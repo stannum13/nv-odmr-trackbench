@@ -4,9 +4,7 @@ Last updated: 2026-09-01
 
 ## Current stage
 
-Stage 0 — Scientific specification complete and user-approved. The detailed
-plan for the repository scaffold and spectral-model stages is complete and
-awaiting execution.
+Stage 1 — Repository scaffold complete; Stage 2 — Spectral models in progress
 
 ## Completed work
 
@@ -18,12 +16,17 @@ awaiting execution.
 - Defined estimator truth-isolation and causal-access requirements.
 - Scoped the first end-to-end milestone and its required outputs.
 - Created the public GitHub repository and configured it as the `origin` remote:
-  `https://github.com/stannum13/nv-odmr-realtime-benchmark`.
+  `https://github.com/stannum13/nv-odmr-trackbench`.
+- Renamed the public repository and distribution to `nv-odmr-trackbench` while
+  retaining the `odmr_bench` import package and `odmrbench` CLI.
 - Received user approval of the Stage 0 scientific specification.
+- Added the installable Python package scaffold and `odmrbench` console entry
+  point.
+- Added the MIT license, citation metadata, and GitHub Actions CI workflow.
 
 ## Important scientific and design decisions
 
-- Project identity is `nv-odmr-realtime-benchmark`; the existing checkout
+- Project identity is `nv-odmr-trackbench`; the existing checkout
   directory is retained.
 - Internal frequency and linewidth units are Hz. Internal time units are
   seconds. Public APIs must not accept ambiguous unitless physical quantities.
@@ -44,10 +47,8 @@ awaiting execution.
 
 ## Tests currently passing
 
-- No executable test suite exists yet because Stage 0 contains documentation
-  only.
-- Documentation whitespace and repository-reference checks are run manually at
-  the end of this stage.
+- `pytest`: 2 passed.
+- `ruff check .`: All checks passed.
 
 ## Known scientific limitations
 
@@ -61,15 +62,11 @@ awaiting execution.
 
 ## Known software limitations
 
-- The Python package, dependency metadata, CLI, configs, tests, and CI do not
-  yet exist.
-- Reproducibility has been specified but not yet demonstrated in code.
+- Reproducibility has been specified but not yet demonstrated beyond the
+  installable package and continuous-integration scaffold.
 
 ## Next actions
 
-1. Review and execute the detailed implementation plan for the repository
-   scaffold and spectral-model stages.
-2. Implement the scaffold and spectral models with explicit FWHM conversion
-   tests.
-3. Add the event-driven virtual instrument and deterministic drift scenario.
-4. Complete the matched-budget full-sweep versus sparse-tracker milestone.
+1. Implement explicit-FWHM spectral functions with conversion tests.
+2. Add the event-driven virtual instrument and deterministic drift scenario.
+3. Complete the matched-budget full-sweep versus sparse-tracker milestone.

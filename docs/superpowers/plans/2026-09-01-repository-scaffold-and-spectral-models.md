@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- The distribution name is `nv-odmr-realtime-benchmark`; the import package is `odmr_bench`.
+- The distribution name is `nv-odmr-trackbench`; the import package is `odmr_bench`.
 - Internal frequency and linewidth units are Hz; internal time units are seconds.
 - Every linewidth-facing API uses a field or argument named `fwhm_hz`; HWHM and Gaussian sigma appear only in named conversion helpers.
 - Q is exactly `center_hz / fwhm_hz` and must not be presented as magnetometric sensitivity.
@@ -128,7 +128,7 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "nv-odmr-realtime-benchmark"
+name = "nv-odmr-trackbench"
 version = "0.1.0"
 description = "A reproducible benchmark for realtime NV-center ODMR resonance tracking."
 readme = "README.md"
@@ -243,7 +243,7 @@ Create `LICENSE`:
 ```text
 MIT License
 
-Copyright (c) 2026 NV ODMR Realtime Benchmark contributors
+Copyright (c) 2026 NV ODMR TrackBench contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -269,13 +269,13 @@ Create `CITATION.cff`:
 ```yaml
 cff-version: 1.2.0
 message: "If you use this software, please cite it using this metadata."
-title: "NV ODMR Realtime Benchmark"
+title: "NV ODMR TrackBench"
 type: software
 authors:
   - alias: "stannum13"
 version: 0.1.0
 license: MIT
-repository-code: "https://github.com/stannum13/nv-odmr-realtime-benchmark"
+repository-code: "https://github.com/stannum13/nv-odmr-trackbench"
 ```
 
 Create `.github/workflows/ci.yml`:
@@ -332,7 +332,7 @@ python -m build --wheel
 ```
 
 Verify that exactly one wheel named like
-`nv_odmr_realtime_benchmark-0.1.0-py3-none-any.whl` appears in `dist/`.
+`nv_odmr_trackbench-0.1.0-py3-none-any.whl` appears in `dist/`.
 Expected: every command exits zero.
 
 - [ ] **Step 6: Update the public status documents for Stage 1**

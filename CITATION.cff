@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using this metadata."
+title: "NV ODMR TrackBench"
+type: software
+authors:
+  - alias: "stannum13"
+version: 0.1.0
+license: MIT
+repository-code: "https://github.com/stannum13/nv-odmr-trackbench"

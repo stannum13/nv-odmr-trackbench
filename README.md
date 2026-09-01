@@ -1,4 +1,4 @@
-# NV ODMR Realtime Benchmark
+# NV ODMR TrackBench
 
 A reproducible benchmark for comparing realtime ODMR resonance and linewidth
 estimators under matched acquisition budgets.
@@ -15,9 +15,9 @@ Two benchmark modes are in scope:
 - closed-loop emulation, in which an estimator selects the next microwave
   frequency to interrogate.
 
-The repository is currently at Stage 0: the scientific contracts and fairness
-requirements are specified in [docs/scientific_spec.md](docs/scientific_spec.md).
-No benchmark results are claimed yet.
+The scientific contracts and fairness requirements are specified in
+[docs/scientific_spec.md](docs/scientific_spec.md). The installable package and
+CI scaffold are in place; executable spectral models are the current stage.
 
 ## Planned first milestone
 
