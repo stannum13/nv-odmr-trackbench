@@ -4,8 +4,9 @@ Last updated: 2026-09-01
 
 ## Current stage
 
-Stage 0 — Scientific specification. The specification has been written and is
-awaiting user review before the implementation plan is created.
+Stage 0 — Scientific specification complete and user-approved. The detailed
+plan for the repository scaffold and spectral-model stages is complete and
+awaiting execution.
 
 ## Completed work
 
@@ -18,6 +19,7 @@ awaiting user review before the implementation plan is created.
 - Scoped the first end-to-end milestone and its required outputs.
 - Created the public GitHub repository and configured it as the `origin` remote:
   `https://github.com/stannum13/nv-odmr-realtime-benchmark`.
+- Received user approval of the Stage 0 scientific specification.
 
 ## Important scientific and design decisions
 
@@ -65,10 +67,9 @@ awaiting user review before the implementation plan is created.
 
 ## Next actions
 
-1. Obtain user review of the committed Stage 0 specification.
-2. Write a detailed, test-driven implementation plan for the repository
-   scaffold and first vertical slice.
-3. Implement the scaffold and spectral models with explicit FWHM conversion
+1. Review and execute the detailed implementation plan for the repository
+   scaffold and spectral-model stages.
+2. Implement the scaffold and spectral models with explicit FWHM conversion
    tests.
-4. Add the event-driven virtual instrument and deterministic drift scenario.
-5. Complete the matched-budget full-sweep versus sparse-tracker milestone.
+3. Add the event-driven virtual instrument and deterministic drift scenario.
+4. Complete the matched-budget full-sweep versus sparse-tracker milestone.

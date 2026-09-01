@@ -16,3 +16,5 @@ once a package version is introduced.
 - Initial project status and README documents.
 - Persisted design record for the Stage 0 specification.
 - Public GitHub repository configuration for ongoing synchronized development.
+- Detailed, test-driven implementation plan for the repository scaffold and
+  explicit-FWHM spectral-model stages.
