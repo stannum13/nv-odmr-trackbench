@@ -18,7 +18,12 @@ def multi_resonance_spectrum(
     *,
     additive_noise: ArrayLike | None = None,
 ) -> NDArray[np.float64]:
-    """Evaluate baseline minus all dip components plus explicit noise."""
+    """Evaluate baseline minus all dips plus a realized perturbation.
+
+    ``additive_noise`` is a caller-provided, already-realized perturbation that
+    must broadcast to ``frequency_hz``. Random sampling deliberately remains
+    outside this deterministic spectral function.
+    """
     frequency = np.asarray(frequency_hz, dtype=np.float64)
     if not np.all(np.isfinite(frequency)):
         raise ValueError("frequency_hz must be finite")

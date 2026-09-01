@@ -39,6 +39,9 @@ python scripts/plot_spectrum.py \
 
 The line-shape APIs use FWHM in Hz explicitly. The generated image is an
 illustrative synthetic fixture, not experimental data or a benchmark result.
+Its YAML loading and numerical curve generation are reusable package helpers,
+so the eight identities, centers, and resolved dip structure are tested without
+depending on PNG pixel hashes.
 
 ## Scientific caution
 

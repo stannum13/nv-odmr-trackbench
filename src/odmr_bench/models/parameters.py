@@ -3,14 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from numbers import Real
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 
 
-def _require_finite(value: float, name: str) -> None:
-    if not np.isfinite(value):
+def _canonical_real_scalar(value: object, name: str) -> float:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (Real, np.integer, np.floating)
+    ):
+        raise TypeError(f"{name} must be a real scalar")
+    canonical = float(value)
+    if not np.isfinite(canonical):
         raise ValueError(f"{name} must be finite")
+    return canonical
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,12 +29,16 @@ class Resonance:
     eta: float
 
     def __post_init__(self) -> None:
+        if not isinstance(self.resonance_id, str):
+            raise TypeError("resonance_id must be a string")
         if not self.resonance_id.strip():
             raise ValueError("resonance_id must be nonempty")
-        _require_finite(self.center_hz, "center_hz")
-        _require_finite(self.fwhm_hz, "fwhm_hz")
-        _require_finite(self.amplitude, "amplitude")
-        _require_finite(self.eta, "eta")
+        for name in ("center_hz", "fwhm_hz", "amplitude", "eta"):
+            object.__setattr__(
+                self,
+                name,
+                _canonical_real_scalar(getattr(self, name), name),
+            )
         if self.fwhm_hz <= 0.0:
             raise ValueError("fwhm_hz must be positive")
         if self.amplitude < 0.0:
@@ -44,10 +55,17 @@ class Baseline:
     quadratic_per_hz2: float = 0.0
 
     def __post_init__(self) -> None:
-        _require_finite(self.intercept, "intercept")
-        _require_finite(self.reference_hz, "reference_hz")
-        _require_finite(self.slope_per_hz, "slope_per_hz")
-        _require_finite(self.quadratic_per_hz2, "quadratic_per_hz2")
+        for name in (
+            "intercept",
+            "reference_hz",
+            "slope_per_hz",
+            "quadratic_per_hz2",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _canonical_real_scalar(getattr(self, name), name),
+            )
 
     def evaluate(self, frequency_hz: ArrayLike) -> NDArray[np.float64]:
         frequency = np.asarray(frequency_hz, dtype=np.float64)

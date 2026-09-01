@@ -10,14 +10,10 @@ import matplotlib
 matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt
-import numpy as np
-import yaml
 
-from odmr_bench.models import (
-    Baseline,
-    Resonance,
-    multi_resonance_spectrum,
-    pseudo_voigt,
+from odmr_bench.plotting import (
+    generate_static_spectrum_curves,
+    load_static_spectrum_config,
 )
 
 
@@ -30,42 +26,27 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    with args.config.open(encoding="utf-8") as stream:
-        config = yaml.safe_load(stream)
-
-    frequency_config = config["frequency"]
-    frequency_hz = np.linspace(
-        float(frequency_config["start_hz"]),
-        float(frequency_config["stop_hz"]),
-        int(frequency_config["points"]),
-    )
-    baseline = Baseline(**config["baseline"])
-    resonances = tuple(Resonance(**item) for item in config["resonances"])
-    if len(resonances) != 8:
-        raise ValueError("static demonstration requires exactly eight resonances")
-
-    fluorescence = multi_resonance_spectrum(frequency_hz, resonances, baseline)
-    baseline_values = baseline.evaluate(frequency_hz)
+    config = load_static_spectrum_config(args.config)
+    curves = generate_static_spectrum_curves(config)
 
     figure, axis = plt.subplots(figsize=(8.0, 4.5), constrained_layout=True)
-    for resonance in resonances:
-        component = baseline_values - resonance.amplitude * pseudo_voigt(
-            frequency_hz,
-            resonance.center_hz,
-            resonance.fwhm_hz,
-            resonance.eta,
+    for component in curves.components:
+        axis.plot(
+            curves.frequency_hz / 1.0e9,
+            component,
+            color="0.78",
+            linewidth=0.8,
         )
-        axis.plot(frequency_hz / 1.0e9, component, color="0.78", linewidth=0.8)
     axis.plot(
-        frequency_hz / 1.0e9,
-        fluorescence,
+        curves.frequency_hz / 1.0e9,
+        curves.fluorescence,
         color="#1f5a94",
         linewidth=1.8,
         label="eight-resonance spectrum",
     )
     axis.plot(
-        frequency_hz / 1.0e9,
-        baseline_values,
+        curves.frequency_hz / 1.0e9,
+        curves.baseline,
         color="#b24a33",
         linestyle="--",
         linewidth=1.1,

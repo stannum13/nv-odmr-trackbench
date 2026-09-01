@@ -26,11 +26,14 @@ Stage 2 — Spectral models complete; next: virtual NV instrument
 - Added normalized Lorentzian, Gaussian, and FWHM-matched pseudo-Voigt line
   shapes with explicit linewidth conversion helpers and Q calculation.
 - Added immutable, validated baseline and resonance parameters using explicit
-  Hz-valued fields and a reference-centered polynomial baseline.
+  Hz-valued fields, canonical Python-float storage, and a reference-centered
+  polynomial baseline.
 - Added deterministic eight-dip spectrum composition with stable parent IDs
-  and caller-supplied additive noise.
+  and caller-supplied, already-realized additive noise.
 - Added a YAML-driven script that generates the synthetic eight-resonance
-  demonstration plot from package code.
+  demonstration plot from reusable package configuration and curve helpers.
+- Extended CI to build and install the wheel before testing and smoke-test the
+  installed `odmrbench --version` entry point.
 
 ## Important scientific and design decisions
 
@@ -42,6 +45,9 @@ Stage 2 — Spectral models complete; next: virtual NV instrument
   sigma conversions must be explicit and unit-tested.
 - Q is defined as resonance center divided by FWHM and is not treated as a
   proxy for magnetometric sensitivity by itself.
+- Low-level spectral functions permit finite signed frequency coordinates for
+  generality; physical scenarios will require positive absolute resonance
+  centers at the instrument-validation boundary without redefining Q.
 - The initial benchmark represents eight electronic resonances. Optional
   hyperfine components may later retain parent electronic-resonance identities.
 - Scenario truth belongs to the virtual instrument and evaluation harness; an
@@ -55,7 +61,7 @@ Stage 2 — Spectral models complete; next: virtual NV instrument
 
 ## Tests currently passing
 
-- `pytest`: 22 passed.
+- `pytest`: 39 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

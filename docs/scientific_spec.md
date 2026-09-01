@@ -64,6 +64,13 @@ seconds. User-facing configuration may offer documented convenience units, but
 configuration parsing must convert them to explicit SI-valued fields before a
 simulation or benchmark begins. APIs must not silently infer units.
 
+Low-level spectral functions allow finite signed frequency coordinates for
+generality. Physical benchmark scenarios must use positive absolute resonance
+centers; scenario-level validation arrives with the instrument stage. This
+policy does not silently redefine Q: the benchmark definition remains
+\(Q_i=f_i/w_i\), without taking an absolute value or otherwise changing the
+signed low-level coordinate.
+
 ### 3.1 FWHM-normalized line shapes
 
 Let \(x=f-f_i\) and \(w_i>0\) be the FWHM. Unit-height component profiles are
@@ -301,6 +308,11 @@ Noise and dynamics must be modular and separately configurable.
 Additive Gaussian noise is permitted for controlled tests. Its standard
 deviation and fluorescence units must be recorded. It is not a photon-counting
 model and must not be presented as one.
+
+At the low-level deterministic spectrum boundary, `additive_noise` is an
+already-realized caller-provided perturbation that may broadcast over the
+frequency coordinates. Stochastic sampling, random-number generator ownership,
+and noise-process configuration remain outside `multi_resonance_spectrum`.
 
 ### 7.2 Photon shot noise
 
