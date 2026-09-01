@@ -4,9 +4,9 @@ Last updated: 2026-09-01
 
 ## Current stage
 
-Stage 2 — Spectral models complete. A revised real-data-grounded playback and
-event-driven virtual-instrument design and test-driven implementation plan are
-approved; dataset/playback implementation is next.
+Stage 3 — Verified recorded-data playback is complete. The event-driven
+virtual-instrument design remains approved; hidden eight-resonance dynamics is
+next.
 
 ## Completed work
 
@@ -44,6 +44,11 @@ approved; dataset/playback implementation is next.
   real-data anchor: 4,693 sweeps by 311 points, CC BY 4.0, checksum-matched.
 - Added the task-by-task implementation plan for verified playback, hidden
   dynamics, observation noise/resources, the virtual instrument, and POC CLI.
+- Added a checked, explicit-path Figshare registry/loader that preserves the
+  raw analog signal and unresolved units, without downloading or redistributing
+  external data.
+- Added immutable sweep data and causal row-major recorded playback, with
+  timestamps unavailable unless a caller explicitly assumes a nominal clock.
 
 ## Important scientific and design decisions
 
@@ -93,9 +98,8 @@ approved; dataset/playback implementation is next.
 
 ## Next actions
 
-1. Add the external dataset registry, explicit-path loader, and causal playback.
-2. Add the event-driven virtual instrument and virtual clock.
-3. Implement seeded Poisson and Gaussian observation-noise models.
-4. Implement provenance-bearing supplied-residual replay/block sampling.
-5. Add the deterministic linear-drift scenario before the matched-budget
+1. Add hidden eight-resonance dynamics and the event-driven virtual instrument.
+2. Implement seeded Poisson and Gaussian observation-noise models.
+3. Implement provenance-bearing supplied-residual replay/block sampling.
+4. Add the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.

@@ -20,6 +20,12 @@ once a package version is introduced.
 
 ### Added
 
+- Checked versioned provenance for Figshare DOI `10.6084/m9.figshare.28788437.v1`,
+  an explicit-local-path verifier, and a parser that preserves original raw
+  sweep order without normalization or implicit downloads.
+- Immutable raw `SweepDataset` records and causal row-major playback
+  observations, with nominal timestamps available only through an explicit
+  caller-supplied clock assumption.
 - Vectorized Lorentzian, Gaussian, and FWHM-matched pseudo-Voigt profiles.
 - Explicit Lorentzian HWHM and Gaussian sigma conversion helpers with tests.
 - Validated baseline and resonance parameter objects, Q calculation, and deterministic multi-resonance composition.
