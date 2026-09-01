@@ -42,3 +42,4 @@ once a package version is introduced.
 - Verified the provenance, license, checksum, matrix structure, frequency grid,
   and scientific limitations of Figshare DOI
   `10.6084/m9.figshare.28788437.v1` for optional playback and semi-empirical use.
+- Added the test-driven playback and virtual-instrument implementation plan.

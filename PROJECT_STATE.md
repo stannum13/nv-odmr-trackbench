@@ -5,8 +5,8 @@ Last updated: 2026-09-01
 ## Current stage
 
 Stage 2 — Spectral models complete. A revised real-data-grounded playback and
-event-driven virtual-instrument design is approved; its implementation plan is
-next.
+event-driven virtual-instrument design and test-driven implementation plan are
+approved; dataset/playback implementation is next.
 
 ## Completed work
 
@@ -42,6 +42,8 @@ next.
   fluorescence, photon accounting, truth isolation, and virtual-clock semantics.
 - Verified Figshare DOI `10.6084/m9.figshare.28788437.v1` as the first optional
   real-data anchor: 4,693 sweeps by 311 points, CC BY 4.0, checksum-matched.
+- Added the task-by-task implementation plan for verified playback, hidden
+  dynamics, observation noise/resources, the virtual instrument, and POC CLI.
 
 ## Important scientific and design decisions
 
