@@ -36,3 +36,9 @@ once a package version is introduced.
 - Public GitHub repository configuration for ongoing synchronized development.
 - Detailed, test-driven implementation plan for the repository scaffold and
   explicit-FWHM spectral-model stages.
+- Approved real-data-grounded playback and event-driven virtual-instrument
+  design covering causal order/time, estimator-safe observations, photon
+  accounting, modular empirical/synthetic noise, and linear center drift.
+- Verified the provenance, license, checksum, matrix structure, frequency grid,
+  and scientific limitations of Figshare DOI
+  `10.6084/m9.figshare.28788437.v1` for optional playback and semi-empirical use.

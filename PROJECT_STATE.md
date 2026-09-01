@@ -4,7 +4,9 @@ Last updated: 2026-09-01
 
 ## Current stage
 
-Stage 2 — Spectral models complete; next: virtual NV instrument
+Stage 2 — Spectral models complete. A revised real-data-grounded playback and
+event-driven virtual-instrument design is approved; its implementation plan is
+next.
 
 ## Completed work
 
@@ -34,6 +36,12 @@ Stage 2 — Spectral models complete; next: virtual NV instrument
   demonstration plot from reusable package configuration and curve helpers.
 - Extended CI to build and install the wheel before testing and smoke-test the
   installed `odmrbench --version` entry point.
+- Completed independent task reviews and a clean final senior review for the
+  repository-scaffold and spectral-model stages.
+- Approved the event-driven virtual-instrument design, including normalized
+  fluorescence, photon accounting, truth isolation, and virtual-clock semantics.
+- Verified Figshare DOI `10.6084/m9.figshare.28788437.v1` as the first optional
+  real-data anchor: 4,693 sweeps by 311 points, CC BY 4.0, checksum-matched.
 
 ## Important scientific and design decisions
 
@@ -83,7 +91,9 @@ Stage 2 — Spectral models complete; next: virtual NV instrument
 
 ## Next actions
 
-1. Add the event-driven virtual instrument and virtual clock.
-2. Implement seeded Poisson and Gaussian observation-noise models.
-3. Add the deterministic linear-drift scenario before the matched-budget
+1. Add the external dataset registry, explicit-path loader, and causal playback.
+2. Add the event-driven virtual instrument and virtual clock.
+3. Implement seeded Poisson and Gaussian observation-noise models.
+4. Implement provenance-bearing supplied-residual replay/block sampling.
+5. Add the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.

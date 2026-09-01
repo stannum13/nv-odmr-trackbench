@@ -459,7 +459,11 @@ plots. Generated figures must be produced by scripts or CLI commands and must
 not be edited manually.
 
 No external large dataset is required for tests or CI. A tiny deterministic
-synthetic fixture will support installation and smoke testing. External dataset
-metadata will be added only after source, format, authorship, license, and
-canonical identifier are verified; large third-party data will not be silently
-downloaded or redistributed.
+synthetic fixture will support installation and smoke testing. The first
+verified external anchor is Figshare DOI `10.6084/m9.figshare.28788437.v1`
+(Liu Liu, CC BY 4.0): 4,693 complete sweeps over 311 frequency points from
+2.740 GHz through 3.050 GHz in 1 MHz steps. Its detector units, timestamps,
+current/field trajectory, and exact resonance truth are unresolved or absent,
+so it supports playback, morphology checks, and semi-empirical residual work,
+not photon calibration or exact tracking-error claims. Large third-party data
+will not be silently downloaded or redistributed.
