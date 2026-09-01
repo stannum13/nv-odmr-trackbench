@@ -15,6 +15,10 @@ once a package version is introduced.
 
 ### Added
 
+- Vectorized Lorentzian, Gaussian, and FWHM-matched pseudo-Voigt profiles.
+- Explicit Lorentzian HWHM and Gaussian sigma conversion helpers with tests.
+- Validated baseline and resonance parameter objects, Q calculation, and deterministic multi-resonance composition.
+- YAML-driven script for generating the synthetic eight-resonance demonstration plot.
 - Installable Python 3.11+ package scaffold and `odmrbench` console entry point.
 - MIT license, citation metadata, Ruff/pytest configuration, and GitHub Actions CI.
 - Stage 0 scientific specification defining observables, linewidth conventions,

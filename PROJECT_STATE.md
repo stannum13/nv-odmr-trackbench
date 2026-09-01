@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 ## Current stage
 
-Stage 1 — Repository scaffold complete; Stage 2 — Spectral models in progress
+Stage 2 — Spectral models complete; next: virtual NV instrument
 
 ## Completed work
 
@@ -23,6 +23,14 @@ Stage 1 — Repository scaffold complete; Stage 2 — Spectral models in progres
 - Added the installable Python package scaffold and `odmrbench` console entry
   point.
 - Added the MIT license, citation metadata, and GitHub Actions CI workflow.
+- Added normalized Lorentzian, Gaussian, and FWHM-matched pseudo-Voigt line
+  shapes with explicit linewidth conversion helpers and Q calculation.
+- Added immutable, validated baseline and resonance parameters using explicit
+  Hz-valued fields and a reference-centered polynomial baseline.
+- Added deterministic eight-dip spectrum composition with stable parent IDs
+  and caller-supplied additive noise.
+- Added a YAML-driven script that generates the synthetic eight-resonance
+  demonstration plot from package code.
 
 ## Important scientific and design decisions
 
@@ -47,12 +55,13 @@ Stage 1 — Repository scaffold complete; Stage 2 — Spectral models in progres
 
 ## Tests currently passing
 
-- `pytest`: 2 passed.
+- `pytest`: 22 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
 
-- No implemented spectral, noise, dynamics, or Hamiltonian model exists yet.
+- No stochastic observation-noise, dynamics, or Hamiltonian model exists yet;
+  the current spectrum model accepts only explicit deterministic additive noise.
 - No real dataset has been verified or attached.
 - Hyperfine structure, ensemble inhomogeneity, optical power broadening,
   microwave power broadening, temperature coupling, and instrument transfer
@@ -62,11 +71,13 @@ Stage 1 — Repository scaffold complete; Stage 2 — Spectral models in progres
 
 ## Known software limitations
 
-- Reproducibility has been specified but not yet demonstrated beyond the
-  installable package and continuous-integration scaffold.
+- End-to-end benchmark reproducibility has not yet been demonstrated beyond the
+  installable package, continuous-integration scaffold, and deterministic
+  configuration-generated spectrum fixture.
 
 ## Next actions
 
-1. Implement explicit-FWHM spectral functions with conversion tests.
-2. Add the event-driven virtual instrument and deterministic drift scenario.
-3. Complete the matched-budget full-sweep versus sparse-tracker milestone.
+1. Add the event-driven virtual instrument and virtual clock.
+2. Implement seeded Poisson and Gaussian observation-noise models.
+3. Add the deterministic linear-drift scenario before the matched-budget
+   full-sweep versus sparse-tracker milestone.

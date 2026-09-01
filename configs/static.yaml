@@ -1,0 +1,18 @@
+frequency:
+  start_hz: 2790000000.0
+  stop_hz: 2950000000.0
+  points: 2401
+baseline:
+  intercept: 1.0
+  reference_hz: 2870000000.0
+  slope_per_hz: 1.0e-11
+  quadratic_per_hz2: 0.0
+resonances:
+  - {resonance_id: r0, center_hz: 2805000000.0, fwhm_hz: 2500000.0, amplitude: 0.018, eta: 0.35}
+  - {resonance_id: r1, center_hz: 2825000000.0, fwhm_hz: 2700000.0, amplitude: 0.021, eta: 0.40}
+  - {resonance_id: r2, center_hz: 2845000000.0, fwhm_hz: 2900000.0, amplitude: 0.023, eta: 0.45}
+  - {resonance_id: r3, center_hz: 2865000000.0, fwhm_hz: 3100000.0, amplitude: 0.025, eta: 0.50}
+  - {resonance_id: r4, center_hz: 2875000000.0, fwhm_hz: 3100000.0, amplitude: 0.024, eta: 0.50}
+  - {resonance_id: r5, center_hz: 2895000000.0, fwhm_hz: 2900000.0, amplitude: 0.022, eta: 0.45}
+  - {resonance_id: r6, center_hz: 2915000000.0, fwhm_hz: 2700000.0, amplitude: 0.020, eta: 0.40}
+  - {resonance_id: r7, center_hz: 2935000000.0, fwhm_hz: 2500000.0, amplitude: 0.017, eta: 0.35}

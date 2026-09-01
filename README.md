@@ -26,6 +26,20 @@ two-point center tracker plus a lower-rate five-point linewidth estimator on a
 virtual eight-resonance spectrum. Comparisons will report center, FWHM, and Q
 errors together with acquisition and compute resources.
 
+## Synthetic spectrum demonstration
+
+After installing the package, generate the deterministic eight-resonance
+spectrum with:
+
+```bash
+python scripts/plot_spectrum.py \
+  --config configs/static.yaml \
+  --output artifacts/spectrum_demo.png
+```
+
+The line-shape APIs use FWHM in Hz explicitly. The generated image is an
+illustrative synthetic fixture, not experimental data or a benchmark result.
+
 ## Scientific caution
 
 The Q factor used by this project is the fitted resonance center divided by its
@@ -36,5 +50,4 @@ noise model must also be considered.
 ## Project status
 
 See [PROJECT_STATE.md](PROJECT_STATE.md) for completed work, limitations, and
-the next planned actions. Installation and executable examples will be added as
-the first vertical slice is implemented.
+the next planned actions.
