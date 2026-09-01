@@ -15,3 +15,4 @@ once a package version is introduced.
   truth isolation, and the first end-to-end milestone.
 - Initial project status and README documents.
 - Persisted design record for the Stage 0 specification.
+- Public GitHub repository configuration for ongoing synchronized development.

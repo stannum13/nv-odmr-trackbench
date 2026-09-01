@@ -16,6 +16,8 @@ awaiting user review before the implementation plan is created.
 - Defined acquisition-resource accounting and matched-budget comparison rules.
 - Defined estimator truth-isolation and causal-access requirements.
 - Scoped the first end-to-end milestone and its required outputs.
+- Created the public GitHub repository and configured it as the `origin` remote:
+  `https://github.com/stannum13/nv-odmr-realtime-benchmark`.
 
 ## Important scientific and design decisions
 
@@ -59,7 +61,6 @@ awaiting user review before the implementation plan is created.
 
 - The Python package, dependency metadata, CLI, configs, tests, and CI do not
   yet exist.
-- No Git remote is configured, so local commits cannot currently be pushed.
 - Reproducibility has been specified but not yet demonstrated in code.
 
 ## Next actions
