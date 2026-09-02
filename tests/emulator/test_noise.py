@@ -123,6 +123,56 @@ def test_empirical_configuration_cannot_be_rebound_after_construction() -> None:
     assert noise.provenance["source_id"] == "generated-fixture-v1"
 
 
+@pytest.mark.parametrize(
+    "attribute",
+    [
+        "mode",
+        "block_size",
+        "residuals",
+        "provenance",
+        "_mode",
+        "_block_size",
+        "_residuals",
+        "_provenance",
+        "_configuration_locked",
+    ],
+)
+def test_empirical_configuration_cannot_be_deleted_after_construction(
+    attribute: str,
+) -> None:
+    noise = EmpiricalResidualNoise(
+        [-0.1, 0.25, 0.5],
+        mode="replay",
+        provenance=_provenance("replay"),
+    )
+    sampling_rule = noise.sampling_rule
+    provenance = dict(noise.provenance)
+
+    with pytest.raises(AttributeError):
+        delattr(noise, attribute)
+
+    assert noise.sampling_rule == sampling_rule
+    assert dict(noise.provenance) == provenance
+
+
+def test_public_residual_copy_cannot_alter_internal_sample_sequence() -> None:
+    noise = EmpiricalResidualNoise(
+        [-0.1, 0.25, 0.5],
+        mode="replay",
+        provenance=_provenance("replay"),
+    )
+    exposed_residuals = noise.residuals
+
+    exposed_residuals.setflags(write=True)
+    exposed_residuals[:] = [99.0, 98.0, 97.0]
+    actual = [
+        noise.sample(1.0, 10.0, 0.1, np.random.default_rng(99)).fluorescence
+        for _ in range(3)
+    ]
+
+    assert actual == pytest.approx([0.9, 1.25, 1.5])
+
+
 def test_empirical_sample_draws_seeded_independent_residual_indices() -> None:
     residuals = np.array([-0.2, 0.0, 0.4])
     expected_rng = np.random.default_rng(11)

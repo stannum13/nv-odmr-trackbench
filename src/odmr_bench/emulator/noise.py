@@ -151,6 +151,19 @@ class EmpiricalResidualNoise:
     _REQUIRED_PROVENANCE_KEYS = frozenset(
         {"source_id", "preparation_label", "normalization_label", "correlation_mode"}
     )
+    _IMMUTABLE_CONFIGURATION_NAMES = frozenset(
+        {
+            "_block_size",
+            "_configuration_locked",
+            "_mode",
+            "_provenance",
+            "_residuals",
+            "block_size",
+            "mode",
+            "provenance",
+            "residuals",
+        }
+    )
 
     def __init__(
         self,
@@ -201,24 +214,24 @@ class EmpiricalResidualNoise:
         object.__setattr__(self, "_configuration_locked", True)
 
     def __setattr__(self, name: str, value: object) -> None:
-        if getattr(self, "_configuration_locked", False) and name in {
-            "_block_size",
-            "_configuration_locked",
-            "_mode",
-            "_provenance",
-            "_residuals",
-            "block_size",
-            "mode",
-            "provenance",
-            "residuals",
-        }:
+        if (
+            getattr(self, "_configuration_locked", False)
+            and name in self._IMMUTABLE_CONFIGURATION_NAMES
+        ):
             raise AttributeError("empirical residual configuration is immutable")
         object.__setattr__(self, name, value)
+
+    def __delattr__(self, name: str) -> None:
+        if name in self._IMMUTABLE_CONFIGURATION_NAMES:
+            raise AttributeError("empirical residual configuration is immutable")
+        object.__delattr__(self, name)
 
     @property
     def residuals(self) -> np.ndarray:
         """Return the defensively copied, read-only residual sequence."""
-        return self._residuals
+        copied_residuals = self._residuals.copy()
+        copied_residuals.setflags(write=False)
+        return copied_residuals
 
     @property
     def mode(self) -> str:
@@ -250,16 +263,20 @@ class EmpiricalResidualNoise:
         fluorescence, _, _, validated_rng = _validate_sample_inputs(
             expected_fluorescence, nominal_rate_hz, integration_time_s, rng
         )
-        if self.mode == "replay":
-            residual = self.residuals[self._cursor]
-            self._cursor = (self._cursor + 1) % self.residuals.size
-        elif self.mode == "sample":
-            residual = self.residuals[validated_rng.integers(0, self.residuals.size)]
+        if self._mode == "replay":
+            residual = self._residuals[self._cursor]
+            self._cursor = (self._cursor + 1) % self._residuals.size
+        elif self._mode == "sample":
+            residual = self._residuals[
+                validated_rng.integers(0, self._residuals.size)
+            ]
         else:
             if self._block_offset == 0:
-                self._block_start = int(validated_rng.integers(0, self.residuals.size))
-            residual = self.residuals[
-                (self._block_start + self._block_offset) % self.residuals.size
+                self._block_start = int(
+                    validated_rng.integers(0, self._residuals.size)
+                )
+            residual = self._residuals[
+                (self._block_start + self._block_offset) % self._residuals.size
             ]
-            self._block_offset = (self._block_offset + 1) % self.block_size  # type: ignore[operator]
+            self._block_offset = (self._block_offset + 1) % self._block_size  # type: ignore[operator]
         return NoiseResult(fluorescence + float(residual))
