@@ -100,3 +100,56 @@ The plan's final fresh-senior review covers the full playback/instrument range
 beginning at the design commit. This task has completed its scoped self-review
 and local verification, but that range review and any push are intentionally
 left to the parent-stage workflow.
+
+## Review-remediation addendum
+
+The Task 5 review identified three Important and two Minor corrections. This
+addendum records their red/green remediation; it supersedes the earlier claim
+that the wheel smoke established configuration availability independently of
+the checkout.
+
+### RED
+
+Before production changes, ran:
+
+```text
+.venv/bin/python -m pytest tests/test_cli_playback.py tests/test_cli_simulate.py tests/test_cli_errors.py tests/test_drift_resource.py -q
+```
+
+Result: `7 failed, 2 passed`. The failures demonstrated the absent canonical
+signal classification, later-query execution before validation, console
+tracebacks/status 1, and absent package resource. A separate prospective-time
+overflow regression also failed because the instrument was constructed first.
+
+### GREEN
+
+Added canonical positive-finite query scalar conversion, whole-schedule virtual
+time validation before instrument construction, concise exit-2 error handling,
+streaming playback aggregates, canonical signal-quantity fields, and the
+wheel-only `bundled:drift` identifier. The focused suite then passed:
+
+```text
+13 passed
+```
+
+The first wheel-build verification exposed a Hatch duplicate-entry failure:
+the source package resource and `force-include` both targeted
+`odmr_bench/configs/drift.yaml`. The final packaging design retains only
+`configs/drift.yaml` as the canonical source and force-includes it into the
+wheel. Rebuilding then succeeded, avoiding unguarded configuration duplication.
+
+### Final verification
+
+```text
+.venv/bin/python -m pytest -q   # 195 passed
+.venv/bin/ruff check .          # All checks passed
+.venv/bin/python -m build       # sdist and wheel built
+git diff --check                # clean
+```
+
+A newly created virtual environment outside the repository installed the
+wheel. Its archive contained `odmr_bench/configs/drift.yaml`; from the external
+working directory, `dataset-info`, successful explicit-path `playback`, and
+`simulate --config bundled:drift` all produced their JSON summaries. CI now
+performs the wheel-content assertion and the clean-environment bundled-scenario
+smoke. No push was performed.

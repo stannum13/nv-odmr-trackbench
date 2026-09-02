@@ -58,6 +58,7 @@ def test_dataset_info_reports_checked_provenance_and_limitations(
             "field_direction",
             "resonance_trajectory",
         ],
+        "signal_quantity": "unknown_analog_signal",
         "timing_status": "nominal_without_timestamps",
         "unit_status": "conflicted_unverified",
     }
@@ -79,6 +80,7 @@ def test_playback_summarizes_raw_fixture_without_inferred_timestamps(
         "points_per_sweep": 3,
         "signal_max": 4.0,
         "signal_min": 1.0,
+        "signal_quantity": "unknown_analog_signal",
         "sweep_count": 2,
         "timing_status": "nominal_without_timestamps",
         "unit_status": "conflicted_unverified",

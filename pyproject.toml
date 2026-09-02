@@ -39,6 +39,9 @@ odmrbench = "odmr_bench.cli:main"
 [tool.hatch.build.targets.wheel]
 packages = ["src/odmr_bench"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"configs/drift.yaml" = "odmr_bench/configs/drift.yaml"
+
 [tool.pytest.ini_options]
 addopts = "-ra --strict-markers"
 testpaths = ["tests"]

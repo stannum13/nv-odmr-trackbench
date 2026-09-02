@@ -10,6 +10,11 @@ once a package version is introduced.
 
 ### Changed
 
+- CLI simulation now canonicalizes every fixed-schedule frequency and duration
+  before virtual-instrument construction, validates the entire prospective
+  virtual timeline, and reports expected path/YAML/configuration/data failures
+  as concise stderr errors with exit status 2. Playback aggregates stream
+  without retaining every observation object.
 - Replaced generator-only recorded playback at the estimator boundary with an
   evaluator-owned callback runner. Python generator frames retain offline source
   state, so the retained `iter_playback_for_analysis` iterator is explicitly
@@ -27,6 +32,13 @@ once a package version is introduced.
 
 ### Added
 
+- Packaged the deterministic drift configuration for wheel-only,
+  arbitrary-working-directory use via
+  `odmrbench simulate --config bundled:drift`; CI verifies wheel contents and a
+  clean-virtual-environment smoke. Source `configs/drift.yaml` remains
+  available as the single canonical scenario source.
+- Added `unknown_analog_signal` alongside `conflicted_unverified` to
+  dataset-info and playback JSON summaries.
 - `odmrbench dataset-info`, explicit-local `odmrbench playback`, and
   YAML-driven `odmrbench simulate` commands with sorted, finite JSON summaries.
   The commands distinguish unverified raw recorded signal from seeded synthetic

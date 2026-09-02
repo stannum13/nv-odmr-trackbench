@@ -4,7 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from collections.abc import Mapping, Sequence
+from importlib.resources import files
+from math import isfinite
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -35,12 +39,56 @@ def _exact_keys(
         )
 
 
+def _positive_finite_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a real scalar")
+    canonical = float(value)
+    if not isfinite(canonical):
+        raise ValueError(f"{name} must be finite")
+    if canonical <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    return canonical
+
+
+def _nonnegative_finite_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise TypeError(f"{name} must be a real scalar")
+    canonical = float(value)
+    if not isfinite(canonical):
+        raise ValueError(f"{name} must be finite")
+    if canonical < 0.0:
+        raise ValueError(f"{name} must be non-negative")
+    return canonical
+
+
+def _validate_prospective_schedule(
+    queries: Sequence[Mapping[str, float]], frequency_overhead_s: float
+) -> None:
+    """Reject overflow before the instrument exists or any query can run."""
+    virtual_time_s = 0.0
+    for query in queries:
+        integration_start_s = virtual_time_s + frequency_overhead_s
+        midpoint_s = integration_start_s + query["integration_time_s"] / 2.0
+        endpoint_s = integration_start_s + query["integration_time_s"]
+        if not all(
+            isfinite(value)
+            for value in (integration_start_s, midpoint_s, endpoint_s)
+        ):
+            raise ValueError("query schedule virtual timestamps must remain finite")
+        virtual_time_s = endpoint_s
+
+
 def _load_drift_scenario(
     path: Path,
-) -> tuple[ODMRInstrument, list[Mapping[str, object]], int]:
+) -> tuple[ODMRInstrument, list[Mapping[str, float]], int]:
     """Validate a deterministic, Poisson-noise linear-drift scenario YAML file."""
-    with path.open(encoding="utf-8") as stream:
-        raw_config = yaml.safe_load(stream)
+    try:
+        with path.open(encoding="utf-8") as stream:
+            raw_config = yaml.safe_load(stream)
+    except OSError as error:
+        raise ValueError(f"could not read simulation config: {path}") from error
+    except yaml.YAMLError as error:
+        raise ValueError(f"could not parse simulation config: {path}") from error
     config = _mapping(raw_config, "simulation config")
     _exact_keys(
         config,
@@ -86,10 +134,14 @@ def _load_drift_scenario(
     raw_queries = config["queries"]
     if not isinstance(raw_queries, list) or not raw_queries:
         raise ValueError("queries must be a non-empty list")
-    queries = [
+    queries: list[Mapping[str, float]] = [
         _query_from_config(raw_query, index)
         for index, raw_query in enumerate(raw_queries)
     ]
+    frequency_overhead_s = _nonnegative_finite_float(
+        config["frequency_overhead_s"], "frequency_overhead_s"
+    )
+    _validate_prospective_schedule(queries, frequency_overhead_s)
     seed = config["seed"]
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise ValueError("seed must be an integer")
@@ -97,7 +149,7 @@ def _load_drift_scenario(
         dynamics=LinearCenterDrift(snapshot, config["center_slew_hz_per_s"]),
         noise=PoissonNoise(),
         nominal_photon_rate_hz=config["nominal_photon_rate_hz"],
-        frequency_overhead_s=config["frequency_overhead_s"],
+        frequency_overhead_s=frequency_overhead_s,
         seed=seed,
     )
     return instrument, queries, seed
@@ -119,14 +171,21 @@ def _resonance_from_config(value: object, index: int) -> Resonance:
     )
 
 
-def _query_from_config(value: object, index: int) -> Mapping[str, object]:
+def _query_from_config(value: object, index: int) -> Mapping[str, float]:
     query = _mapping(value, f"queries[{index}]")
     _exact_keys(
         query,
         name=f"queries[{index}]",
         required=frozenset({"frequency_hz", "integration_time_s"}),
     )
-    return query
+    return {
+        "frequency_hz": _positive_finite_float(
+            query["frequency_hz"], f"queries[{index}].frequency_hz"
+        ),
+        "integration_time_s": _positive_finite_float(
+            query["integration_time_s"], f"queries[{index}].integration_time_s"
+        ),
+    }
 
 
 def _print_json(payload: Mapping[str, Any]) -> None:
@@ -149,6 +208,7 @@ def _dataset_info() -> int:
             "limitations": {
                 "ground_truth_status": record.ground_truth_status,
                 "missing_metadata": list(record.missing_metadata),
+                "signal_quantity": record.signal_quantity,
                 "timing_status": record.timing_status,
                 "unit_status": record.unit_status,
             },
@@ -162,22 +222,34 @@ def _playback(path: Path, max_observations: int | None) -> int:
         raise ValueError("max_observations must be positive")
     dataset = parse_figshare_sweep_file(path)
     observations = iter_playback_for_analysis(dataset)
-    selected = []
+    observation_count = 0
+    signal_min: float | None = None
+    signal_max: float | None = None
     for observation in observations:
-        if max_observations is not None and len(selected) >= max_observations:
+        if max_observations is not None and observation_count >= max_observations:
             break
-        selected.append(observation)
-    if not selected:
+        observation_count += 1
+        signal_min = (
+            observation.signal
+            if signal_min is None
+            else min(signal_min, observation.signal)
+        )
+        signal_max = (
+            observation.signal
+            if signal_max is None
+            else max(signal_max, observation.signal)
+        )
+    if observation_count == 0 or signal_min is None or signal_max is None:
         raise ValueError("playback requires at least one observation")
-    signals = [observation.signal for observation in selected]
     _print_json(
         {
             "inferred_timestamps": False,
             "mode": "recorded_playback",
-            "observation_count": len(selected),
+            "observation_count": observation_count,
             "points_per_sweep": int(dataset.signal.shape[1]),
-            "signal_max": max(signals),
-            "signal_min": min(signals),
+            "signal_max": signal_max,
+            "signal_min": signal_min,
+            "signal_quantity": FIGSHARE_28788437_V1.signal_quantity,
             "sweep_count": int(dataset.signal.shape[0]),
             "timing_status": "nominal_without_timestamps",
             "unit_status": "conflicted_unverified",
@@ -195,8 +267,16 @@ def _sample_summary(sample: InstrumentObservation) -> dict[str, float | int]:
     }
 
 
-def _simulate(config_path: Path) -> int:
-    instrument, queries, seed = _load_drift_scenario(config_path)
+def _simulation_config_path(config: str) -> Path:
+    if config == "bundled:drift":
+        return Path(files("odmr_bench").joinpath("configs", "drift.yaml"))
+    if config.startswith("bundled:"):
+        raise ValueError(f"unknown bundled simulation config: {config}")
+    return Path(config)
+
+
+def _simulate(config: str) -> int:
+    instrument, queries, seed = _load_drift_scenario(_simulation_config_path(config))
     samples = [
         instrument.query(
             frequency_hz=query["frequency_hz"],
@@ -241,18 +321,23 @@ def build_parser() -> argparse.ArgumentParser:
     simulate = commands.add_parser(
         "simulate", help="run a fixed synthetic drift schedule"
     )
-    simulate.add_argument("--config", type=Path, required=True)
+    simulate.add_argument("--config", required=True)
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = build_parser().parse_args(argv)
-    if args.command == "dataset-info":
-        return _dataset_info()
-    if args.command == "playback":
-        return _playback(args.path, args.max_observations)
-    if args.command == "simulate":
-        return _simulate(args.config)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    try:
+        if args.command == "dataset-info":
+            return _dataset_info()
+        if args.command == "playback":
+            return _playback(args.path, args.max_observations)
+        if args.command == "simulate":
+            return _simulate(args.config)
+    except (OSError, TypeError, ValueError, yaml.YAMLError) as error:
+        print(f"{parser.prog}: error: {error}", file=sys.stderr)
+        return 2
     raise RuntimeError("unreachable command dispatch")
 
 

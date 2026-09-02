@@ -25,7 +25,7 @@ The package exposes three deterministic JSON commands:
 ```bash
 odmrbench dataset-info
 odmrbench playback --path /explicit/local/ODMR_data.dat --max-observations 100
-odmrbench simulate --config configs/drift.yaml
+odmrbench simulate --config bundled:drift
 ```
 
 `dataset-info` reports the checked optional Figshare record. `playback` parses
@@ -34,6 +34,12 @@ download data, infer timestamps by default, or assign resolved raw units.
 `simulate` runs the bundled fixed schedule through a seeded, synthetic
 eight-resonance virtual instrument. Neither command fits or tracks resonances;
 estimators are the next stage.
+
+The installed wheel includes the deterministic `bundled:drift` scenario, so the
+command above works from any current directory. A source checkout retains its
+human-readable source example at `configs/drift.yaml`; use
+`odmrbench simulate --config configs/drift.yaml` when changing or inspecting
+that file.
 
 Read [docs/datasets.md](docs/datasets.md) before obtaining or replaying the
 optional CC BY data, including its explicit download URL, size, checksum, and

@@ -78,6 +78,11 @@ Estimator implementation is next.
   without copying its immutable configuration.
 - Added deterministic JSON CLI summaries for checked optional-dataset metadata,
   explicit-local raw playback, and a fixed seeded synthetic-drift scenario.
+- Hardened CLI configuration and packaging review findings: the complete query
+  schedule is scalar-canonicalized and checked for finite virtual timing before
+  instrument construction, expected input failures have concise exit-2 error
+  messages, playback streams aggregates, and `bundled:drift` is wheel-packaged
+  for arbitrary-working-directory use.
 - Added an explicit eight-resonance Poisson drift configuration, a download-free
   in-memory playback/emulation example, and researcher-facing raw-data and
   synthetic-emulation guidance.
@@ -128,7 +133,8 @@ Estimator implementation is next.
 - No benchmark results exist, so neither primary nor secondary hypothesis has
   supporting evidence.
 - Raw playback retains unresolved analog units and has no measured timestamps;
-  its CLI summary is not a photon-count or timing claim.
+  its CLI summary labels both its `unknown_analog_signal` quantity and its
+  `conflicted_unverified` unit status; it is not a photon-count or timing claim.
 - The fixed CLI emulator is synthetic. Its seeded output does not establish
   estimator accuracy, realtime performance, or agreement with the recording.
 
