@@ -27,6 +27,13 @@ once a package version is introduced.
 
 ### Added
 
+- Event-driven `ODMRInstrument` queries with overhead-before-integration
+  virtual-time sequencing, midpoint hidden-truth evaluation, end timestamps,
+  normalized-fluorescence photon accounting, and no wall-clock dependency.
+- Atomic query commits that preserve clock, sequence, resources, seeded RNG
+  behavior, and stateful empirical-noise cursors when validation or sampling
+  fails; uncheckpointable mutable noise strategies are rejected before sampling.
+  Full records retain expected photons while estimator views do not.
 - Seeded Poisson shot noise, controlled Gaussian normalized-fluorescence noise,
   and provenance-bearing empirical residual noise with explicit replay, sample,
   and contiguous-block correlation semantics.

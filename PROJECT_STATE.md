@@ -4,8 +4,8 @@ Last updated: 2026-09-03
 
 ## Current stage
 
-Stage 5 — Observation noise and resource accounting are complete. The
-event-driven virtual instrument is next.
+Stage 5 — Event-driven virtual instrument is complete. The playback and
+emulation proof-of-concept CLI is next.
 
 ## Completed work
 
@@ -70,6 +70,12 @@ event-driven virtual instrument is next.
 - Added atomic virtual-acquisition resource accounting for observations,
   integration, nominal/expected/realized photons, uncounted observations, and
   elapsed virtual time.
+- Added an event-driven virtual ODMR instrument that evaluates hidden truth at
+  the integration midpoint, returns end-of-integration timestamps, advances
+  only virtual time, and commits sequence, clock, and resource totals atomically.
+- Preserved seeded stochastic reproducibility across failed queries by restoring
+  NumPy-generator and stateful-noise state; empirical replay remains usable
+  without copying its immutable configuration.
 
 ## Important scientific and design decisions
 
@@ -103,7 +109,7 @@ event-driven virtual instrument is next.
 
 ## Tests currently passing
 
-- `pytest`: 127 passed.
+- `pytest`: 163 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -125,7 +131,7 @@ event-driven virtual instrument is next.
 
 ## Next actions
 
-1. Add the event-driven virtual instrument and connect it to the noise,
-   estimator-safe observation, and atomic resource interfaces.
-2. Add the deterministic linear-drift scenario before the matched-budget
+1. Add proof-of-concept playback and emulation CLI commands and their explicit
+   deterministic drift configuration.
+2. Exercise the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.

@@ -1,5 +1,6 @@
 """Noisy, estimator-safe observation primitives for the virtual instrument."""
 
+from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.emulator.noise import (
     EmpiricalResidualNoise,
     GaussianNoise,
@@ -18,6 +19,7 @@ __all__ = [
     "GaussianNoise",
     "InstrumentObservation",
     "NoiseResult",
+    "ODMRInstrument",
     "PoissonNoise",
     "ResourceLedger",
     "ResourceSnapshot",
