@@ -27,6 +27,15 @@ once a package version is introduced.
 
 ### Added
 
+- Seeded Poisson shot noise, controlled Gaussian normalized-fluorescence noise,
+  and provenance-bearing empirical residual noise with explicit replay, sample,
+  and contiguous-block correlation semantics.
+- Frozen evaluator-owned `InstrumentObservation` records and separate
+  estimator-safe observations that structurally exclude signal-conditioned
+  expected photon counts and other hidden truth.
+- Atomic resource-ledger snapshots covering observation count, integration,
+  nominal/expected/realized photons, observations without counts, and virtual
+  elapsed time.
 - Frozen hidden eight-resonance `SpectralSnapshot` records and a
   runtime-checkable `SpectralDynamics` interface for virtual-time truth.
 - Deterministic stationary and common/per-ID linear center drift that preserve

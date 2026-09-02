@@ -4,9 +4,8 @@ Last updated: 2026-09-03
 
 ## Current stage
 
-Stage 4 — Hidden eight-resonance dynamics is complete. The event-driven
-virtual-instrument design remains approved; observation noise and resource
-accounting are next.
+Stage 5 — Observation noise and resource accounting are complete. The
+event-driven virtual instrument is next.
 
 ## Completed work
 
@@ -62,6 +61,15 @@ accounting are next.
 - Added runtime-checkable spectral-dynamics protocol plus stationary and
   deterministic common/per-ID linear-center-drift implementations. They accept
   only finite non-negative virtual timestamps and never sort resonance order.
+- Added seeded Poisson shot-noise and controlled Gaussian normalized-fluorescence
+  models, with photons retained only when the generative model produces counts.
+- Added provenance-bearing empirical residual noise with explicit replay,
+  independent-sample, and contiguous-block correlation modes.
+- Added frozen full and estimator-safe observation records; signal-conditioned
+  expected photons remain evaluator-only and are absent from estimator objects.
+- Added atomic virtual-acquisition resource accounting for observations,
+  integration, nominal/expected/realized photons, uncounted observations, and
+  elapsed virtual time.
 
 ## Important scientific and design decisions
 
@@ -89,18 +97,19 @@ accounting are next.
   machine-readable results and figures.
 - Development prioritizes the first falsifiable vertical slice over completing
   every planned abstraction in advance.
+- Empirical residual correlation is a declared experimental condition: replay
+  preserves supplied order, sample draws independent residuals, and block draws
+  seeded contiguous blocks with deterministic wrapping.
 
 ## Tests currently passing
 
-- `pytest`: 84 passed.
-- `ruff check src/odmr_bench/dynamics tests/dynamics`: All checks passed.
-  Repository-wide Ruff currently reports three pre-existing `UP038` findings in
-  `datasets/playback.py` and `models/parameters.py`.
+- `pytest`: 127 passed.
+- `ruff check .`: All checks passed.
 
 ## Known scientific limitations
 
-- No stochastic observation-noise or Hamiltonian model exists yet; the current
-  dynamics layer provides only stationary and deterministic linear center drift.
+- The current dynamics layer provides only stationary and deterministic linear
+  center drift; no Hamiltonian model exists yet.
 - No real dataset has been verified or attached.
 - Hyperfine structure, ensemble inhomogeneity, optical power broadening,
   microwave power broadening, temperature coupling, and instrument transfer
@@ -116,8 +125,7 @@ accounting are next.
 
 ## Next actions
 
-1. Implement seeded Poisson and Gaussian observation-noise models.
-2. Implement provenance-bearing supplied-residual replay/block sampling.
-3. Add the event-driven virtual instrument and its resource accounting.
-4. Add the deterministic linear-drift scenario before the matched-budget
+1. Add the event-driven virtual instrument and connect it to the noise,
+   estimator-safe observation, and atomic resource interfaces.
+2. Add the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.

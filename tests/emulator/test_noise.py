@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+from types import MappingProxyType
+
+import numpy as np
+import pytest
+
+from odmr_bench.emulator.noise import (
+    EmpiricalResidualNoise,
+    GaussianNoise,
+    PoissonNoise,
+)
+
+
+def _provenance(correlation_mode: str) -> dict[str, str]:
+    return {
+        "source_id": "generated-fixture-v1",
+        "preparation_label": "known-reference-subtraction",
+        "normalization_label": "normalized-fluorescence",
+        "correlation_mode": correlation_mode,
+    }
+
+
+def test_poisson_noise_returns_seeded_count_and_normalized_fluorescence() -> None:
+    rate_hz = 25.0
+    duration_s = 0.2
+    expected_fluorescence = 0.8
+    expected_count = np.random.default_rng(23).poisson(
+        expected_fluorescence * rate_hz * duration_s
+    )
+
+    result = PoissonNoise().sample(
+        expected_fluorescence,
+        rate_hz,
+        duration_s,
+        np.random.default_rng(23),
+    )
+
+    assert result.realized_photons == expected_count
+    assert result.fluorescence == expected_count / (rate_hz * duration_s)
+
+
+def test_gaussian_noise_scales_standard_deviation_with_integration_time() -> None:
+    noise = GaussianNoise(stddev_at_1s=0.4)
+    expected_fluorescence = 1.2
+    unit_duration = noise.sample(
+        expected_fluorescence,
+        10.0,
+        1.0,
+        np.random.default_rng(5),
+    )
+    quarter_duration = noise.sample(
+        expected_fluorescence,
+        10.0,
+        0.25,
+        np.random.default_rng(5),
+    )
+
+    assert unit_duration.realized_photons is None
+    assert quarter_duration.realized_photons is None
+    assert quarter_duration.fluorescence - expected_fluorescence == pytest.approx(
+        2.0 * (unit_duration.fluorescence - expected_fluorescence)
+    )
+
+
+def test_zero_gaussian_noise_is_a_deterministic_control() -> None:
+    result = GaussianNoise(stddev_at_1s=0.0).sample(
+        0.83, 10.0, 0.2, np.random.default_rng(5)
+    )
+
+    assert result.fluorescence == 0.83
+    assert result.realized_photons is None
+
+
+def test_empirical_replay_cycles_through_residual_order() -> None:
+    noise = EmpiricalResidualNoise(
+        [-0.1, 0.25, 0.5],
+        mode="replay",
+        provenance=_provenance("replay"),
+    )
+
+    values = [
+        noise.sample(1.0, 10.0, 0.1, np.random.default_rng(99)).fluorescence
+        for _ in range(5)
+    ]
+
+    assert values == pytest.approx([0.9, 1.25, 1.5, 0.9, 1.25])
+    assert noise.provenance == MappingProxyType(_provenance("replay"))
+    with pytest.raises(TypeError):
+        noise.provenance["source_id"] = "mutated"  # type: ignore[index]
+
+
+def test_empirical_sample_draws_seeded_independent_residual_indices() -> None:
+    residuals = np.array([-0.2, 0.0, 0.4])
+    expected_rng = np.random.default_rng(11)
+    expected = [
+        1.0 + residuals[expected_rng.integers(0, residuals.size)]
+        for _ in range(6)
+    ]
+    noise = EmpiricalResidualNoise(
+        residuals,
+        mode="sample",
+        provenance=_provenance("sample"),
+    )
+    actual_rng = np.random.default_rng(11)
+
+    actual = [noise.sample(1.0, 10.0, 0.1, actual_rng).fluorescence for _ in range(6)]
+
+    assert actual == pytest.approx(expected)
+
+
+def test_empirical_block_preserves_contiguous_order_and_wraps() -> None:
+    residuals = np.array([-0.2, 0.0, 0.3, 0.5])
+    expected_rng = np.random.default_rng(17)
+    start = expected_rng.integers(0, residuals.size)
+    expected = [1.0 + residuals[(start + index) % residuals.size] for index in range(6)]
+    noise = EmpiricalResidualNoise(
+        residuals,
+        mode="block",
+        block_size=6,
+        provenance=_provenance("block"),
+    )
+
+    actual = [
+        noise.sample(1.0, 10.0, 0.1, np.random.default_rng(17)).fluorescence
+        for _ in range(6)
+    ]
+
+    assert actual == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(
+    ("expected_fluorescence", "nominal_rate_hz", "integration_time_s"),
+    [
+        (-0.01, 1.0, 1.0),
+        (np.nan, 1.0, 1.0),
+        (1.0, 0.0, 1.0),
+        (1.0, np.inf, 1.0),
+        (1.0, 1.0, 0.0),
+        (1.0, 1.0, np.nan),
+    ],
+)
+def test_noise_strategies_reject_invalid_sample_inputs(
+    expected_fluorescence: float, nominal_rate_hz: float, integration_time_s: float
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        PoissonNoise().sample(
+            expected_fluorescence,
+            nominal_rate_hz,
+            integration_time_s,
+            np.random.default_rng(1),
+        )
+
+
+@pytest.mark.parametrize(
+    ("residuals", "mode", "provenance", "block_size"),
+    [
+        ([], "replay", _provenance("replay"), None),
+        ([0.0, np.inf], "sample", _provenance("sample"), None),
+        ([0.0], "unknown", _provenance("unknown"), None),
+        ([0.0], "replay", {"source_id": "missing-labels"}, None),
+        ([0.0], "block", _provenance("block"), 0),
+        ([0.0], "block", _provenance("replay"), 2),
+    ],
+)
+def test_empirical_noise_rejects_invalid_configuration(
+    residuals: list[float],
+    mode: str,
+    provenance: dict[str, str],
+    block_size: int | None,
+) -> None:
+    with pytest.raises((TypeError, ValueError)):
+        EmpiricalResidualNoise(
+            residuals,
+            mode=mode,
+            provenance=provenance,
+            block_size=block_size,
+        )
+
+
+@pytest.mark.parametrize("stddev_at_1s", [-0.01, np.nan, np.inf])
+def test_gaussian_noise_rejects_invalid_standard_deviation(stddev_at_1s: float) -> None:
+    with pytest.raises(ValueError):
+        GaussianNoise(stddev_at_1s)
