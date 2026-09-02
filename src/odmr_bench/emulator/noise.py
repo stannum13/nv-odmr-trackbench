@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from numbers import Integral, Real
 from types import MappingProxyType
 from typing import Protocol, runtime_checkable
@@ -107,7 +107,7 @@ class NoiseResult:
 class PoissonNoise:
     """Photon shot noise with counts retained alongside normalized fluorescence."""
 
-    sampling_rule: str = "poisson"
+    sampling_rule: str = field(default="poisson", init=False)
 
     def checkpoint(self) -> None:
         """Return the immutable no-op checkpoint for this stateless strategy."""
@@ -147,7 +147,7 @@ class GaussianNoise:
     """Controlled additive normalized-fluorescence noise, not a count model."""
 
     stddev_at_1s: float
-    sampling_rule: str = "gaussian"
+    sampling_rule: str = field(default="gaussian", init=False)
 
     def __post_init__(self) -> None:
         stddev_at_1s = _finite_float(self.stddev_at_1s, "stddev_at_1s")

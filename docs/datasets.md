@@ -2,7 +2,7 @@
 
 The optional real-data anchor is Figshare DOI
 [`10.6084/m9.figshare.28788437.v1`](https://doi.org/10.6084/m9.figshare.28788437.v1),
-the CC BY 4.0 dataset by Liu Liu. Its explicit versioned file download URL is
+the CC BY 4.0 dataset by Liu. Its explicit versioned file download URL is
 `https://ndownloader.figshare.com/files/53646563`. The expected file is
 18,974,276 bytes (about 19 MB) and has MD5 checksum
 `df03ef2385cdd64d2f0e117ecd9d6c7e`.

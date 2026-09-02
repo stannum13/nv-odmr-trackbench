@@ -74,6 +74,27 @@ def test_registry_yaml_matches_the_checked_figshare_record() -> None:
     assert public["ground_truth_status"] == record.ground_truth_status
 
 
+def test_public_dataset_docs_match_the_checked_creator_string() -> None:
+    root = Path(__file__).parents[2]
+    creator = ", ".join(FIGSHARE_28788437_V1.authors)
+    expected_attributions = {
+        root / "docs" / "datasets.md": f"dataset by {creator}.",
+        root
+        / "docs"
+        / "scientific_spec.md": f"({creator}, CC BY 4.0)",
+        root
+        / "docs"
+        / "superpowers"
+        / "specs"
+        / "2026-09-01-virtual-instrument-design.md": f"authored by {creator} and",
+    }
+
+    for path, expected_attribution in expected_attributions.items():
+        text = path.read_text(encoding="utf-8")
+        assert expected_attribution in text
+        assert "Liu Liu" not in text
+
+
 def test_sweep_dataset_copies_and_freezes_caller_arrays() -> None:
     signal = np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
     frequency_hz = np.array([10.0, 20.0, 30.0])

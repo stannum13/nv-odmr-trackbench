@@ -72,6 +72,16 @@ def test_zero_gaussian_noise_is_a_deterministic_control() -> None:
     assert result.realized_photons is None
 
 
+def test_builtin_noise_constructors_cannot_relabel_their_sampling_rules() -> None:
+    with pytest.raises(TypeError, match="sampling_rule"):
+        PoissonNoise(sampling_rule="gaussian")
+    with pytest.raises(TypeError, match="sampling_rule"):
+        GaussianNoise(stddev_at_1s=0.0, sampling_rule="poisson")
+
+    assert PoissonNoise().sampling_rule == "poisson"
+    assert GaussianNoise(stddev_at_1s=0.0).sampling_rule == "gaussian"
+
+
 @pytest.mark.parametrize(
     "noise",
     [PoissonNoise(), GaussianNoise(stddev_at_1s=0.0)],

@@ -142,6 +142,28 @@ def test_poisson_counts_match_returned_normalized_fluorescence() -> None:
     )
 
 
+@pytest.mark.parametrize(
+    ("noise", "expected_rule"),
+    [
+        (PoissonNoise(), "poisson"),
+        (GaussianNoise(stddev_at_1s=0.0), "gaussian"),
+    ],
+)
+def test_builtin_noise_observation_records_the_exact_sampling_rule(
+    noise: PoissonNoise | GaussianNoise, expected_rule: str
+) -> None:
+    from odmr_bench.emulator.instrument import ODMRInstrument
+
+    observation = ODMRInstrument(
+        dynamics=StationaryDynamics(_snapshot()),
+        noise=noise,
+        nominal_photon_rate_hz=100.0,
+        seed=2,
+    ).query(2.86e9, 0.1)
+
+    assert observation.sampling_rule == expected_rule
+
+
 def test_empirical_replay_noise_remains_usable_by_the_instrument() -> None:
     from odmr_bench.emulator.instrument import ODMRInstrument
 

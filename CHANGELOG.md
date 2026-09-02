@@ -10,6 +10,12 @@ once a package version is introduced.
 
 ### Changed
 
+- Built-in Poisson and Gaussian noise strategies now fix their recorded
+  sampling-rule provenance at construction, and public Figshare attribution
+  consistently uses the checked creator string, `Liu`.
+- Clarified that the optional external recording is verified by metadata and
+  checksum but is neither bundled nor attached and has no verified tracking
+  truth; the static-spectrum script is a source-checkout demo after install.
 - CLI simulation now canonicalizes every fixed-schedule frequency and duration
   before virtual-instrument construction, validates the entire prospective
   virtual timeline, and reports expected path/YAML/configuration/data failures

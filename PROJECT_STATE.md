@@ -119,14 +119,15 @@ Estimator implementation is next.
 
 ## Tests currently passing
 
-- `pytest`: 196 passed.
+- `pytest`: 200 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
 
 - The current dynamics layer provides only stationary and deterministic linear
   center drift; no Hamiltonian model exists yet.
-- No real dataset has been verified or attached.
+- No external real-data file is bundled or attached, and the recording has no
+  verified tracking truth.
 - Hyperfine structure, ensemble inhomogeneity, optical power broadening,
   microwave power broadening, temperature coupling, and instrument transfer
   functions are not yet modeled.

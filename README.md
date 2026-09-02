@@ -55,8 +55,8 @@ errors together with acquisition and compute resources.
 
 ## Synthetic spectrum demonstration
 
-After installing the package, generate the deterministic eight-resonance
-spectrum with:
+From a source checkout after installing the package, generate the deterministic
+eight-resonance spectrum with:
 
 ```bash
 python scripts/plot_spectrum.py \

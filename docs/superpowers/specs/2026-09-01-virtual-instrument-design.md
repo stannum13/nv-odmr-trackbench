@@ -17,7 +17,7 @@ constrained by an actual ODMR file rather than invented in isolation.
 ## Real-data anchor
 
 The first external anchor is Figshare DOI
-`10.6084/m9.figshare.28788437.v1`, authored by Liu Liu and licensed CC BY 4.0.
+`10.6084/m9.figshare.28788437.v1`, authored by Liu and licensed CC BY 4.0.
 The versioned file is a regular matrix of 4,693 stored sweeps by 311 frequency
 points spanning 2.740 GHz through 3.050 GHz inclusive in 1 MHz steps. Its MD5
 checksum is `df03ef2385cdd64d2f0e117ecd9d6c7e`.
