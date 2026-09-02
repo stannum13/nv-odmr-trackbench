@@ -153,3 +153,23 @@ working directory, `dataset-info`, successful explicit-path `playback`, and
 `simulate --config bundled:drift` all produced their JSON summaries. CI now
 performs the wheel-content assertion and the clean-environment bundled-scenario
 smoke. No push was performed.
+
+## Final re-review follow-up
+
+The final re-review found two Minor follow-ups. An oversized YAML integer for
+`frequency_overhead_s` was added as a subprocess/console regression. It first
+failed with exit status 1 and an `OverflowError` traceback. Float conversion now
+translates that expected scalar overflow to a finite-value configuration error,
+and the pre-execution scenario-loading boundary translates any remaining
+configuration conversion overflow without catching runtime query failures.
+
+The focused CLI suite passed with `13 passed`; final verification recorded:
+
+```text
+.venv/bin/python -m pytest -q   # 196 passed
+.venv/bin/ruff check .          # All checks passed
+git diff --check                # clean
+```
+
+`PROJECT_STATE.md` now reports the same final 196-test total. This follow-up is
+local only; no push was performed.

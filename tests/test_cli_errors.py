@@ -65,3 +65,32 @@ def test_expected_input_errors_are_concise_at_the_subprocess_boundary(
     assert completed.stdout == ""
     assert completed.stderr.startswith(f"odmrbench: error: {expected_message}")
     assert "Traceback" not in completed.stderr
+
+
+def test_oversized_yaml_integer_is_a_concise_console_configuration_error(
+    tmp_path: Path,
+) -> None:
+    config = tmp_path / "oversized-integer.yaml"
+    source_config = Path("configs/drift.yaml").read_text(encoding="utf-8")
+    config.write_text(
+        source_config.replace(
+            "frequency_overhead_s: 0.001",
+            f"frequency_overhead_s: {'9' * 400}",
+        ),
+        encoding="utf-8",
+    )
+
+    executable = Path(sys.executable).with_name("odmrbench")
+    completed = subprocess.run(
+        [executable, "simulate", "--config", str(config)],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stdout == ""
+    assert completed.stderr.startswith(
+        "odmrbench: error: frequency_overhead_s must be finite"
+    )
+    assert "Traceback" not in completed.stderr

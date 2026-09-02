@@ -119,7 +119,7 @@ Estimator implementation is next.
 
 ## Tests currently passing
 
-- `pytest`: 187 passed.
+- `pytest`: 196 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

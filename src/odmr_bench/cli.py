@@ -42,7 +42,10 @@ def _exact_keys(
 def _positive_finite_float(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a real scalar")
-    canonical = float(value)
+    try:
+        canonical = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} must be finite") from error
     if not isfinite(canonical):
         raise ValueError(f"{name} must be finite")
     if canonical <= 0.0:
@@ -53,7 +56,10 @@ def _positive_finite_float(value: object, name: str) -> float:
 def _nonnegative_finite_float(value: object, name: str) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError(f"{name} must be a real scalar")
-    canonical = float(value)
+    try:
+        canonical = float(value)
+    except OverflowError as error:
+        raise ValueError(f"{name} must be finite") from error
     if not isfinite(canonical):
         raise ValueError(f"{name} must be finite")
     if canonical < 0.0:
@@ -276,7 +282,14 @@ def _simulation_config_path(config: str) -> Path:
 
 
 def _simulate(config: str) -> int:
-    instrument, queries, seed = _load_drift_scenario(_simulation_config_path(config))
+    try:
+        instrument, queries, seed = _load_drift_scenario(
+            _simulation_config_path(config)
+        )
+    except OverflowError as error:
+        raise ValueError(
+            "simulation config has a numeric value outside the finite float range"
+        ) from error
     samples = [
         instrument.query(
             frequency_hz=query["frequency_hz"],
