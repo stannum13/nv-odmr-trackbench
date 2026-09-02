@@ -27,6 +27,10 @@ once a package version is introduced.
 
 ### Added
 
+- Frozen hidden eight-resonance `SpectralSnapshot` records and a
+  runtime-checkable `SpectralDynamics` interface for virtual-time truth.
+- Deterministic stationary and common/per-ID linear center drift that preserve
+  physical parent IDs and input order without frequency sorting.
 - `load_verified_sweep_file` for deterministic, injected-record verification
   without a network dependency, plus complete YAML/dataclass parity coverage.
 - `run_playback`, which supplies estimator callbacks with one frozen

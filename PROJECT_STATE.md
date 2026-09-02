@@ -4,9 +4,9 @@ Last updated: 2026-09-03
 
 ## Current stage
 
-Stage 3 — Verified recorded-data playback is complete. The event-driven
-virtual-instrument design remains approved; hidden eight-resonance dynamics is
-next.
+Stage 4 — Hidden eight-resonance dynamics is complete. The event-driven
+virtual-instrument design remains approved; observation noise and resource
+accounting are next.
 
 ## Completed work
 
@@ -57,6 +57,11 @@ next.
 - Hardened local verified loading by checking and parsing one immutable byte
   snapshot, added full YAML-to-record parity coverage, deterministic verified
   loader success coverage, and non-empty sweep-dimension validation.
+- Added frozen hidden `SpectralSnapshot` truth records that require exactly
+  eight unique stable physical IDs and positive absolute centers.
+- Added runtime-checkable spectral-dynamics protocol plus stationary and
+  deterministic common/per-ID linear-center-drift implementations. They accept
+  only finite non-negative virtual timestamps and never sort resonance order.
 
 ## Important scientific and design decisions
 
@@ -87,13 +92,15 @@ next.
 
 ## Tests currently passing
 
-- `pytest`: 63 passed.
-- `ruff check .`: All checks passed.
+- `pytest`: 84 passed.
+- `ruff check src/odmr_bench/dynamics tests/dynamics`: All checks passed.
+  Repository-wide Ruff currently reports three pre-existing `UP038` findings in
+  `datasets/playback.py` and `models/parameters.py`.
 
 ## Known scientific limitations
 
-- No stochastic observation-noise, dynamics, or Hamiltonian model exists yet;
-  the current spectrum model accepts only explicit deterministic additive noise.
+- No stochastic observation-noise or Hamiltonian model exists yet; the current
+  dynamics layer provides only stationary and deterministic linear center drift.
 - No real dataset has been verified or attached.
 - Hyperfine structure, ensemble inhomogeneity, optical power broadening,
   microwave power broadening, temperature coupling, and instrument transfer
@@ -109,8 +116,8 @@ next.
 
 ## Next actions
 
-1. Add hidden eight-resonance dynamics and the event-driven virtual instrument.
-2. Implement seeded Poisson and Gaussian observation-noise models.
-3. Implement provenance-bearing supplied-residual replay/block sampling.
+1. Implement seeded Poisson and Gaussian observation-noise models.
+2. Implement provenance-bearing supplied-residual replay/block sampling.
+3. Add the event-driven virtual instrument and its resource accounting.
 4. Add the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.
