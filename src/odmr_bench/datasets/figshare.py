@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from odmr_bench.datasets.models import SweepDataset
+from odmr_bench.datasets.models import DatasetRecord, SweepDataset
 from odmr_bench.datasets.registry import FIGSHARE_28788437_V1
 
 _SCALAR_HEADERS = {
@@ -59,19 +59,18 @@ def _regular_frequency_axis(
     return start_hz + step_hz * np.arange(frequency_count, dtype=np.float64)
 
 
-def parse_figshare_sweep_file(
-    path: str | Path, *, expected_shape: tuple[int, int] | None = None
+def _parse_figshare_sweep_bytes(
+    source_bytes: bytes, *, expected_shape: tuple[int, int] | None = None
 ) -> SweepDataset:
-    """Parse a Qudi-style Figshare sweep file without reordering or scaling it."""
-    source = Path(path)
+    """Parse one immutable Qudi-style file snapshot without reordering or scaling."""
     declared: dict[str, str] = {}
     data_rows: list[list[float]] = []
     signal_label: str | None = None
 
     try:
-        lines = source.read_text(encoding="utf-8").splitlines()
-    except OSError as error:
-        raise ValueError(f"could not read sweep file: {source}") from error
+        lines = source_bytes.decode("utf-8").splitlines()
+    except UnicodeDecodeError as error:
+        raise ValueError("sweep file must be UTF-8 text") from error
 
     for line in lines:
         if line.startswith("#"):
@@ -147,27 +146,35 @@ def parse_figshare_sweep_file(
     )
 
 
-def load_figshare_28788437(path: str | Path) -> SweepDataset:
-    """Verify a local copy of Figshare article 28788437 version 1; never download."""
+def parse_figshare_sweep_file(
+    path: str | Path, *, expected_shape: tuple[int, int] | None = None
+) -> SweepDataset:
+    """Parse a Qudi-style Figshare sweep file without reordering or scaling it."""
     source = Path(path)
     try:
-        with source.open("rb") as file:
-            digest = hashlib.file_digest(
-                file, FIGSHARE_28788437_V1.checksum_algorithm
-            ).hexdigest()
+        source_bytes = source.read_bytes()
     except OSError as error:
         raise ValueError(f"could not read sweep file: {source}") from error
-    if digest != FIGSHARE_28788437_V1.checksum_value:
+    return _parse_figshare_sweep_bytes(source_bytes, expected_shape=expected_shape)
+
+
+def _load_verified_sweep_bytes(
+    source_bytes: bytes, *, expected_record: DatasetRecord
+) -> SweepDataset:
+    digest = hashlib.new(
+        expected_record.checksum_algorithm, source_bytes
+    ).hexdigest()
+    if digest != expected_record.checksum_value:
         raise ValueError("file checksum does not match Figshare record")
-    if source.stat().st_size != FIGSHARE_28788437_V1.byte_size:
+    if len(source_bytes) != expected_record.byte_size:
         raise ValueError("file size does not match Figshare record")
-    parsed = parse_figshare_sweep_file(
-        source, expected_shape=FIGSHARE_28788437_V1.shape
+    parsed = _parse_figshare_sweep_bytes(
+        source_bytes, expected_shape=expected_record.shape
     )
     expected_frequency_hz = (
-        FIGSHARE_28788437_V1.frequency_start_hz
-        + FIGSHARE_28788437_V1.frequency_step_hz
-        * np.arange(FIGSHARE_28788437_V1.frequency_count, dtype=np.float64)
+        expected_record.frequency_start_hz
+        + expected_record.frequency_step_hz
+        * np.arange(expected_record.frequency_count, dtype=np.float64)
     )
     if not np.array_equal(parsed.frequency_hz, expected_frequency_hz):
         raise ValueError("file frequency grid does not match Figshare record")
@@ -175,8 +182,29 @@ def load_figshare_28788437(path: str | Path) -> SweepDataset:
         signal=parsed.signal,
         frequency_hz=parsed.frequency_hz,
         declared_metadata=parsed.declared_metadata,
-        record=FIGSHARE_28788437_V1,
+        record=expected_record,
     )
 
 
-__all__ = ["load_figshare_28788437", "parse_figshare_sweep_file"]
+def load_verified_sweep_file(
+    path: str | Path, *, expected_record: DatasetRecord
+) -> SweepDataset:
+    """Verify and parse one local byte snapshot against an injected record."""
+    source = Path(path)
+    try:
+        source_bytes = source.read_bytes()
+    except OSError as error:
+        raise ValueError(f"could not read sweep file: {source}") from error
+    return _load_verified_sweep_bytes(source_bytes, expected_record=expected_record)
+
+
+def load_figshare_28788437(path: str | Path) -> SweepDataset:
+    """Verify a local copy of Figshare article 28788437 version 1; never download."""
+    return load_verified_sweep_file(path, expected_record=FIGSHARE_28788437_V1)
+
+
+__all__ = [
+    "load_figshare_28788437",
+    "load_verified_sweep_file",
+    "parse_figshare_sweep_file",
+]

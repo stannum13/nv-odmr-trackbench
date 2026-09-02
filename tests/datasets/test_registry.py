@@ -44,12 +44,14 @@ def test_registry_yaml_matches_the_checked_figshare_record() -> None:
     record = FIGSHARE_28788437_V1
 
     assert public["dataset_id"] == record.dataset_id
+    assert public["title"] == record.title
     assert public["doi"] == record.doi
     assert public["version"] == record.version
     assert tuple(public["authors"]) == record.authors
     assert public["license_name"] == record.license_name
     assert public["license_spdx"] == record.license_spdx
     assert public["license_url"] == record.license_url
+    assert public["canonical_url"] == record.canonical_url
     assert public["filename"] == record.filename
     assert public["download_url"] == record.download_url
     assert public["byte_size"] == record.byte_size
@@ -62,6 +64,14 @@ def test_registry_yaml_matches_the_checked_figshare_record() -> None:
         "step_hz": record.frequency_step_hz,
         "count": record.frequency_count,
     }
+    assert public["declared_signal_label"] == record.declared_signal_label
+    assert public["signal_quantity"] == record.signal_quantity
+    assert public["unit_status"] == record.unit_status
+    assert public["detector_channel"] == record.detector_channel
+    assert public["nominal_clock_hz"] == record.nominal_clock_hz
+    assert public["timing_status"] == record.timing_status
+    assert tuple(public["missing_metadata"]) == record.missing_metadata
+    assert public["ground_truth_status"] == record.ground_truth_status
 
 
 def test_sweep_dataset_copies_and_freezes_caller_arrays() -> None:
@@ -97,6 +107,8 @@ def test_sweep_dataset_copies_and_freezes_caller_arrays() -> None:
         ),
         (np.array([[1.0, 2.0]]), np.array([10.0]), "length"),
         (np.array([[1.0, 2.0]]), np.array([20.0, 10.0]), "increasing"),
+        (np.empty((0, 3)), np.array([10.0, 20.0, 30.0]), "at least one"),
+        (np.empty((2, 0)), np.array([]), "at least one"),
     ],
 )
 def test_sweep_dataset_rejects_invalid_arrays(

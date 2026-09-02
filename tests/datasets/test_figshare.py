@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import hashlib
+from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-from odmr_bench.datasets import load_figshare_28788437, parse_figshare_sweep_file
+from odmr_bench.datasets import (
+    FIGSHARE_28788437_V1,
+    load_figshare_28788437,
+    load_verified_sweep_file,
+    parse_figshare_sweep_file,
+)
 
 
 def _write_sweep_file(
@@ -92,3 +99,30 @@ def test_verified_loader_rejects_a_tiny_fixture_with_wrong_checksum(
 
     with pytest.raises(ValueError, match="checksum"):
         load_figshare_28788437(path)
+
+
+def test_verified_loader_parses_the_verified_byte_snapshot_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "tiny.dat"
+    _write_sweep_file(path)
+    verified_snapshot = path.read_bytes()
+    expected_record = replace(
+        FIGSHARE_28788437_V1,
+        byte_size=len(verified_snapshot),
+        checksum_value=hashlib.md5(verified_snapshot).hexdigest(),
+        shape=(2, 3),
+        frequency_start_hz=10.0,
+        frequency_stop_hz=30.0,
+        frequency_step_hz=10.0,
+        frequency_count=3,
+    )
+    path.write_text("not the verified snapshot", encoding="utf-8")
+    monkeypatch.setattr(Path, "read_bytes", lambda _path: verified_snapshot)
+
+    dataset = load_verified_sweep_file(path, expected_record=expected_record)
+
+    np.testing.assert_array_equal(
+        dataset.signal, np.array([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+    )
+    assert dataset.record == expected_record

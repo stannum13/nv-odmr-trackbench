@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Generator
+from collections.abc import Callable, Generator
 from dataclasses import dataclass
 from numbers import Real
 
@@ -36,14 +36,18 @@ def _validated_clock(nominal_clock_hz: float | None) -> float | None:
     return clock_hz
 
 
-def iter_playback(
+def iter_playback_for_analysis(
     dataset: SweepDataset, nominal_clock_hz: float | None = None
 ) -> Generator[PlaybackObservation, None, None]:
-    """Yield only recorded samples in original row-major causal order.
+    """Yield recorded samples for trusted evaluator-side analysis only.
 
     A timestamp is deliberately unavailable unless a caller supplies an explicit
     nominal clock assumption. Such timestamps are inferred sequence times, not
     measured acquisition timestamps.
+
+    This generator retains the complete offline dataset in its frame and is not
+    causally isolated. Never pass it to estimator-controlled code; use
+    :func:`run_playback` for estimator callbacks.
     """
     clock_hz = _validated_clock(nominal_clock_hz)
 
@@ -67,4 +71,24 @@ def iter_playback(
     return observations()
 
 
-__all__ = ["PlaybackObservation", "iter_playback"]
+def run_playback(
+    dataset: SweepDataset,
+    on_observation: Callable[[PlaybackObservation], None],
+    nominal_clock_hz: float | None = None,
+) -> None:
+    """Call estimator code with exactly one frozen observation at a time.
+
+    Iteration remains evaluator-owned, so normal estimator interfaces receive
+    only ``PlaybackObservation`` values. Python callbacks are not a security
+    sandbox against deliberate stack introspection; use process isolation for
+    adversarial estimator code.
+    """
+    for observation in iter_playback_for_analysis(dataset, nominal_clock_hz):
+        on_observation(observation)
+
+
+__all__ = [
+    "PlaybackObservation",
+    "iter_playback_for_analysis",
+    "run_playback",
+]

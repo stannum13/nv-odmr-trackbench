@@ -153,14 +153,11 @@ separate execution protocols. Results must identify their mode.
 
 ### 4.1 Mode A: recorded playback
 
-The estimator receives recorded observations in their original causal order:
+The evaluator advances the recording and calls the estimator with one frozen
+observation at a time in original causal order:
 
 ```python
-estimator.update(
-    frequency_hz=frequency_hz,
-    fluorescence=fluorescence,
-    timestamp_s=timestamp_s,
-)
+run_playback(dataset, estimator.update)
 ```
 
 At update \(k\), the estimator may access observations with indices no greater
@@ -172,6 +169,14 @@ An evaluation harness may use future data after replay to construct a reference
 and calculate metrics, but that reference must not share an object or callback
 with the estimator. Offline preprocessing that uses a complete recording must
 be labeled noncausal and cannot be counted as online estimator performance.
+
+A generator that traverses an offline recording is not a sufficient estimator
+boundary in Python: its inspectable frame necessarily retains future source
+state. `iter_playback_for_analysis` is consequently trusted evaluator tooling
+only, useful for diagnostics and post-replay metrics but never passed to
+estimator code or represented as causally isolated. The callback runner limits
+the ordinary API to one immutable observation per call; a benchmark executing
+deliberately adversarial Python code must use process isolation as well.
 
 Playback evaluates algorithms compatible with the recorded acquisition
 schedule. It cannot fairly evaluate an adaptive query at a frequency that was
@@ -260,7 +265,8 @@ labeled as conditional on free pre-calibration.
 Tests must include sentinels or separated types that make accidental truth
 access difficult. Benchmark orchestration must not pass a scenario or
 instrument object directly to an estimator when a restricted observation view
-is sufficient.
+is sufficient. Recorded playback likewise must not pass an offline iterator to
+an estimator when its causal runner can pass one restricted observation instead.
 
 ## 6. Resource accounting and fair comparisons
 

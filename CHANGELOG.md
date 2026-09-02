@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Replaced generator-only recorded playback at the estimator boundary with an
+  evaluator-owned callback runner. Python generator frames retain offline source
+  state, so the retained `iter_playback_for_analysis` iterator is explicitly
+  trusted evaluator tooling and is never represented as causally isolated.
+- Verified local Figshare loading now checks the length and digest of one
+  immutable byte snapshot and parses that same snapshot.
+- Rejected empty sweep and frequency dimensions in `SweepDataset`.
 - Renamed the public distribution and repository to `nv-odmr-trackbench`;
   the `odmr_bench` import package and `odmrbench` CLI remain unchanged.
 - Canonicalized validated real parameter scalars to immutable Python floats and
@@ -20,6 +27,11 @@ once a package version is introduced.
 
 ### Added
 
+- `load_verified_sweep_file` for deterministic, injected-record verification
+  without a network dependency, plus complete YAML/dataclass parity coverage.
+- `run_playback`, which supplies estimator callbacks with one frozen
+  `PlaybackObservation` at a time. Process isolation remains required for
+  deliberately adversarial estimator code.
 - Checked versioned provenance for Figshare DOI `10.6084/m9.figshare.28788437.v1`,
   an explicit-local-path verifier, and a parser that preserves original raw
   sweep order without normalization or implicit downloads.

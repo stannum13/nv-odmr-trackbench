@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-09-01
+Last updated: 2026-09-03
 
 ## Current stage
 
@@ -49,6 +49,14 @@ next.
   external data.
 - Added immutable sweep data and causal row-major recorded playback, with
   timestamps unavailable unless a caller explicitly assumes a nominal clock.
+- Replaced the deficient generator-only estimator boundary: Python generator
+  frames retain the offline dataset and can reveal future samples. Estimator
+  playback now uses an evaluator-owned causal callback runner that supplies one
+  frozen observation at a time; `iter_playback_for_analysis` is trusted
+  evaluator-only tooling.
+- Hardened local verified loading by checking and parsing one immutable byte
+  snapshot, added full YAML-to-record parity coverage, deterministic verified
+  loader success coverage, and non-empty sweep-dimension validation.
 
 ## Important scientific and design decisions
 
@@ -69,6 +77,9 @@ next.
   estimator receives only observations and permitted public metadata.
 - Recorded playback cannot evaluate adaptive frequencies that were not present
   in the recording.
+- A callback runner protects the normal estimator API from accidental future
+  data access, but it is not a security sandbox against adversarial Python stack
+  introspection; use process isolation for that threat model.
 - Budget matching and any unavoidable budget mismatch must be explicit in
   machine-readable results and figures.
 - Development prioritizes the first falsifiable vertical slice over completing
@@ -76,7 +87,7 @@ next.
 
 ## Tests currently passing
 
-- `pytest`: 39 passed.
+- `pytest`: 63 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

@@ -20,7 +20,8 @@ both paths without introducing estimators or unsupported experimental claims.
 ## Global Constraints
 
 - All scientifically important code lives under `src/odmr_bench/`.
-- Recorded playback never exposes future observations or offline references.
+- Recorded playback invokes estimator callbacks through a causal runner; a
+  trusted analysis iterator is evaluator-only and never estimator-facing.
 - Closed-loop emulation advances virtual time and never calls `sleep()`.
 - The Figshare signal remains `unknown_analog_signal` with
   `conflicted_unverified` units; it is never silently treated as photons,
@@ -62,12 +63,15 @@ both paths without introducing estimators or unsupported experimental claims.
 **Interfaces:**
 - Produces: `DatasetRecord`, `SweepDataset`, `PlaybackObservation`,
   `FIGSHARE_28788437_V1`, `parse_figshare_sweep_file`,
-  `load_figshare_28788437`, and `iter_playback`.
+  `load_figshare_28788437`, `load_verified_sweep_file`, `run_playback`, and
+  `iter_playback_for_analysis`.
 - `SweepDataset.signal` has shape `(n_sweeps, n_frequencies)` and all NumPy
   arrays are copies marked read-only.
-- `iter_playback(dataset, nominal_clock_hz=None)` yields flattened row-major
-  observations with monotonic `sequence_index`; timestamps are `None` unless
-  the caller explicitly supplies the nominal-clock assumption.
+- `run_playback(dataset, on_observation, nominal_clock_hz=None)` is the
+  estimator-facing path; it supplies only one frozen row-major observation per
+  callback, with `timestamp_s=None` unless the caller explicitly supplies the
+  nominal-clock assumption. `iter_playback_for_analysis` is explicitly trusted
+  evaluator tooling, not causal isolation.
 
 - [ ] **Step 1: Write failing registry and immutable-model tests**
 
@@ -121,12 +125,15 @@ both paths without introducing estimators or unsupported experimental claims.
   Assert row-major frequency/signal order, sequence indices `0..N-1`, sweep and
   sample indices, absent timestamps by default, explicit inferred timestamps
   `sequence_index / nominal_clock_hz`, and rejection of non-positive/non-finite
-  clock assumptions. Confirm consuming one iterator item exposes no container
-  or callback for future signal values.
+  clock assumptions. Confirm the actual callback object given to estimator code
+  is only one frozen observation; do not treat a Python generator as isolated.
 
 - [ ] **Step 8: Implement playback and verify Task 1**
 
-  Implement frozen `PlaybackObservation` and a generator-only `iter_playback`.
+  Implement frozen `PlaybackObservation`, evaluator-owned `run_playback`, and
+  clearly named trusted `iter_playback_for_analysis` tooling. The initial
+  generator-only design is deficient because its frame retains the complete
+  dataset; process isolation remains necessary for adversarial estimator code.
   Run `pytest tests/datasets -q`, `pytest -q`, `ruff check .`, and
   `git diff --check`; inspect scientific wording and commit.
 

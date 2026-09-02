@@ -82,8 +82,17 @@ sorted. With no measured timestamps, observations expose sequence indices and
 An explicit nominal-timing transform may derive sample times using the declared
 200 Hz clock. These times are labeled inferred and do not establish uninterrupted
 acquisition, integration duration, inter-sweep dead time, or temporal bandwidth.
-The playback iterator yields only already-reached observations and cannot expose
-future rows, offline fit results, or a future scan boundary to an estimator.
+
+The original generator-only playback boundary was deficient: a Python generator
+must retain its dataset and current row in an inspectable frame, so handing that
+iterator to estimator code can expose future recorded values. Estimator-facing
+playback therefore uses `run_playback(dataset, on_observation, ...)`; the runner
+advances evaluator-owned state and invokes the callback with exactly one frozen
+`PlaybackObservation` at a time. `iter_playback_for_analysis` remains available
+only as explicitly named trusted evaluator tooling for inspection and metrics;
+it is never passed to estimator code and makes no causal-isolation claim. The
+runner protects the normal benchmark API boundary, not against deliberately
+adversarial Python stack introspection; that threat requires process isolation.
 
 ## Package boundaries
 
@@ -295,7 +304,9 @@ that generator for the run. Dynamics are deterministic functions of virtual
 time in this stage. Identical initial state, configuration, query sequence, and
 seed produce identical observations and resource snapshots.
 
-The generator itself never appears in an estimator-facing object.
+Recorded playback uses its causal runner as the estimator-facing boundary. Its
+trusted analysis iterator remains evaluator-owned and is excluded from all
+estimator objects and callbacks.
 
 ## Validation and failure behavior
 

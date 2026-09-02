@@ -91,6 +91,8 @@ class SweepDataset:
             raise ValueError("signal must be two-dimensional")
         if frequency_hz.ndim != 1:
             raise ValueError("frequency_hz must be one-dimensional")
+        if signal.shape[0] < 1 or signal.shape[1] < 1 or frequency_hz.size < 1:
+            raise ValueError("signal and frequency_hz must contain at least one sample")
         if signal.shape[1] != frequency_hz.size:
             raise ValueError("frequency_hz length must match the signal width")
         if not np.all(np.isfinite(signal)) or not np.all(np.isfinite(frequency_hz)):
