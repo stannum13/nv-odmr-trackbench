@@ -32,7 +32,9 @@ once a package version is introduced.
   normalized-fluorescence photon accounting, and no wall-clock dependency.
 - Atomic query commits that preserve clock, sequence, resources, seeded RNG
   behavior, and stateful empirical-noise cursors when validation or sampling
-  fails; uncheckpointable mutable noise strategies are rejected before sampling.
+  fails. Noise now has an explicit in-place checkpoint/restore extension
+  contract, so third-party strategies cannot corrupt external aliases through
+  reflective deep-copy rollback and are rejected before sampling without it.
   Full records retain expected photons while estimator views do not.
 - Seeded Poisson shot noise, controlled Gaussian normalized-fluorescence noise,
   and provenance-bearing empirical residual noise with explicit replay, sample,

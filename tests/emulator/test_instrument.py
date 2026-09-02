@@ -6,6 +6,7 @@ from dataclasses import fields
 import numpy as np
 import pytest
 
+import odmr_bench.emulator.instrument as instrument_module
 from odmr_bench.dynamics import LinearCenterDrift, SpectralSnapshot, StationaryDynamics
 from odmr_bench.emulator import (
     EmpiricalResidualNoise,
@@ -177,6 +178,12 @@ class _InvalidNoise:
     def __init__(self) -> None:
         self.valid = False
 
+    def checkpoint(self) -> None:
+        return None
+
+    def restore(self, checkpoint: object) -> None:
+        assert checkpoint is None
+
     def sample(
         self,
         expected_fluorescence: float,
@@ -196,19 +203,10 @@ class _InvalidNoise:
         )
 
 
-class _UncheckpointableCounter:
-    def __init__(self) -> None:
-        self.value = 0
-
-    def __deepcopy__(self, memo: object) -> object:
-        raise TypeError("cannot checkpoint counter")
-
-
-class _UncheckpointableNoise:
+class _NoCheckpointNoise:
     sampling_rule = "invalid"
 
     def __init__(self) -> None:
-        self.counter = _UncheckpointableCounter()
         self.sample_calls = 0
 
     def sample(
@@ -219,7 +217,6 @@ class _UncheckpointableNoise:
         rng: np.random.Generator,
     ) -> object:
         self.sample_calls += 1
-        self.counter.value += 1
         rng.normal()
         return object()
 
@@ -292,10 +289,10 @@ def test_failed_query_preserves_clock_resources_sequence_and_rng(
         assert instrument.query(2.86e9, 0.1) == control.query(2.86e9, 0.1)
 
 
-def test_query_rejects_uncheckpointable_noise_state_before_sampling() -> None:
+def test_query_rejects_noise_without_checkpoint_protocol_before_sampling() -> None:
     from odmr_bench.emulator.instrument import ODMRInstrument
 
-    noise = _UncheckpointableNoise()
+    noise = _NoCheckpointNoise()
     instrument = ODMRInstrument(
         dynamics=StationaryDynamics(_snapshot()),
         noise=noise,
@@ -303,16 +300,169 @@ def test_query_rejects_uncheckpointable_noise_state_before_sampling() -> None:
         seed=17,
     )
 
-    with pytest.raises(TypeError, match="checkpointable"):
+    with pytest.raises(TypeError, match="checkpoint/restore"):
         instrument.query(2.86e9, 0.1)
 
-    assert noise.counter.value == 0
     assert noise.sample_calls == 0
     assert instrument.virtual_time_s == 0.0
     assert instrument.resources.observations == 0
 
 
-def test_constructor_requires_one_rng_source_and_valid_rates() -> None:
+class _AliasedMutableNoise:
+    sampling_rule = "aliased-test"
+
+    def __init__(self, *, fail: bool) -> None:
+        self.fail = fail
+        self.left = [0]
+        self.right = self.left
+        self.cursor = 0
+
+    def checkpoint(self) -> tuple[int, tuple[int, ...]]:
+        return self.cursor, tuple(self.left)
+
+    def restore(self, checkpoint: object) -> None:
+        cursor, values = checkpoint  # type: ignore[misc]
+        self.cursor = cursor
+        self.left[:] = values
+
+    def sample(
+        self,
+        expected_fluorescence: float,
+        nominal_rate_hz: float,
+        integration_time_s: float,
+        rng: np.random.Generator,
+    ) -> object:
+        self.cursor += 1
+        self.left[0] += 1
+        rng.normal()
+        if self.fail:
+            return object()
+        return NoiseResult(fluorescence=float(self.left[0]))
+
+
+class _RecoveringDynamics:
+    def __init__(self) -> None:
+        self.fail = True
+
+    def snapshot_at(self, timestamp_s: float) -> SpectralSnapshot:
+        if self.fail and timestamp_s > 0.0:
+            raise RuntimeError("transient dynamics failure")
+        return _snapshot()
+
+
+@pytest.mark.parametrize(
+    "failure_phase",
+    [
+        "dynamics",
+        "spectrum_shape",
+        "spectrum_raises",
+        "noise",
+        "observation",
+        "ledger",
+    ],
+)
+def test_failure_phases_restore_all_query_state_and_next_seeded_result(
+    failure_phase: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from odmr_bench.emulator.instrument import ODMRInstrument
+
+    noise = _AliasedMutableNoise(fail=failure_phase == "noise")
+    dynamics: object = (
+        _RecoveringDynamics()
+        if failure_phase == "dynamics"
+        else StationaryDynamics(_snapshot())
+    )
+    instrument = ODMRInstrument(
+        dynamics=dynamics,
+        noise=noise,
+        nominal_photon_rate_hz=100.0,
+        seed=17,
+    )
+    control = ODMRInstrument(
+        dynamics=StationaryDynamics(_snapshot()),
+        noise=_AliasedMutableNoise(fail=False),
+        nominal_photon_rate_hz=100.0,
+        seed=17,
+    )
+    before_resources = instrument.resources
+    externally_held_state = noise.left
+    original_spectrum = instrument_module.multi_resonance_spectrum
+    original_observation = instrument_module.InstrumentObservation
+    original_record = instrument_module.ResourceLedger.record
+
+    if failure_phase == "spectrum_shape":
+        monkeypatch.setattr(
+            instrument_module,
+            "multi_resonance_spectrum",
+            lambda *_args, **_kwargs: np.asarray([1.0, 1.0]),
+        )
+    elif failure_phase == "spectrum_raises":
+        def raise_from_spectrum(*_args: object, **_kwargs: object) -> np.ndarray:
+            raise RuntimeError("spectrum evaluation failure")
+
+        monkeypatch.setattr(
+            instrument_module, "multi_resonance_spectrum", raise_from_spectrum
+        )
+    elif failure_phase == "observation":
+        def raise_from_observation(*_args: object, **_kwargs: object) -> object:
+            raise RuntimeError("observation construction failure")
+
+        monkeypatch.setattr(
+            instrument_module, "InstrumentObservation", raise_from_observation
+        )
+    elif failure_phase == "ledger":
+        def raise_from_ledger(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("ledger failure")
+
+        monkeypatch.setattr(
+            instrument_module.ResourceLedger, "record", raise_from_ledger
+        )
+
+    with pytest.raises((RuntimeError, TypeError, ValueError)):
+        instrument.query(2.86e9, 0.1)
+
+    assert instrument.virtual_time_s == 0.0
+    assert instrument.resources == before_resources
+    assert noise.left is externally_held_state
+    assert noise.right is externally_held_state
+    assert noise.left == [0]
+    assert noise.cursor == 0
+
+    if failure_phase == "dynamics":
+        assert isinstance(dynamics, _RecoveringDynamics)
+        dynamics.fail = False
+    if failure_phase == "noise":
+        noise.fail = False
+    monkeypatch.setattr(
+        instrument_module, "multi_resonance_spectrum", original_spectrum
+    )
+    monkeypatch.setattr(
+        instrument_module, "InstrumentObservation", original_observation
+    )
+    monkeypatch.setattr(instrument_module.ResourceLedger, "record", original_record)
+
+    assert instrument.query(2.86e9, 0.1) == control.query(2.86e9, 0.1)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("dynamics", object()),
+        ("noise", object()),
+        ("nominal_photon_rate_hz", np.nan),
+        ("nominal_photon_rate_hz", np.inf),
+        ("frequency_overhead_s", np.nan),
+        ("frequency_overhead_s", np.inf),
+        ("seed", True),
+        ("seed", 1.5),
+        ("seed", "invalid"),
+        ("rng", np.random.RandomState(1)),
+        ("rng", object()),
+    ],
+)
+def test_constructor_rejects_invalid_dependencies_and_rng_configuration(
+    field: str, value: object
+) -> None:
     from odmr_bench.emulator.instrument import ODMRInstrument
 
     common = {
@@ -333,3 +483,11 @@ def test_constructor_requires_one_rng_source_and_valid_rates() -> None:
             nominal_photon_rate_hz=0.0,
             seed=1,
         )
+    invalid = dict(common)
+    invalid[field] = value
+    if field == "rng":
+        invalid["rng"] = value
+    else:
+        invalid["seed"] = value if field == "seed" else 1
+    with pytest.raises((TypeError, ValueError)):
+        ODMRInstrument(**invalid)

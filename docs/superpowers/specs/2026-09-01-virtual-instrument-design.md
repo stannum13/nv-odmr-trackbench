@@ -199,6 +199,24 @@ Every strategy receives expected normalized fluorescence, nominal photon rate,
 integration duration, and an explicit NumPy random generator. It returns a
 measured normalized fluorescence and an optional realized integer photon count.
 
+### Failure-atomic extension contract
+
+Every noise strategy accepted by `ODMRInstrument` must also provide
+`checkpoint()` and `restore(checkpoint)`. The instrument takes the opaque
+checkpoint immediately before calling `sample`; if sampling, observation
+construction, or resource recording fails, it restores the NumPy generator and
+calls `restore` on that same noise object before re-raising the error.
+
+Built-in stateless strategies use the immutable `None` checkpoint. The
+empirical residual strategy checkpoints only its replay/block cursor state and
+restores those fields in place. A third-party mutable strategy must restore its
+complete sampling state in place, including externally held mutable objects and
+their alias relationships; it must not replace those objects with copies. This
+is a public extension obligation because generic reflection or deep copying
+cannot reliably restore arbitrary Python object graphs. A strategy that does
+not expose callable `checkpoint` and `restore` methods is rejected before its
+first sample.
+
 ### Poisson shot noise
 
 Sample

@@ -109,7 +109,7 @@ emulation proof-of-concept CLI is next.
 
 ## Tests currently passing
 
-- `pytest`: 163 passed.
+- `pytest`: 183 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

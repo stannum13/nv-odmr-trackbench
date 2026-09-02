@@ -72,6 +72,39 @@ def test_zero_gaussian_noise_is_a_deterministic_control() -> None:
     assert result.realized_photons is None
 
 
+@pytest.mark.parametrize(
+    "noise",
+    [PoissonNoise(), GaussianNoise(stddev_at_1s=0.0)],
+)
+def test_stateless_noise_strategies_use_immutable_noop_checkpoints(
+    noise: PoissonNoise | GaussianNoise,
+) -> None:
+    checkpoint = noise.checkpoint()
+
+    assert checkpoint is None
+    noise.restore(checkpoint)
+
+
+def test_empirical_checkpoint_restores_only_mutable_replay_cursor_in_place() -> None:
+    noise = EmpiricalResidualNoise(
+        [-0.1, 0.25, 0.5],
+        mode="replay",
+        provenance=_provenance("replay"),
+    )
+    residuals = noise.residuals
+    provenance = noise.provenance
+    checkpoint = noise.checkpoint()
+
+    noise.sample(1.0, 10.0, 0.1, np.random.default_rng(99))
+    noise.restore(checkpoint)
+
+    assert noise.residuals.tolist() == residuals.tolist()
+    assert noise.provenance is provenance
+    assert noise.sample(1.0, 10.0, 0.1, np.random.default_rng(99)).fluorescence == (
+        pytest.approx(0.9)
+    )
+
+
 def test_empirical_replay_cycles_through_residual_order() -> None:
     noise = EmpiricalResidualNoise(
         [-0.1, 0.25, 0.5],

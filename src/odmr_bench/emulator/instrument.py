@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from numbers import Integral, Real
-from types import MappingProxyType
 from typing import Any
 
 import numpy as np
@@ -49,46 +48,15 @@ def _validate_noise(noise: object) -> None:
         raise ValueError("noise.sampling_rule must be a non-empty string")
 
 
-def _copy_state_value(value: object) -> object:
-    """Copy restorable strategy state or reject an unsafe noise strategy."""
-    if isinstance(value, MappingProxyType):
-        return value
-    try:
-        return deepcopy(value)
-    except (TypeError, ValueError) as error:
-        raise TypeError("noise state must be checkpointable") from error
-
-
-def _noise_state(noise: object) -> tuple[dict[str, object], dict[str, object] | None]:
-    """Return restorable slot and dictionary state for one noise strategy."""
-    slot_state: dict[str, object] = {}
-    for cls in type(noise).__mro__:
-        slots = getattr(cls, "__slots__", ())
-        if isinstance(slots, str):
-            slots = (slots,)
-        for name in slots:
-            if name not in {"__dict__", "__weakref__"} and hasattr(noise, name):
-                slot_state[name] = _copy_state_value(getattr(noise, name))
-    dictionary = getattr(noise, "__dict__", None)
-    dictionary_state = (
-        {name: _copy_state_value(value) for name, value in dictionary.items()}
-        if dictionary is not None
-        else None
-    )
-    return slot_state, dictionary_state
-
-
-def _restore_noise_state(
-    noise: object, state: tuple[dict[str, object], dict[str, object] | None]
-) -> None:
-    """Undo a failed strategy sample, including empirical replay cursors."""
-    slot_state, dictionary_state = state
-    for name, value in slot_state.items():
-        object.__setattr__(noise, name, value)
-    if dictionary_state is not None:
-        dictionary = noise.__dict__
-        dictionary.clear()
-        dictionary.update(dictionary_state)
+def _checkpoint_noise(noise: object) -> object:
+    """Capture opaque strategy state before sampling, or reject unsafe plugins."""
+    checkpoint = getattr(noise, "checkpoint", None)
+    restore = getattr(noise, "restore", None)
+    if not callable(checkpoint) or not callable(restore):
+        raise TypeError(
+            "noise must implement callable checkpoint/restore methods before sampling"
+        )
+    return checkpoint()
 
 
 class ODMRInstrument:
@@ -203,10 +171,11 @@ class ODMRInstrument:
         )
         expected_photons = _nonnegative_float(expected_photons, "expected_photons")
 
-        # Sampling can advance both the generator and a stateful empirical
-        # strategy.  Restore both if any validation/recording step fails.
+        # Sampling can advance both the generator and a stateful strategy.
+        # The explicit noise protocol restores aliases and externally held
+        # mutable objects in place if a query cannot commit.
         rng_state: dict[str, Any] = deepcopy(self._rng.bit_generator.state)
-        noise_state = _noise_state(self._noise)
+        noise_state = _checkpoint_noise(self._noise)
         try:
             noise_result = self._noise.sample(
                 expected_fluorescence,
@@ -239,7 +208,7 @@ class ODMRInstrument:
             )
         except Exception:
             self._rng.bit_generator.state = rng_state
-            _restore_noise_state(self._noise, noise_state)
+            self._noise.restore(noise_state)
             raise
 
         self._virtual_time_s = endpoint

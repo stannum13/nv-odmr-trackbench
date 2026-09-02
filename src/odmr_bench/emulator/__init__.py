@@ -2,6 +2,7 @@
 
 from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.emulator.noise import (
+    CheckpointableNoise,
     EmpiricalResidualNoise,
     GaussianNoise,
     NoiseResult,
@@ -14,6 +15,7 @@ from odmr_bench.emulator.observations import (
 from odmr_bench.emulator.resources import ResourceLedger, ResourceSnapshot
 
 __all__ = [
+    "CheckpointableNoise",
     "EmpiricalResidualNoise",
     "EstimatorObservation",
     "GaussianNoise",

@@ -6,9 +6,37 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Integral, Real
 from types import MappingProxyType
+from typing import Protocol, runtime_checkable
 
 import numpy as np
 from numpy.typing import ArrayLike
+
+
+@runtime_checkable
+class CheckpointableNoise(Protocol):
+    """Failure-atomic state protocol required by ``ODMRInstrument``.
+
+    ``checkpoint`` returns an opaque token immediately before a sample. If a
+    query cannot commit, ``restore(token)`` must put the *same strategy object*
+    back into its exact pre-sample state in place. Third-party mutable
+    strategies must preserve externally held object identities, aliases, and
+    mutable backing objects rather than replacing attributes with copied values.
+    The token is private to the strategy and is supplied only to its matching
+    ``restore`` call.
+
+    Stateless strategies still implement this protocol with immutable no-op
+    checkpoints. A third-party strategy without both methods is rejected before
+    ``sample`` is called, because arbitrary Python object graphs cannot be
+    rollback-safe by reflective copying.
+    """
+
+    def checkpoint(self) -> object:
+        """Return an opaque token representing the current sampling state."""
+        ...
+
+    def restore(self, checkpoint: object) -> None:
+        """Restore a token in place after an uncommitted query."""
+        ...
 
 
 def _finite_float(value: object, name: str) -> float:
@@ -81,6 +109,15 @@ class PoissonNoise:
 
     sampling_rule: str = "poisson"
 
+    def checkpoint(self) -> None:
+        """Return the immutable no-op checkpoint for this stateless strategy."""
+        return None
+
+    def restore(self, checkpoint: object) -> None:
+        """Restore a stateless checkpoint without replacing this object."""
+        if checkpoint is not None:
+            raise ValueError("invalid PoissonNoise checkpoint")
+
     def sample(
         self,
         expected_fluorescence: float,
@@ -119,6 +156,15 @@ class GaussianNoise:
         object.__setattr__(
             self, "stddev_at_1s", stddev_at_1s
         )
+
+    def checkpoint(self) -> None:
+        """Return the immutable no-op checkpoint for this stateless strategy."""
+        return None
+
+    def restore(self, checkpoint: object) -> None:
+        """Restore a stateless checkpoint without replacing this object."""
+        if checkpoint is not None:
+            raise ValueError("invalid GaussianNoise checkpoint")
 
     def sample(
         self,
@@ -252,6 +298,29 @@ class EmpiricalResidualNoise:
     def sampling_rule(self) -> str:
         """Return a rule that retains the selected residual correlation mode."""
         return f"empirical_{self.mode}"
+
+    def checkpoint(self) -> tuple[int, int, int]:
+        """Capture only mutable replay/block cursors for failure rollback."""
+        return self._cursor, self._block_start, self._block_offset
+
+    def restore(self, checkpoint: object) -> None:
+        """Restore mutable cursors in place without touching configuration."""
+        if (
+            not isinstance(checkpoint, tuple)
+            or len(checkpoint) != 3
+            or any(
+                isinstance(value, bool | np.bool_)
+                or not isinstance(value, Integral | np.integer)
+                for value in checkpoint
+            )
+        ):
+            raise TypeError("invalid EmpiricalResidualNoise checkpoint")
+        cursor, block_start, block_offset = (int(value) for value in checkpoint)
+        if cursor < 0 or block_start < 0 or block_offset < 0:
+            raise ValueError("invalid EmpiricalResidualNoise checkpoint")
+        object.__setattr__(self, "_cursor", cursor)
+        object.__setattr__(self, "_block_start", block_start)
+        object.__setattr__(self, "_block_offset", block_offset)
 
     def sample(
         self,
