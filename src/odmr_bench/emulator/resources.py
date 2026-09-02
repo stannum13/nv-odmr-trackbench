@@ -56,6 +56,54 @@ class ResourceSnapshot:
     observations_without_realized_counts: int
     virtual_elapsed_time_s: float
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "observations", _nonnegative_int(self.observations, "observations")
+        )
+        object.__setattr__(
+            self,
+            "integration_time_s",
+            _nonnegative_float(self.integration_time_s, "integration_time_s"),
+        )
+        object.__setattr__(
+            self,
+            "nominal_exposure_photons",
+            _nonnegative_float(
+                self.nominal_exposure_photons, "nominal_exposure_photons"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "expected_photons",
+            _nonnegative_float(self.expected_photons, "expected_photons"),
+        )
+        object.__setattr__(
+            self,
+            "realized_photons",
+            _nonnegative_int(self.realized_photons, "realized_photons"),
+        )
+        object.__setattr__(
+            self,
+            "observations_without_realized_counts",
+            _nonnegative_int(
+                self.observations_without_realized_counts,
+                "observations_without_realized_counts",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "virtual_elapsed_time_s",
+            _nonnegative_float(
+                self.virtual_elapsed_time_s, "virtual_elapsed_time_s"
+            ),
+        )
+        if self.observations_without_realized_counts > self.observations:
+            raise ValueError(
+                "observations_without_realized_counts cannot exceed observations"
+            )
+        if self.virtual_elapsed_time_s < self.integration_time_s:
+            raise ValueError("virtual_elapsed_time_s must include integration_time_s")
+
 
 class ResourceLedger:
     """Private mutable resource totals committed only after query success."""
@@ -103,15 +151,31 @@ class ResourceLedger:
             else _nonnegative_int(realized_photons, "realized_photons")
         )
 
-        self._observations += 1
-        self._integration_time_s += integration
-        self._nominal_exposure_photons += nominal
-        self._expected_photons += expected
-        self._virtual_elapsed_time_s += elapsed
-        if realized is None:
-            self._observations_without_realized_counts += 1
-        else:
-            self._realized_photons += realized
+        prospective = ResourceSnapshot(
+            observations=self._observations + 1,
+            integration_time_s=self._integration_time_s + integration,
+            nominal_exposure_photons=self._nominal_exposure_photons + nominal,
+            expected_photons=self._expected_photons + expected,
+            realized_photons=self._realized_photons
+            if realized is None
+            else self._realized_photons + realized,
+            observations_without_realized_counts=(
+                self._observations_without_realized_counts + 1
+                if realized is None
+                else self._observations_without_realized_counts
+            ),
+            virtual_elapsed_time_s=self._virtual_elapsed_time_s + elapsed,
+        )
+
+        self._observations = prospective.observations
+        self._integration_time_s = prospective.integration_time_s
+        self._nominal_exposure_photons = prospective.nominal_exposure_photons
+        self._expected_photons = prospective.expected_photons
+        self._realized_photons = prospective.realized_photons
+        self._observations_without_realized_counts = (
+            prospective.observations_without_realized_counts
+        )
+        self._virtual_elapsed_time_s = prospective.virtual_elapsed_time_s
 
     def snapshot(self) -> ResourceSnapshot:
         """Return a frozen copy of the completed acquisition totals."""

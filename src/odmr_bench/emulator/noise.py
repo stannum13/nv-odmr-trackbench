@@ -139,12 +139,13 @@ class EmpiricalResidualNoise:
 
     __slots__ = (
         "_block_offset",
+        "_block_size",
         "_block_start",
+        "_configuration_locked",
         "_cursor",
-        "block_size",
-        "mode",
-        "provenance",
-        "residuals",
+        "_mode",
+        "_provenance",
+        "_residuals",
     )
 
     _REQUIRED_PROVENANCE_KEYS = frozenset(
@@ -190,13 +191,49 @@ class EmpiricalResidualNoise:
             raise ValueError("block_size is only valid for block residual mode")
 
         values.setflags(write=False)
-        self.residuals = values
-        self.mode = mode
-        self.block_size = block_size
-        self.provenance = MappingProxyType(copied_provenance)
+        object.__setattr__(self, "_residuals", values)
+        object.__setattr__(self, "_mode", mode)
+        object.__setattr__(self, "_block_size", block_size)
+        object.__setattr__(self, "_provenance", MappingProxyType(copied_provenance))
         self._cursor = 0
         self._block_start = 0
         self._block_offset = 0
+        object.__setattr__(self, "_configuration_locked", True)
+
+    def __setattr__(self, name: str, value: object) -> None:
+        if getattr(self, "_configuration_locked", False) and name in {
+            "_block_size",
+            "_configuration_locked",
+            "_mode",
+            "_provenance",
+            "_residuals",
+            "block_size",
+            "mode",
+            "provenance",
+            "residuals",
+        }:
+            raise AttributeError("empirical residual configuration is immutable")
+        object.__setattr__(self, name, value)
+
+    @property
+    def residuals(self) -> np.ndarray:
+        """Return the defensively copied, read-only residual sequence."""
+        return self._residuals
+
+    @property
+    def mode(self) -> str:
+        """Return the fixed temporal-correlation mode."""
+        return self._mode
+
+    @property
+    def block_size(self) -> int | None:
+        """Return the fixed contiguous-block length, when applicable."""
+        return self._block_size
+
+    @property
+    def provenance(self) -> Mapping[str, str]:
+        """Return immutable residual-source provenance."""
+        return self._provenance
 
     @property
     def sampling_rule(self) -> str:

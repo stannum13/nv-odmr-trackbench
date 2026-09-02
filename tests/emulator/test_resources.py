@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from dataclasses import FrozenInstanceError
 
+import numpy as np
 import pytest
 
-from odmr_bench.emulator.resources import ResourceLedger
+from odmr_bench.emulator.resources import ResourceLedger, ResourceSnapshot
 
 
 def test_resource_ledger_accumulates_all_acquisition_dimensions() -> None:
@@ -44,6 +45,55 @@ def test_resource_snapshot_is_immutable() -> None:
 @pytest.mark.parametrize(
     "kwargs",
     [
+        {"observations": -1},
+        {"observations": True},
+        {"integration_time_s": float("nan")},
+        {"nominal_exposure_photons": float("inf")},
+        {"expected_photons": -0.1},
+        {"realized_photons": -1},
+        {"observations_without_realized_counts": 1.5},
+        {"virtual_elapsed_time_s": float("-inf")},
+        {"observations": 0, "observations_without_realized_counts": 1},
+        {"integration_time_s": 0.2, "virtual_elapsed_time_s": 0.1},
+    ],
+)
+def test_resource_snapshot_rejects_invalid_public_totals(
+    kwargs: dict[str, float | int | bool],
+) -> None:
+    values: dict[str, float | int | bool] = {
+        "observations": 0,
+        "integration_time_s": 0.0,
+        "nominal_exposure_photons": 0.0,
+        "expected_photons": 0.0,
+        "realized_photons": 0,
+        "observations_without_realized_counts": 0,
+        "virtual_elapsed_time_s": 0.0,
+    }
+    values.update(kwargs)
+
+    with pytest.raises((TypeError, ValueError)):
+        ResourceSnapshot(**values)
+
+
+def test_resource_snapshot_canonicalizes_valid_numeric_scalars() -> None:
+    snapshot = ResourceSnapshot(
+        observations=np.int64(1),
+        integration_time_s=np.float64(0.1),
+        nominal_exposure_photons=np.float64(2.0),
+        expected_photons=np.float64(1.9),
+        realized_photons=np.int64(2),
+        observations_without_realized_counts=np.int64(0),
+        virtual_elapsed_time_s=np.float64(0.2),
+    )
+
+    assert type(snapshot.observations) is int
+    assert type(snapshot.integration_time_s) is float
+    assert type(snapshot.realized_photons) is int
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
         {"integration_time_s": 0.0},
         {"nominal_exposure_photons": -0.1},
         {"expected_photons": float("nan")},
@@ -67,6 +117,24 @@ def test_invalid_commit_leaves_resource_ledger_unchanged(
     values.update(kwargs)
 
     with pytest.raises((TypeError, ValueError)):
+        ledger.record(**values)
+
+    assert ledger.snapshot() == before
+
+
+def test_overflowing_prospective_totals_leave_resource_ledger_unchanged() -> None:
+    ledger = ResourceLedger()
+    values = {
+        "integration_time_s": 1e308,
+        "nominal_exposure_photons": 1e308,
+        "expected_photons": 1e308,
+        "realized_photons": 1,
+        "virtual_elapsed_time_s": 1e308,
+    }
+    ledger.record(**values)
+    before = ledger.snapshot()
+
+    with pytest.raises(ValueError):
         ledger.record(**values)
 
     assert ledger.snapshot() == before

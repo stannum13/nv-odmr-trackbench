@@ -90,6 +90,39 @@ def test_empirical_replay_cycles_through_residual_order() -> None:
         noise.provenance["source_id"] = "mutated"  # type: ignore[index]
 
 
+def test_empirical_configuration_cannot_be_rebound_after_construction() -> None:
+    supplied_residuals = np.array([-0.1, 0.25, 0.5])
+    supplied_provenance = _provenance("replay")
+    noise = EmpiricalResidualNoise(
+        supplied_residuals,
+        mode="replay",
+        provenance=supplied_provenance,
+    )
+
+    supplied_residuals[0] = 99.0
+    supplied_provenance["source_id"] = "mutated-source"
+
+    with pytest.raises(AttributeError):
+        noise.mode = "sample"  # type: ignore[assignment]
+    with pytest.raises(AttributeError):
+        noise.block_size = 2  # type: ignore[assignment]
+    with pytest.raises(AttributeError):
+        noise.residuals = np.array([99.0])  # type: ignore[assignment]
+    with pytest.raises(AttributeError):
+        noise.provenance = _provenance("sample")  # type: ignore[assignment]
+    with pytest.raises(AttributeError):
+        noise._mode = "sample"  # type: ignore[attr-defined]
+    with pytest.raises(AttributeError):
+        noise._configuration_locked = False  # type: ignore[attr-defined]
+    with pytest.raises(ValueError):
+        noise.residuals[0] = 99.0
+
+    assert noise.mode == "replay"
+    assert noise.block_size is None
+    assert noise.residuals.tolist() == [-0.1, 0.25, 0.5]
+    assert noise.provenance["source_id"] == "generated-fixture-v1"
+
+
 def test_empirical_sample_draws_seeded_independent_residual_indices() -> None:
     residuals = np.array([-0.2, 0.0, 0.4])
     expected_rng = np.random.default_rng(11)
@@ -109,21 +142,25 @@ def test_empirical_sample_draws_seeded_independent_residual_indices() -> None:
     assert actual == pytest.approx(expected)
 
 
-def test_empirical_block_preserves_contiguous_order_and_wraps() -> None:
+def test_empirical_block_preserves_contiguous_order_across_boundaries() -> None:
     residuals = np.array([-0.2, 0.0, 0.3, 0.5])
     expected_rng = np.random.default_rng(17)
-    start = expected_rng.integers(0, residuals.size)
-    expected = [1.0 + residuals[(start + index) % residuals.size] for index in range(6)]
+    expected: list[float] = []
+    for index in range(7):
+        if index % 3 == 0:
+            start = expected_rng.integers(0, residuals.size)
+        expected.append(1.0 + residuals[(start + index % 3) % residuals.size])
     noise = EmpiricalResidualNoise(
         residuals,
         mode="block",
-        block_size=6,
+        block_size=3,
         provenance=_provenance("block"),
     )
+    actual_rng = np.random.default_rng(17)
 
     actual = [
-        noise.sample(1.0, 10.0, 0.1, np.random.default_rng(17)).fluorescence
-        for _ in range(6)
+        noise.sample(1.0, 10.0, 0.1, actual_rng).fluorescence
+        for _ in range(7)
     ]
 
     assert actual == pytest.approx(expected)
