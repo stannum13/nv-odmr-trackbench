@@ -16,8 +16,29 @@ Two benchmark modes are in scope:
   frequency to interrogate.
 
 The scientific contracts and fairness requirements are specified in
-[docs/scientific_spec.md](docs/scientific_spec.md). The installable package and
-CI scaffold are in place; executable spectral models are the current stage.
+[docs/scientific_spec.md](docs/scientific_spec.md).
+
+## Playback and synthetic-emulation proof of concept
+
+The package exposes three deterministic JSON commands:
+
+```bash
+odmrbench dataset-info
+odmrbench playback --path /explicit/local/ODMR_data.dat --max-observations 100
+odmrbench simulate --config configs/drift.yaml
+```
+
+`dataset-info` reports the checked optional Figshare record. `playback` parses
+only an explicit local raw file and preserves its row-major order; it does not
+download data, infer timestamps by default, or assign resolved raw units.
+`simulate` runs the bundled fixed schedule through a seeded, synthetic
+eight-resonance virtual instrument. Neither command fits or tracks resonances;
+estimators are the next stage.
+
+Read [docs/datasets.md](docs/datasets.md) before obtaining or replaying the
+optional CC BY data, including its explicit download URL, size, checksum, and
+metadata limitations. [docs/emulator.md](docs/emulator.md) describes the
+validated synthetic drift configuration and its virtual-time/photon summary.
 
 ## Planned first milestone
 

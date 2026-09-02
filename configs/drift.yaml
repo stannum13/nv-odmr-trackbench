@@ -1,0 +1,31 @@
+# Deterministic synthetic scenario for `odmrbench simulate`.
+# All frequencies are Hz; all durations and slew rates use seconds.
+baseline:
+  intercept: 1.0
+  reference_hz: 2870000000.0
+  slope_per_hz: 1.0e-11
+  quadratic_per_hz2: 0.0
+resonances:
+  - {id: r0, center_hz: 2805000000.0, fwhm_hz: 2500000.0, amplitude: 0.018, eta: 0.35}
+  - {id: r1, center_hz: 2825000000.0, fwhm_hz: 2700000.0, amplitude: 0.021, eta: 0.40}
+  - {id: r2, center_hz: 2845000000.0, fwhm_hz: 2900000.0, amplitude: 0.023, eta: 0.45}
+  - {id: r3, center_hz: 2865000000.0, fwhm_hz: 3100000.0, amplitude: 0.025, eta: 0.50}
+  - {id: r4, center_hz: 2875000000.0, fwhm_hz: 3100000.0, amplitude: 0.024, eta: 0.50}
+  - {id: r5, center_hz: 2895000000.0, fwhm_hz: 2900000.0, amplitude: 0.022, eta: 0.45}
+  - {id: r6, center_hz: 2915000000.0, fwhm_hz: 2700000.0, amplitude: 0.020, eta: 0.40}
+  - {id: r7, center_hz: 2935000000.0, fwhm_hz: 2500000.0, amplitude: 0.017, eta: 0.35}
+center_slew_hz_per_s: 2500.0
+noise:
+  kind: poisson
+nominal_photon_rate_hz: 500000.0
+frequency_overhead_s: 0.001
+seed: 20260903
+queries:
+  - {frequency_hz: 2805000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2825000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2845000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2865000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2875000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2895000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2915000000.0, integration_time_s: 0.005}
+  - {frequency_hz: 2935000000.0, integration_time_s: 0.005}

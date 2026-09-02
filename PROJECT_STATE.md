@@ -4,8 +4,8 @@ Last updated: 2026-09-03
 
 ## Current stage
 
-Stage 5 — Event-driven virtual instrument is complete. The playback and
-emulation proof-of-concept CLI is next.
+Stage 5 — Playback and synthetic-emulation proof-of-concept CLI is complete.
+Estimator implementation is next.
 
 ## Completed work
 
@@ -76,6 +76,11 @@ emulation proof-of-concept CLI is next.
 - Preserved seeded stochastic reproducibility across failed queries by restoring
   NumPy-generator and stateful-noise state; empirical replay remains usable
   without copying its immutable configuration.
+- Added deterministic JSON CLI summaries for checked optional-dataset metadata,
+  explicit-local raw playback, and a fixed seeded synthetic-drift scenario.
+- Added an explicit eight-resonance Poisson drift configuration, a download-free
+  in-memory playback/emulation example, and researcher-facing raw-data and
+  synthetic-emulation guidance.
 
 ## Important scientific and design decisions
 
@@ -109,7 +114,7 @@ emulation proof-of-concept CLI is next.
 
 ## Tests currently passing
 
-- `pytest`: 183 passed.
+- `pytest`: 187 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -122,16 +127,23 @@ emulation proof-of-concept CLI is next.
   functions are not yet modeled.
 - No benchmark results exist, so neither primary nor secondary hypothesis has
   supporting evidence.
+- Raw playback retains unresolved analog units and has no measured timestamps;
+  its CLI summary is not a photon-count or timing claim.
+- The fixed CLI emulator is synthetic. Its seeded output does not establish
+  estimator accuracy, realtime performance, or agreement with the recording.
 
 ## Known software limitations
 
 - End-to-end benchmark reproducibility has not yet been demonstrated beyond the
-  installable package, continuous-integration scaffold, and deterministic
-  configuration-generated spectrum fixture.
+  installable package, command smoke tests, and deterministic synthetic
+  configuration fixtures.
+- The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
+  schema and fixed query schedule; adaptive estimator orchestration is not yet
+  implemented.
 
 ## Next actions
 
-1. Add proof-of-concept playback and emulation CLI commands and their explicit
-   deterministic drift configuration.
+1. Implement estimators against the causal playback and estimator-safe virtual
+   observation interfaces.
 2. Exercise the deterministic linear-drift scenario before the matched-budget
    full-sweep versus sparse-tracker milestone.

@@ -27,6 +27,13 @@ once a package version is introduced.
 
 ### Added
 
+- `odmrbench dataset-info`, explicit-local `odmrbench playback`, and
+  YAML-driven `odmrbench simulate` commands with sorted, finite JSON summaries.
+  The commands distinguish unverified raw recorded signal from seeded synthetic
+  emulation and make no fitted-tracking or performance claim.
+- An eight-resonance linear-drift, Poisson-noise configuration; optional-dataset
+  provenance/limitation documentation; synthetic-emulator documentation; and a
+  small in-memory playback/emulation example that never downloads external data.
 - Event-driven `ODMRInstrument` queries with overhead-before-integration
   virtual-time sequencing, midpoint hidden-truth evaluation, end timestamps,
   normalized-fluorescence photon accounting, and no wall-clock dependency.
