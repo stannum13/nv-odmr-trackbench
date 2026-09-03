@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
@@ -94,8 +95,15 @@ def _optional_positive_float(value: object, name: str) -> float | None:
 def _copied_float64_array(value: ArrayLike, name: str) -> NDArray[np.float64]:
     """Copy a numeric array before its caller applies contract-specific checks."""
     try:
-        canonical = np.array(value, dtype=np.float64, copy=True)
-    except (TypeError, ValueError) as exc:
+        raw = np.asarray(value)
+        if np.iscomplexobj(raw) or (
+            raw.dtype == object and any(np.iscomplexobj(item) for item in raw.ravel())
+        ):
+            raise TypeError(f"{name} must not contain complex values")
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", np.exceptions.ComplexWarning)
+            canonical = np.array(raw, dtype=np.float64, copy=True)
+    except (TypeError, ValueError, np.exceptions.ComplexWarning) as exc:
         raise TypeError(f"{name} must be a numeric array") from exc
     return canonical
 
@@ -525,6 +533,12 @@ class SpectrumFitResult:
             baseline_estimate = None
 
         initial_guess = _copy_initial_guess(self.initial_guess)
+        if (
+            self.model_kind == "lorentzian"
+            and initial_guess is not None
+            and any(resonance.eta != 1.0 for resonance in initial_guess.resonances)
+        ):
+            raise ValueError("lorentzian guesses require eta equal to one")
         if not success and failure_code in {
             "initialization_failed",
             "insufficient_samples",
@@ -576,9 +590,21 @@ class SpectrumFitResult:
         jacobian_rank = _optional_int(self.jacobian_rank, "jacobian_rank")
         if jacobian_rank is not None and jacobian_rank < 0:
             raise ValueError("jacobian_rank must be non-negative")
+        free_parameters = _free_parameter_count(self.model_kind, baseline_degree)
+        if jacobian_rank is not None and jacobian_rank > free_parameters:
+            raise ValueError("jacobian_rank cannot exceed the free parameter count")
 
         if not success:
             assert failure_code is not None
+            if failure_code == "insufficient_samples":
+                if degrees_of_freedom > 0:
+                    raise ValueError(
+                        "insufficient_samples requires non-positive degrees_of_freedom"
+                    )
+            elif degrees_of_freedom <= 0:
+                raise ValueError(
+                    "non-scarcity failures require positive degrees_of_freedom"
+                )
             if failure_code in {
                 "initialization_failed",
                 "insufficient_samples",
@@ -614,7 +640,6 @@ class SpectrumFitResult:
                 if residual_scale is None or cost is None or residual_rmse is None:
                     raise ValueError("quality_failed requires finite residual fields")
         else:
-            free_parameters = _free_parameter_count(self.model_kind, baseline_degree)
             if residual_scale is None or cost is None or residual_rmse is None:
                 raise ValueError("successful results require residual fields")
             if degrees_of_freedom <= 0:

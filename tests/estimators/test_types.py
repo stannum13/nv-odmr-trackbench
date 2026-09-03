@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 from numpy.testing import assert_array_equal
@@ -109,6 +111,23 @@ def test_complete_sweep_preserves_all_samples_without_sorting_or_deduplication()
 
     assert_array_equal(sweep.frequency_hz, frequency_hz)
     assert_array_equal(sweep.fluorescence, fluorescence)
+
+
+@pytest.mark.parametrize("complex_field", ["frequency_hz", "fluorescence"])
+def test_complete_sweep_rejects_complex_arrays_without_silent_projection(
+    complex_field: str,
+) -> None:
+    frequency_hz, fluorescence = _valid_arrays()
+    values: dict[str, np.ndarray] = {
+        "frequency_hz": frequency_hz,
+        "fluorescence": fluorescence,
+    }
+    values[complex_field] = values[complex_field].astype(np.complex128) + 1j
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", np.exceptions.ComplexWarning)
+        with pytest.raises(TypeError):
+            CompleteSweep(**values)
 
 
 def _configuration(**overrides: object) -> FitConfiguration:
@@ -309,6 +328,28 @@ def test_fit_uncertainty_copies_freezes_and_validates_shapes() -> None:
         FitUncertainty(np.ones(2), np.ones(7), np.ones(8), np.ones(8), None)
 
 
+@pytest.mark.parametrize(
+    "complex_field",
+    ["baseline_standard_errors", "center_hz", "fwhm_hz", "amplitude", "eta"],
+)
+def test_fit_uncertainty_rejects_complex_arrays_without_silent_projection(
+    complex_field: str,
+) -> None:
+    values: dict[str, np.ndarray] = {
+        "baseline_standard_errors": np.ones(2),
+        "center_hz": np.ones(8),
+        "fwhm_hz": np.ones(8),
+        "amplitude": np.ones(8),
+        "eta": np.ones(8),
+    }
+    values[complex_field] = values[complex_field].astype(np.complex128) + 1j
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", np.exceptions.ComplexWarning)
+        with pytest.raises(TypeError):
+            FitUncertainty(**values)
+
+
 def _success_result(**overrides: object) -> SpectrumFitResult:
     values: dict[str, object] = {
         "success": True,
@@ -349,6 +390,28 @@ def test_successful_fit_derives_read_only_signed_q_and_snapshots_guess() -> None
     assert result.initial_guess == initial_guess
 
 
+def test_lorentzian_result_rejects_a_retained_guess_with_nonunit_eta() -> None:
+    lorentzian_resonances = tuple(
+        Resonance(
+            resonance_id=resonance.resonance_id,
+            center_hz=resonance.center_hz,
+            fwhm_hz=resonance.fwhm_hz,
+            amplitude=resonance.amplitude,
+            eta=1.0,
+        )
+        for resonance in _resonances()
+    )
+
+    with pytest.raises(ValueError):
+        _success_result(
+            model_kind="lorentzian",
+            resonance_estimates=lorentzian_resonances,
+            initial_guess=_initial_guess(),
+            uncertainty=_uncertainty(),
+            jacobian_rank=26,
+        )
+
+
 @pytest.mark.parametrize(
     "failure_code",
     [
@@ -383,6 +446,7 @@ def test_failure_result_has_no_final_estimates_or_uncertainty(
         residual_scale=0.1
         if failure_code not in {"insufficient_samples", "uninformative_sweep"}
         else None,
+        degrees_of_freedom=0 if failure_code == "insufficient_samples" else 100,
         jacobian_rank=10 if failure_code == "quality_failed" else None,
     )
 
@@ -447,11 +511,68 @@ def test_failure_result_rejects_the_failure_state_matrix(
         "residual_scale": 0.1
         if failure_code not in {"insufficient_samples", "uninformative_sweep"}
         else None,
+        "degrees_of_freedom": 0 if failure_code == "insufficient_samples" else 100,
         "jacobian_rank": 10 if failure_code == "quality_failed" else None,
     }
     values.update(overrides)
     with pytest.raises((TypeError, ValueError)):
         _success_result(**values)
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "degrees_of_freedom"),
+    [
+        ("initialization_failed", 0),
+        ("uninformative_sweep", 0),
+        ("optimization_failed", 0),
+        ("quality_failed", 0),
+        ("insufficient_samples", 1),
+    ],
+)
+def test_failure_result_enforces_degrees_of_freedom_state_semantics(
+    failure_code: str, degrees_of_freedom: int
+) -> None:
+    optimizer_attempted = failure_code in {"optimization_failed", "quality_failed"}
+    with pytest.raises(ValueError):
+        _success_result(
+            success=False,
+            failure_code=failure_code,
+            resonance_estimates=(),
+            baseline_estimate=None,
+            initial_guess=_initial_guess() if optimizer_attempted else None,
+            uncertainty=None,
+            uncertainty_reason="not available",
+            scipy_status=1 if optimizer_attempted else None,
+            scipy_message="stopped" if optimizer_attempted else None,
+            nfev=1 if optimizer_attempted else 0,
+            cost=0.01 if optimizer_attempted else None,
+            residual_rmse=0.02 if optimizer_attempted else None,
+            residual_scale=0.1
+            if failure_code not in {"insufficient_samples", "uninformative_sweep"}
+            else None,
+            degrees_of_freedom=degrees_of_freedom,
+            jacobian_rank=10 if failure_code == "quality_failed" else None,
+        )
+
+
+def test_quality_failed_result_rejects_rank_above_its_free_parameter_count() -> None:
+    with pytest.raises(ValueError):
+        _success_result(
+            success=False,
+            failure_code="quality_failed",
+            resonance_estimates=(),
+            baseline_estimate=None,
+            initial_guess=_initial_guess(),
+            uncertainty=None,
+            uncertainty_reason="rank check failed",
+            scipy_status=1,
+            scipy_message="stopped",
+            nfev=1,
+            cost=0.01,
+            residual_rmse=0.02,
+            residual_scale=0.1,
+            jacobian_rank=35,
+        )
 
 
 def test_sweep_estimate_canonicalizes_completion_metadata_for_a_failure() -> None:
