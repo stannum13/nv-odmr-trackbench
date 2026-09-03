@@ -1,11 +1,11 @@
 # Project State
 
-Last updated: 2026-09-03
+Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 design — Offline oracle and repeated full-sweep fit design approved;
-written specification is awaiting final review before implementation planning.
+Stage 6.1 implementation — The offline oracle/full-sweep plan passed its final
+adversarial review and Task 1 immutable contracts are next.
 
 ## Completed work
 
@@ -89,6 +89,20 @@ written specification is awaiting final review before implementation planning.
 - Approved a six-stage estimator sequence and specified Stage 6.1: constrained
   offline Lorentzian/pseudo-Voigt oracle plus an independent repeated-sweep
   baseline.
+- Added the task-by-task Stage 6.1 implementation plan covering immutable fit
+  contracts, deterministic initialization, constrained fitting/uncertainty,
+  and the cold-start repeated full-sweep estimator.
+- Corrected the plan after adversarial review by defining the fit-failure state
+  machine, full-rank quality gate, scaled-to-public covariance transform, exact
+  center bounds, public schemas, initializer formulas, and fixed regressions.
+- Corrected the second review findings with additive-offset-invariant
+  fluorescence scaling, one-cutoff SVD covariance, an exact baseline-only SSE
+  reference, feasible fallback geometry/fixture, a denser scan grid, immutable
+  initial-guess provenance, and a typed failure-field matrix.
+- Defined pre-initialization `uninformative_sweep` handling for zero-variation
+  data and corrected the final smoke-test paths and affine-scaling fixture rules.
+- Separated exact identical-input repeatability from physically negligible
+  affine-representation roundoff and SciPy termination details.
 
 ## Important scientific and design decisions
 
@@ -153,7 +167,7 @@ written specification is awaiting final review before implementation planning.
 
 ## Next actions
 
-1. Review the written Stage 6.1 design and create its test-driven implementation
-   plan.
-2. Implement and validate the offline oracle and repeated full-sweep baseline.
-3. Design Stage 6.2 warm-started causal sweep fitting.
+1. Implement and independently review the Stage 6.1 immutable fit contracts.
+2. Continue through deterministic initialization, constrained fitting, and the
+   repeated cold-start sweep wrapper.
+3. Run the integrated oracle/full-sweep verification gate.

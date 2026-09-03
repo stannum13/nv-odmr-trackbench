@@ -41,6 +41,20 @@ once a package version is introduced.
 - Approved six-stage estimator-benchmark decomposition and detailed Stage 6.1
   design for constrained eight-resonance offline fitting and an independent
   repeated full-sweep baseline.
+- Added the test-driven Stage 6.1 oracle/full-sweep implementation plan.
+- Hardened that plan after internal scientific review with explicit
+  identifiability/failure rules, public-unit covariance transformation, exact
+  ordered-center bounds, deterministic initializer formulas, public schemas,
+  and numerical regression fixtures.
+- Closed its second review findings with affine fluorescence scaling, a shared
+  SVD cutoff for rank and covariance, an exact baseline-only quality reference,
+  feasible fallback geometry, immutable initial-guess provenance, and explicit
+  failure-field invariants.
+- Added explicit zero-variation sweep failure semantics and fully pinned the
+  Stage 6.1 clean-environment verification commands.
+- Separated algebraic affine-scaling tests from optimizer-level scientific
+  equivalence tolerances so harmless floating-point termination changes are not
+  treated as scientific failures.
 
 - Packaged the deterministic drift configuration for wheel-only,
   arbitrary-working-directory use via

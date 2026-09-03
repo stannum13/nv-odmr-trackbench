@@ -147,7 +147,17 @@ recorded in fit metadata. Warm-start behavior belongs to Stage 6.2.
 ### Optimization and result
 
 Use `scipy.optimize.least_squares` with bounded parameters and residual scaling
-appropriate to the declared fluorescence units. A `SpectrumFitResult` contains:
+appropriate to the declared fluorescence units. Scaling separates a fixed
+data-derived origin `y_ref = median(y)` from the signal-variation scale
+`S = ptp(y)`: the packed intercept is `(b0-y_ref)/S`, spectral amplitudes and
+baseline variation use `S`, and a zero/non-finite variation is rejected before
+initialization and optimization as a structured `uninformative_sweep` failure.
+That preflight does not retain an unused auto, fallback, or user guess.
+Consequently, in exact arithmetic adding a constant fluorescence offset does
+not change the spectral residual Jacobian. Finite-precision offset
+representations may change SciPy's discrete termination status or evaluation
+count without changing the public scientific success/rank decision. A
+`SpectrumFitResult` contains:
 
 - model kind and baseline degree;
 - eight immutable resonance estimates with stable output IDs;
@@ -156,19 +166,52 @@ appropriate to the declared fluorescence units. A `SpectrumFitResult` contains:
 - success flag, termination status/message, evaluation count, and cost;
 - residual RMSE and degrees of freedom;
 - initialization diagnostics, including fallback use; and
+- an immutable snapshot of the exact initial guess used for any optimizer
+  attempt; and
 - optional standard errors derived from the final Jacobian.
 
-Jacobian uncertainties are reported only when the Jacobian has adequate rank,
-degrees of freedom are positive, and the covariance approximation is finite.
-They are labeled local linearized fit uncertainties, not experimental coverage
-guarantees. Otherwise the uncertainty fields are `None` with a diagnostic
-reason.
+Jacobian uncertainties are reported only when the Jacobian has full numerical
+column rank under the configured deterministic relative singular-value
+tolerance, degrees of freedom are positive, and the covariance approximation
+is finite. Rank and covariance reuse one SVD and exactly the same singular-value
+cutoff rather than forming a separately truncated normal-matrix pseudoinverse.
+Full numerical rank and positive degrees of freedom are Stage 6.1
+fit-success requirements, not merely uncertainty requirements. This prevents a
+flat or under-resolved fallback fit from being reported as an identified
+eight-line solution.
+
+Optimization uses dimensionless scaled parameters and residuals, but public
+uncertainty never remains in optimizer coordinates. With the public baseline
+reference fixed to the sweep midpoint, the fitter computes the complete linear
+map from packed parameters to public intercept, per-Hz slope, per-Hz²
+quadratic, amplitude, center Hz, FWHM Hz, and eta. It transforms the full
+covariance as `C_public = T @ C_packed @ T.T` before extracting standard errors.
+The reported fit cost is converted to raw squared-fluorescence units and
+residual RMSE to fluorescence units. Uncertainties are labeled local linearized fit uncertainties, not
+experimental coverage guarantees. If covariance is non-finite after the public
+transform, uncertainty is `None` with a diagnostic reason and the otherwise
+identified fit may remain successful.
 
 An optimizer termination flag alone is insufficient for scientific success.
 The result is unsuccessful when parameters are non-finite, bounds are violated,
-center ordering fails, the residual is non-finite, or the configured quality
-checks fail. Failed results retain diagnostics but expose no plausible-looking
-parameter estimate as a successful observation.
+center ordering/separation fails, residuals are non-finite, degrees of freedom
+are non-positive, the Jacobian is rank deficient, any line is below the
+configured resolved-amplitude threshold, or the fit fails the configured
+minimum improvement over a baseline-only model. Failed results retain
+diagnostics but expose no plausible-looking parameter estimate as a successful
+observation.
+
+Initialization follows one explicit state machine. No guess means
+`initialization_failed` and SciPy is not called. An explicitly enabled fallback
+guess may reach optimization and records `used_fallback`; low candidate count
+then remains diagnostic rather than forcing failure. The same post-fit rank,
+amplitude, separation, and baseline-improvement checks apply, so fallback can
+recover an identifiable eight-line spectrum missed by conservative detection
+but cannot turn flat or seven-line data into a successful oracle result.
+Evenly spaced fallback is constructed only when the usable span after edge
+margins is strictly greater than seven minimum separations, ensuring every
+ordered-center constraint box has positive width; otherwise initialization
+fails explicitly.
 
 ### Repeated full-sweep estimator
 
