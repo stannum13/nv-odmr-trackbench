@@ -38,6 +38,10 @@ once a package version is introduced.
 
 ### Added
 
+- Approved six-stage estimator-benchmark decomposition and detailed Stage 6.1
+  design for constrained eight-resonance offline fitting and an independent
+  repeated full-sweep baseline.
+
 - Packaged the deterministic drift configuration for wheel-only,
   arbitrary-working-directory use via
   `odmrbench simulate --config bundled:drift`; CI verifies wheel contents and a

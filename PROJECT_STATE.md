@@ -4,8 +4,8 @@ Last updated: 2026-09-03
 
 ## Current stage
 
-Stage 5 — Playback and synthetic-emulation proof-of-concept CLI is complete.
-Estimator implementation is next.
+Stage 6.1 design — Offline oracle and repeated full-sweep fit design approved;
+written specification is awaiting final review before implementation planning.
 
 ## Completed work
 
@@ -86,6 +86,9 @@ Estimator implementation is next.
 - Added an explicit eight-resonance Poisson drift configuration, a download-free
   in-memory playback/emulation example, and researcher-facing raw-data and
   synthetic-emulation guidance.
+- Approved a six-stage estimator sequence and specified Stage 6.1: constrained
+  offline Lorentzian/pseudo-Voigt oracle plus an independent repeated-sweep
+  baseline.
 
 ## Important scientific and design decisions
 
@@ -150,7 +153,7 @@ Estimator implementation is next.
 
 ## Next actions
 
-1. Implement estimators against the causal playback and estimator-safe virtual
-   observation interfaces.
-2. Exercise the deterministic linear-drift scenario before the matched-budget
-   full-sweep versus sparse-tracker milestone.
+1. Review the written Stage 6.1 design and create its test-driven implementation
+   plan.
+2. Implement and validate the offline oracle and repeated full-sweep baseline.
+3. Design Stage 6.2 warm-started causal sweep fitting.
