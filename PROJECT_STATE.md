@@ -4,8 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 implementation — The offline oracle/full-sweep plan passed its final
-adversarial review and Task 1 immutable contracts are next.
+Stage 6.1 implementation — Task 1 immutable sweep, configuration, and result
+contracts are complete; deterministic initialization is next.
 
 ## Completed work
 
@@ -103,6 +103,11 @@ adversarial review and Task 1 immutable contracts are next.
   data and corrected the final smoke-test paths and affine-scaling fixture rules.
 - Separated exact identical-input repeatability from physically negligible
   affine-representation roundoff and SciPy termination details.
+- Added immutable validated full-sweep, fitting-configuration, initialization,
+  uncertainty, fit-result, and per-sweep-estimate contracts for the offline
+  oracle. Result records enforce the structured failure state machine, preserve
+  attempted-guess provenance, and derive read-only signed Q values from public
+  fitted centers and FWHM values without estimator access to hidden truth.
 
 ## Important scientific and design decisions
 
@@ -136,7 +141,7 @@ adversarial review and Task 1 immutable contracts are next.
 
 ## Tests currently passing
 
-- `pytest`: 200 passed.
+- `pytest`: 295 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

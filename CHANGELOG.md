@@ -38,6 +38,12 @@ once a package version is introduced.
 
 ### Added
 
+- Frozen, slotted estimator contracts for complete sweeps, constrained fit
+  configuration, initial guesses, initializer diagnostics, local covariance
+  uncertainties, structured spectrum-fit outcomes, and sweep-level resource
+  totals. Arrays are defensive float64 read-only copies; fit failures preserve
+  diagnostics without final estimates or uncertainty, and fitted Q values are
+  derived directly as signed center/FWHM values.
 - Approved six-stage estimator-benchmark decomposition and detailed Stage 6.1
   design for constrained eight-resonance offline fitting and an independent
   repeated full-sweep baseline.
