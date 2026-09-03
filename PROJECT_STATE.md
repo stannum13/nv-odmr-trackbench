@@ -4,8 +4,9 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 implementation — Task 2 deterministic baseline-aware initialization
-is complete; independent review and constrained fitting are next.
+Stage 6.1 implementation — Task 3 constrained Lorentzian and pseudo-Voigt
+oracle fitting is complete; independent review and the repeated cold-start
+sweep wrapper are next.
 
 ## Completed work
 
@@ -117,6 +118,13 @@ is complete; independent review and constrained fitting are next.
   signal-scaled floating-point discovery floor rejects polynomial/smoothing
   roundoff, while overflow-safe frequency normalization supports extreme finite
   same-sign and opposite-sign endpoints.
+- Added deterministic bounded Lorentzian and pseudo-Voigt oracle fitting with
+  dimensionless frequency/fluorescence scaling, midpoint-referenced linear or
+  quadratic baselines, exact non-crossing center boxes, structured scientific
+  failures, raw-unit residual diagnostics, full-rank quality gates, and
+  public-unit local-linearized covariance from one shared SVD cutoff. Fixed
+  regressions cover clean/noisy recovery, affine fluorescence changes,
+  initialization/fallback behavior, and exact baseline-improvement boundaries.
 
 ## Important scientific and design decisions
 
@@ -150,7 +158,7 @@ is complete; independent review and constrained fitting are next.
 
 ## Tests currently passing
 
-- `pytest`: 333 passed.
+- `pytest`: 393 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -181,7 +189,6 @@ is complete; independent review and constrained fitting are next.
 
 ## Next actions
 
-1. Independently review deterministic baseline-aware initialization.
-2. Continue through constrained fitting and the repeated cold-start sweep
-   wrapper.
+1. Independently review constrained oracle fitting.
+2. Implement the repeated cold-start sweep wrapper and researcher guidance.
 3. Run the integrated oracle/full-sweep verification gate.

@@ -38,6 +38,14 @@ once a package version is introduced.
 
 ### Added
 
+- Constrained eight-resonance Lorentzian and pseudo-Voigt oracle fitting with
+  scaled bounded parameters, midpoint-fixed linear/quadratic baselines,
+  deterministic TRF optimization, non-crossing center boxes, structured
+  preflight/optimization/quality failures, exact baseline-only SSE gating,
+  raw-fluorescence diagnostics, and public-unit local-linearized uncertainties
+  derived from one scaled-Jacobian SVD. Regression coverage includes clean and
+  noisy recovery, affine fluorescence invariance, deterministic initialization,
+  explicit fallback honesty, parameter validation, and repeatability.
 - Deterministic baseline-aware initialization for complete sweeps, including
   three robust baseline-rejection updates and a final discovery fit, physical-
   frequency candidate separation and linewidth interpolation on nonuniform
