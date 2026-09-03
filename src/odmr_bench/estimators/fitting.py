@@ -107,6 +107,11 @@ def _preoptimization_failure(
     *,
     residual_scale: float | None = None,
 ) -> SpectrumFitResult:
+    reason = (
+        diagnostics.messages[-1]
+        if diagnostics.messages
+        else f"{failure_code.replace('_', ' ')} before optimization"
+    )
     return SpectrumFitResult(
         success=False,
         failure_code=failure_code,
@@ -117,7 +122,7 @@ def _preoptimization_failure(
         diagnostics=diagnostics,
         initial_guess=None,
         uncertainty=None,
-        uncertainty_reason=diagnostics.messages[-1],
+        uncertainty_reason=reason,
         scipy_status=None,
         scipy_message=None,
         nfev=0,
@@ -176,7 +181,52 @@ def _validate_guess(
     )
     if np.any(packed < lower) or np.any(packed > upper):
         raise ValueError("guess parameters must lie inside optimizer bounds")
+    if (
+        not np.all(np.isfinite(packed))
+        or not np.all(np.isfinite(lower))
+        or not np.all(np.isfinite(upper))
+        or np.any(lower >= upper)
+    ):
+        raise ValueError("numerical parameterization must have finite strict bounds")
     return packed, lower, upper
+
+
+def _append_diagnostic_message(
+    diagnostics: InitializationDiagnostics, message: str
+) -> InitializationDiagnostics:
+    return InitializationDiagnostics(
+        source=diagnostics.source,
+        candidate_count=diagnostics.candidate_count,
+        selected_indices=diagnostics.selected_indices,
+        used_fallback=diagnostics.used_fallback,
+        messages=(*diagnostics.messages, message),
+    )
+
+
+def _public_parameters_valid(
+    fitted: FitInitialGuess,
+    configuration: FitConfiguration,
+    frequency_min_hz: float,
+    frequency_max_hz: float,
+) -> bool:
+    resonances = fitted.resonances
+    centers = np.asarray([item.center_hz for item in resonances])
+    widths = np.asarray([item.fwhm_hz for item in resonances])
+    amplitudes = np.asarray([item.amplitude for item in resonances])
+    etas = np.asarray([item.eta for item in resonances])
+    return bool(
+        np.all(centers >= frequency_min_hz)
+        and np.all(centers <= frequency_max_hz)
+        and np.all(np.diff(centers) > 0.0)
+        and np.all(np.diff(centers) >= configuration.min_center_separation_hz)
+        and np.all(widths >= configuration.min_fwhm_hz)
+        and np.all(widths <= configuration.max_fwhm_hz)
+        and np.all(amplitudes >= 0.0)
+        and np.all(amplitudes <= configuration.max_amplitude)
+        and np.all(etas >= 0.0)
+        and np.all(etas <= 1.0)
+        and (configuration.model_kind == "pseudo_voigt" or np.all(etas == 1.0))
+    )
 
 
 def _scaled_residual_function(
@@ -284,7 +334,6 @@ def fit_spectrum(
     frequency_max = float(sweep.frequency_hz[-1])
     frequency_reference = frequency_min / 2.0 + frequency_max / 2.0
     frequency_half_span = frequency_max / 2.0 - frequency_min / 2.0
-    fluorescence_reference = float(np.median(sweep.fluorescence))
     with np.errstate(over="ignore", invalid="ignore"):
         fluorescence_scale = float(np.ptp(sweep.fluorescence))
     if not np.isfinite(fluorescence_scale) or fluorescence_scale == 0.0:
@@ -292,6 +341,19 @@ def fit_spectrum(
             configuration,
             "uninformative_sweep",
             _empty_diagnostics("fluorescence variation is zero or non-finite"),
+            degrees_of_freedom,
+        )
+    fluorescence_anchor = float(sweep.fluorescence[0])
+    with np.errstate(over="ignore", invalid="ignore"):
+        shifted_fluorescence = sweep.fluorescence - fluorescence_anchor
+        fluorescence_reference = float(
+            fluorescence_anchor + np.median(shifted_fluorescence)
+        )
+    if not np.isfinite(fluorescence_reference):
+        return _preoptimization_failure(
+            configuration,
+            "uninformative_sweep",
+            _empty_diagnostics("fluorescence origin is non-finite numerically"),
             degrees_of_freedom,
         )
 
@@ -327,9 +389,12 @@ def fit_spectrum(
             fluorescence_reference=fluorescence_reference,
             fluorescence_scale=fluorescence_scale,
         )
-    except ValueError:
+    except ValueError as error:
         if initial_guess is not None:
             raise
+        diagnostics = _append_diagnostic_message(
+            diagnostics, f"initial guess preflight failed: {error}"
+        )
         return _preoptimization_failure(
             configuration,
             "initialization_failed",
@@ -364,7 +429,7 @@ def fit_spectrum(
         and raw_cost is not None
         and residual_rmse is not None
     )
-    if not optimization.success or not finite_solution:
+    if not optimization.success:
         return SpectrumFitResult(
             success=False,
             failure_code="optimization_failed",
@@ -376,6 +441,29 @@ def fit_spectrum(
             initial_guess=guess,
             uncertainty=None,
             uncertainty_reason="optimizer did not return a finite successful solution",
+            scipy_status=int(optimization.status),
+            scipy_message=str(optimization.message),
+            nfev=int(optimization.nfev),
+            cost=raw_cost,
+            residual_rmse=residual_rmse,
+            residual_scale=fluorescence_scale,
+            degrees_of_freedom=degrees_of_freedom,
+            jacobian_rank=None,
+        )
+    if not finite_solution:
+        return SpectrumFitResult(
+            success=False,
+            failure_code="quality_failed",
+            model_kind=configuration.model_kind,
+            baseline_degree=configuration.baseline_degree,
+            resonance_estimates=(),
+            baseline_estimate=None,
+            diagnostics=diagnostics,
+            initial_guess=guess,
+            uncertainty=None,
+            uncertainty_reason=(
+                "optimizer returned non-finite parameters, residuals, or cost"
+            ),
             scipy_status=int(optimization.status),
             scipy_message=str(optimization.message),
             nfev=int(optimization.nfev),
@@ -441,6 +529,9 @@ def fit_spectrum(
     amplitudes = np.asarray([item.amplitude for item in fitted.resonances])
     fitted_values = np.asarray(optimization.x, dtype=np.float64)
     bounds_valid = np.all(fitted_values >= lower) and np.all(fitted_values <= upper)
+    public_bounds_valid = _public_parameters_valid(
+        fitted, configuration, frequency_min, frequency_max
+    )
     separated = np.all(np.diff(centers) >= configuration.min_center_separation_hz)
     resolved = np.all(amplitudes >= configuration.min_resolved_amplitude)
     baseline_sse = _baseline_only_sse(
@@ -457,6 +548,8 @@ def fit_spectrum(
         quality_reasons.append("scaled Jacobian is not full column rank")
     if not bounds_valid:
         quality_reasons.append("fitted parameters violate configured bounds")
+    if not public_bounds_valid:
+        quality_reasons.append("public fitted parameters violate configured bounds")
     if not separated:
         quality_reasons.append("fitted centers violate minimum separation")
     if not resolved:

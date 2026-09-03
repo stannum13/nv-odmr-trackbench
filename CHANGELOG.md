@@ -10,6 +10,12 @@ once a package version is introduced.
 
 ### Changed
 
+- Hardened constrained oracle fitting against empty initialization reasons,
+  rounded public-bound violations, unrepresentable center separations,
+  quadratic-scaling overflow, collapsed optimizer bounds, and extreme finite
+  fluorescence origins. Successful optimizer termination with non-finite
+  outputs is now an explicit metric-less `quality_failed`, while unsuccessful
+  termination remains `optimization_failed`.
 - Built-in Poisson and Gaussian noise strategies now fix their recorded
   sampling-rule provenance at construction, and public Figshare attribution
   consistently uses the checked creator string, `Liu`.

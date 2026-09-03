@@ -10,6 +10,11 @@ from numpy.typing import ArrayLike, NDArray
 from odmr_bench.estimators.types import FitConfiguration, FitInitialGuess
 from odmr_bench.models import Baseline, Resonance
 
+# Scaled baseline coordinates are expected to be order unity. This finite limit
+# remains scientifically nonbinding while avoiding overflow in TRF's internal
+# products of distances to bounds.
+_FINITE_BOUND = 1.0e6
+
 
 def _normalization_values(
     frequency_reference_hz: float,
@@ -54,7 +59,13 @@ def pack_parameters(
         guess.baseline.slope_per_hz * half_span / scale,
     ]
     if configuration.baseline_degree == 2:
-        packed.append(guess.baseline.quadratic_per_hz2 * half_span * half_span / scale)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            quadratic = (guess.baseline.quadratic_per_hz2 * half_span) * (
+                half_span / scale
+            )
+        if not np.isfinite(quadratic):
+            raise ValueError("quadratic packing failed numerically")
+        packed.append(quadratic)
     elif guess.baseline.quadratic_per_hz2 != 0.0:
         raise ValueError("linear baseline guesses require zero quadratic coefficient")
 
@@ -95,15 +106,20 @@ def unpack_parameters(
     if not np.all(np.isfinite(values)) or not np.isfinite(y_reference):
         raise ValueError("packed parameters and fluorescence_reference must be finite")
 
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        quadratic = (
+            ((values[2] * scale) / half_span) / half_span
+            if configuration.baseline_degree == 2
+            else 0.0
+        )
+    if not np.isfinite(quadratic):
+        raise ValueError("quadratic unpacking failed numerically")
+
     baseline = Baseline(
         intercept=y_reference + scale * values[0],
         reference_hz=reference,
         slope_per_hz=scale * values[1] / half_span,
-        quadratic_per_hz2=(
-            scale * values[2] / (half_span * half_span)
-            if configuration.baseline_degree == 2
-            else 0.0
-        ),
+        quadratic_per_hz2=quadratic,
     )
     resonance_values = values[baseline_size : baseline_size + 24].reshape(8, 3)
     etas = (
@@ -136,13 +152,19 @@ def public_parameter_transform(
     _, half_span, scale = _normalization_values(
         0.0, frequency_half_span_hz, fluorescence_scale
     )
-    factors = [scale, scale / half_span]
+    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+        slope_factor = scale / half_span
+        quadratic_factor = slope_factor / half_span
+    factors = [scale, slope_factor]
     if configuration.baseline_degree == 2:
-        factors.append(scale / (half_span * half_span))
+        factors.append(quadratic_factor)
     factors.extend([scale, half_span, half_span] * 8)
     if configuration.model_kind == "pseudo_voigt":
         factors.extend([1.0] * 8)
-    return np.diag(np.asarray(factors, dtype=np.float64))
+    factor_array = np.asarray(factors, dtype=np.float64)
+    if not np.all(np.isfinite(factor_array)):
+        raise ValueError("public parameter transform failed numerically")
+    return np.diag(factor_array)
 
 
 def center_bounds_hz(
@@ -179,6 +201,12 @@ def center_bounds_hz(
         lower[index + 1] = midpoint + minimum / 2.0
     if np.any(lower >= upper):
         raise ValueError("every initial center box must have positive width")
+    with np.errstate(over="ignore", invalid="ignore"):
+        representable_separations = lower[1:] - upper[:-1]
+    if np.any(representable_separations < minimum):
+        raise ValueError(
+            "representable adjacent center boxes violate minimum separation"
+        )
     if np.any(centers < lower) or np.any(centers > upper):
         raise ValueError("every initial center must lie inside its constrained box")
     return lower, upper
@@ -206,8 +234,8 @@ def parameter_bounds(
         configuration.min_center_separation_hz,
     )
     baseline_size = configuration.baseline_degree + 1
-    lower = [-np.inf] * baseline_size
-    upper = [np.inf] * baseline_size
+    lower = [-_FINITE_BOUND] * baseline_size
+    upper = [_FINITE_BOUND] * baseline_size
     for low_hz, high_hz in zip(center_lower, center_upper, strict=True):
         lower.extend(
             [

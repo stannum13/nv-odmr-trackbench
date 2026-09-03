@@ -14,11 +14,18 @@ from odmr_bench.estimators import (
     CompleteSweep,
     FitConfiguration,
     FitInitialGuess,
+    InitializationDiagnostics,
     fit_spectrum,
     linearized_standard_errors,
 )
-from odmr_bench.estimators.fitting import _scaled_residual_function
-from odmr_bench.estimators.parameterization import pack_parameters
+from odmr_bench.estimators.fitting import (
+    _scaled_residual_function,
+    _uncertainty_from_errors,
+)
+from odmr_bench.estimators.parameterization import (
+    pack_parameters,
+    public_parameter_transform,
+)
 from odmr_bench.models import Baseline, Resonance, multi_resonance_spectrum
 
 FREQUENCY_HZ = np.linspace(2.740e9, 3.020e9, 4481)
@@ -175,6 +182,75 @@ def test_linearized_standard_errors_use_one_svd_and_public_transform() -> None:
     assert_allclose(errors, np.sqrt(np.diag(expected_covariance)), rtol=1e-14)
 
 
+def test_covariance_covers_complete_public_layout_in_declared_order() -> None:
+    configuration = _configuration()
+    transform = public_parameter_transform(
+        configuration,
+        frequency_half_span_hz=8.0,
+        fluorescence_scale=4.0,
+    )
+    diagonal = np.linspace(1.0, 2.0, 35)
+    jacobian = np.diag(diagonal)
+
+    errors, rank, reason = linearized_standard_errors(
+        jacobian,
+        scaled_cost=5.0,
+        degrees_of_freedom=10,
+        public_transform=transform,
+        rank_rtol=1.0e-12,
+    )
+
+    expected = np.diag(transform) / diagonal
+    assert rank == 35
+    assert reason is None
+    assert_allclose(errors, expected, rtol=2.0e-15, atol=0.0)
+
+    uncertainty = _uncertainty_from_errors(np.arange(35.0), configuration)
+    assert_array_equal(uncertainty.baseline_standard_errors, [0.0, 1.0, 2.0])
+    resonance_layout = np.arange(3.0, 27.0).reshape(8, 3)
+    assert_array_equal(uncertainty.amplitude, resonance_layout[:, 0])
+    assert_array_equal(uncertainty.center_hz, resonance_layout[:, 1])
+    assert_array_equal(uncertainty.fwhm_hz, resonance_layout[:, 2])
+    assert_array_equal(uncertainty.eta, np.arange(27.0, 35.0))
+
+
+def test_singular_value_exactly_at_cutoff_is_not_retained() -> None:
+    errors, rank, reason = linearized_standard_errors(
+        np.diag([1.0, 1.0e-4]),
+        scaled_cost=1.0,
+        degrees_of_freedom=3,
+        public_transform=np.eye(2),
+        rank_rtol=1.0e-4,
+    )
+
+    assert errors is None
+    assert rank == 1
+    assert reason == "scaled Jacobian is rank deficient"
+
+
+def test_rank_and_covariance_share_one_svd_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_svd = np.linalg.svd
+    calls = 0
+
+    def counting_svd(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return original_svd(*args, **kwargs)
+
+    monkeypatch.setattr(np.linalg, "svd", counting_svd)
+
+    errors, rank, reason = linearized_standard_errors(
+        np.eye(4), 1.0, 5, np.eye(4), 1.0e-12
+    )
+
+    assert errors is not None
+    assert rank == 4
+    assert reason is None
+    assert calls == 1
+
+
 @pytest.mark.parametrize(
     ("jacobian", "cost", "dof", "transform", "expected_rank"),
     [
@@ -301,6 +377,153 @@ def test_nonfinite_public_parameters_from_successful_optimizer_fail_quality(
     assert result.baseline_estimate is None
 
 
+def test_successful_optimizer_with_nonfinite_outputs_fails_quality_without_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def nonfinite_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        fitted = x0.copy()
+        fitted[0] = np.nan
+        return SimpleNamespace(
+            success=True,
+            status=2,
+            message="terminated with nonfinite output",
+            nfev=4,
+            x=fitted,
+            fun=np.full(FREQUENCY_HZ.size, np.nan),
+            cost=np.nan,
+            jac=np.full((FREQUENCY_HZ.size, x0.size), np.nan),
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", nonfinite_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.cost is None
+    assert result.residual_rmse is None
+    assert result.jacobian_rank is None
+    assert result.uncertainty is None
+    assert result.uncertainty_reason == (
+        "optimizer returned non-finite parameters, residuals, or cost"
+    )
+    assert result.scipy_status == 2
+    assert result.nfev == 4
+
+
+def test_detected_exact_separation_preflight_failure_has_stable_reason(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration = _configuration(baseline_degree=1)
+    centers = 2.75e9 + configuration.min_center_separation_hz * np.arange(8)
+    detected_guess = FitInitialGuess(
+        tuple(
+            Resonance(f"r{i}", center, 5.0e5, 0.01, 0.5)
+            for i, center in enumerate(centers)
+        ),
+        Baseline(1.0, REFERENCE_HZ, 2.0e-11),
+    )
+    diagnostics = InitializationDiagnostics(
+        source="detected",
+        candidate_count=8,
+        selected_indices=tuple(range(8)),
+        used_fallback=False,
+        messages=(),
+    )
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.initialize_spectrum",
+        lambda sweep, config: (detected_guess, diagnostics),
+    )
+
+    def unexpected_scipy(*args: object, **kwargs: object) -> None:
+        raise AssertionError("SciPy must not run after guess preflight failure")
+
+    monkeypatch.setattr("odmr_bench.estimators.fitting.least_squares", unexpected_scipy)
+
+    result = fit_spectrum(_sweep(baseline_degree=1), configuration)
+
+    assert result.failure_code == "initialization_failed"
+    assert result.diagnostics.source == "detected"
+    assert result.diagnostics.messages
+    assert result.uncertainty_reason == result.diagnostics.messages[-1]
+    assert result.scipy_status is None
+    assert result.nfev == 0
+
+
+def test_public_amplitude_rounding_above_bound_fails_quality(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sweep = _sweep()
+    scale = float(np.ptp(sweep.fluorescence))
+    maximum = np.float64(0.08)
+    for _ in range(1000):
+        if (maximum / scale) * scale > maximum:
+            break
+        maximum = np.nextafter(maximum, -np.inf)
+    else:
+        raise AssertionError("failed to construct saturation rounding fixture")
+    configuration = _configuration(max_amplitude=float(maximum))
+
+    def saturating_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun
+        fitted = x0.copy()
+        fitted[3] = kwargs["bounds"][1][3]
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="saturated",
+            nfev=1,
+            x=fitted,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", saturating_least_squares
+    )
+    result = fit_spectrum(sweep, configuration, _guess())
+
+    assert result.failure_code == "quality_failed"
+    assert result.resonance_estimates == ()
+    assert "public" in result.uncertainty_reason
+
+
+def test_underflowed_parameter_bounds_are_rejected_before_scipy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fluorescence = np.linspace(1.0e307, 1.0e308, FREQUENCY_HZ.size)
+    configuration = _configuration(
+        baseline_degree=1,
+        max_amplitude=1.0e-300,
+        min_resolved_amplitude=1.0e-300,
+    )
+    guess = FitInitialGuess(
+        tuple(
+            replace(item, amplitude=1.0e-300, eta=0.5)
+            for item in _guess(baseline_degree=1).resonances
+        ),
+        Baseline(float(fluorescence[fluorescence.size // 2]), REFERENCE_HZ),
+    )
+
+    def unexpected_scipy(*args: object, **kwargs: object) -> None:
+        raise AssertionError("SciPy must not receive invalid numerical bounds")
+
+    monkeypatch.setattr("odmr_bench.estimators.fitting.least_squares", unexpected_scipy)
+
+    with pytest.raises(ValueError, match="parameterization"):
+        fit_spectrum(CompleteSweep(FREQUENCY_HZ, fluorescence), configuration, guess)
+
+
 @pytest.mark.parametrize(
     ("model_kind", "degree"),
     [(model, degree) for model in ("lorentzian", "pseudo_voigt") for degree in (1, 2)],
@@ -369,6 +592,48 @@ def test_nonfinite_variation_scale_is_uninformative_without_warning() -> None:
     assert result.failure_code == "uninformative_sweep"
     assert result.initial_guess is None
     assert result.residual_scale is None
+
+
+def test_same_sign_extreme_fluorescence_has_finite_origin_without_warning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    frequency = np.linspace(FREQUENCY_HZ[0], FREQUENCY_HZ[-1], 4480)
+    scale = 1.0e307
+    resonances, baseline = _truth(scale=scale, offset=1.0e308)
+    sweep = CompleteSweep(
+        frequency, multi_resonance_spectrum(frequency, resonances, baseline)
+    )
+    configuration = _configuration(
+        max_amplitude=0.08 * scale,
+        min_resolved_amplitude=1.0e-4 * scale,
+    )
+    guess = _guess(scale=scale, offset=1.0e308)
+
+    def finite_origin_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        assert np.all(np.isfinite(x0))
+        return SimpleNamespace(
+            success=False,
+            status=0,
+            message="origin observed",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(frequency.size),
+            cost=0.0,
+            jac=np.zeros((frequency.size, x0.size)),
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", finite_origin_least_squares
+    )
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        result = fit_spectrum(sweep, configuration, guess)
+
+    assert result.failure_code == "optimization_failed"
+    assert result.residual_scale is not None
 
 
 def test_clean_sweep_auto_initialization_recovers_without_truth_input() -> None:
@@ -459,7 +724,9 @@ def _replace_resonance(
     "invalid_kind",
     ["ids", "eta", "reference", "interval", "separation", "width", "amplitude"],
 )
-def test_invalid_user_guesses_raise_before_scipy(invalid_kind: str) -> None:
+def test_invalid_user_guesses_raise_before_scipy(
+    invalid_kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
     guess = _guess()
     if invalid_kind == "ids":
         resonances = list(guess.resonances)
@@ -485,6 +752,11 @@ def test_invalid_user_guesses_raise_before_scipy(invalid_kind: str) -> None:
     configuration = _configuration(
         model_kind="lorentzian" if invalid_kind == "eta" else "pseudo_voigt"
     )
+
+    def unexpected_scipy(*args: object, **kwargs: object) -> None:
+        raise AssertionError("SciPy must not run for invalid user guesses")
+
+    monkeypatch.setattr("odmr_bench.estimators.fitting.least_squares", unexpected_scipy)
 
     with pytest.raises(ValueError):
         fit_spectrum(_sweep(configuration.model_kind), configuration, guess)
@@ -519,15 +791,50 @@ def test_identical_calls_are_numerically_repeatable() -> None:
             rtol=1e-12,
             atol=1e-12,
         )
+    assert_allclose(first.q_values, second.q_values, rtol=1e-12, atol=1e-12)
+    assert first.baseline_estimate is not None
+    assert second.baseline_estimate is not None
+    assert_allclose(
+        [
+            first.baseline_estimate.intercept,
+            first.baseline_estimate.reference_hz,
+            first.baseline_estimate.slope_per_hz,
+            first.baseline_estimate.quadratic_per_hz2,
+        ],
+        [
+            second.baseline_estimate.intercept,
+            second.baseline_estimate.reference_hz,
+            second.baseline_estimate.slope_per_hz,
+            second.baseline_estimate.quadratic_per_hz2,
+        ],
+        rtol=1e-12,
+        atol=1e-12,
+    )
+    assert first.uncertainty is not None
+    assert second.uncertainty is not None
+    for field in (
+        "baseline_standard_errors",
+        "center_hz",
+        "fwhm_hz",
+        "amplitude",
+        "eta",
+    ):
+        assert_allclose(
+            getattr(first.uncertainty, field),
+            getattr(second.uncertainty, field),
+            rtol=1e-12,
+            atol=1e-12,
+        )
 
 
 @pytest.mark.parametrize("scale", [1.0e-3, 1.0e3])
 def test_multiplicative_fluorescence_units_preserve_scientific_fit(
     scale: float,
 ) -> None:
-    base = fit_spectrum(_sweep(), _configuration(), _guess())
+    noise = np.random.default_rng(6104).normal(0.0, 2.0e-6, FREQUENCY_HZ.size)
+    base = fit_spectrum(_sweep(noise=noise), _configuration(), _guess())
     scaled = fit_spectrum(
-        _sweep(scale=scale),
+        _sweep(scale=scale, noise=noise * scale),
         _configuration(
             max_amplitude=0.08 * scale,
             min_resolved_amplitude=1.0e-4 * scale,

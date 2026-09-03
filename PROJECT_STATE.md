@@ -125,6 +125,12 @@ sweep wrapper are next.
   public-unit local-linearized covariance from one shared SVD cutoff. Fixed
   regressions cover clean/noisy recovery, affine fluorescence changes,
   initialization/fallback behavior, and exact baseline-improvement boundaries.
+- Hardened the oracle review boundary with nonempty initializer-preflight
+  reasons, finite representable optimizer bounds, explicit public-parameter and
+  rounded center-box checks, overflow-safe quadratic scaling and fluorescence
+  origins, and a distinct metric-less `quality_failed` state for nominally
+  successful optimizers that return non-finite outputs. Covariance tests now
+  pin the full public layout, strict SVD cutoff, and single-SVD implementation.
 
 ## Important scientific and design decisions
 
@@ -158,7 +164,7 @@ sweep wrapper are next.
 
 ## Tests currently passing
 
-- `pytest`: 393 passed.
+- `pytest`: 404 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

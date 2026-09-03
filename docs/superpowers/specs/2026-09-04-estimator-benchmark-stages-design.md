@@ -200,6 +200,11 @@ configured resolved-amplitude threshold, or the fit fails the configured
 minimum improvement over a baseline-only model. Failed results retain
 diagnostics but expose no plausible-looking parameter estimate as a successful
 observation.
+An unsuccessful optimizer termination is `optimization_failed`. A nominally
+successful termination with non-finite parameters, residuals, or cost is
+instead `quality_failed`; its raw cost and RMSE remain `None` rather than using
+NaN or manufacturing finite metrics. Other quality failures retain finite raw
+cost and RMSE diagnostics.
 
 Initialization follows one explicit state machine. No guess means
 `initialization_failed` and SciPy is not called. An explicitly enabled fallback

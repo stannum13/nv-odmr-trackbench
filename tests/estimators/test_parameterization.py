@@ -98,6 +98,61 @@ def test_public_transform_has_declared_diagonal_factors() -> None:
     assert_array_equal(transform, np.diag(expected))
 
 
+def test_quadratic_scaling_is_overflow_safe_at_extreme_binary_span() -> None:
+    half_span = np.ldexp(1.0, 520)
+    quadratic = np.ldexp(1.0, -1040)
+    configuration = FitConfiguration(
+        model_kind="lorentzian",
+        baseline_degree=2,
+        min_fwhm_hz=1.0,
+        max_fwhm_hz=8.0,
+        max_amplitude=16.0,
+        min_resolved_amplitude=0.5,
+        min_center_separation_hz=1.0,
+    )
+    guess = FitInitialGuess(
+        resonances=_guess("lorentzian", 2).resonances,
+        baseline=Baseline(0.0, 0.0, quadratic_per_hz2=quadratic),
+    )
+
+    packed = pack_parameters(
+        guess,
+        configuration,
+        frequency_reference_hz=0.0,
+        frequency_half_span_hz=half_span,
+        fluorescence_reference=0.0,
+        fluorescence_scale=1.0,
+    )
+    unpacked = unpack_parameters(
+        packed,
+        configuration,
+        frequency_reference_hz=0.0,
+        frequency_half_span_hz=half_span,
+        fluorescence_reference=0.0,
+        fluorescence_scale=1.0,
+    )
+    transform = public_parameter_transform(
+        configuration,
+        frequency_half_span_hz=half_span,
+        fluorescence_scale=1.0,
+    )
+
+    assert packed[2] == 1.0
+    assert unpacked.baseline.quadratic_per_hz2 == quadratic
+    assert transform[2, 2] == quadratic
+
+
+def test_public_transform_rejects_nonfinite_sequential_factors() -> None:
+    configuration = FitConfiguration(model_kind="lorentzian", baseline_degree=2)
+
+    with pytest.raises(ValueError, match="transform failed numerically"):
+        public_parameter_transform(
+            configuration,
+            frequency_half_span_hz=np.nextafter(0.0, 1.0),
+            fluorescence_scale=np.finfo(np.float64).max,
+        )
+
+
 def test_center_boxes_enforce_minimum_separation_including_exact_gaps() -> None:
     centers = np.array([10.0, 20.0, 35.0, 50.0, 65.0, 80.0, 95.0, 110.0])
     lower, upper = center_bounds_hz(centers, 0.0, 120.0, 10.0)
@@ -105,6 +160,13 @@ def test_center_boxes_enforce_minimum_separation_including_exact_gaps() -> None:
     assert lower[1] == centers[1]
     assert upper[0] == centers[0]
     assert np.all(lower[1:] - upper[:-1] == 10.0)
+
+
+def test_center_boxes_reject_unrepresentable_requested_separation() -> None:
+    centers = 1.0e16 + 100.0 * np.arange(8)
+
+    with pytest.raises(ValueError, match="representable"):
+        center_bounds_hz(centers, 1.0e16 - 100.0, 1.0e16 + 800.0, 5.0)
 
 
 @pytest.mark.parametrize(
@@ -144,8 +206,8 @@ def test_parameter_bounds_scale_all_public_limits() -> None:
         fluorescence_scale=8.0,
     )
 
-    assert np.all(np.isneginf(lower[:2]))
-    assert np.all(np.isposinf(upper[:2]))
+    assert np.all(np.isfinite(lower))
+    assert np.all(np.isfinite(upper))
     for index in range(8):
         start = 2 + 3 * index
         assert_array_equal(lower[start : start + 3][[0, 2]], [0.0, 0.04])

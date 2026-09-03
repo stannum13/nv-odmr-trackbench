@@ -637,8 +637,17 @@ class SpectrumFitResult:
                 if (cost is None) != (residual_rmse is None):
                     raise ValueError("cost and residual_rmse must be jointly available")
             else:
-                if residual_scale is None or cost is None or residual_rmse is None:
-                    raise ValueError("quality_failed requires finite residual fields")
+                if residual_scale is None:
+                    raise ValueError("quality_failed requires a residual scale")
+                if (cost is None) != (residual_rmse is None):
+                    raise ValueError("cost and residual_rmse must be jointly available")
+                if cost is None and uncertainty_reason != (
+                    "optimizer returned non-finite parameters, residuals, or cost"
+                ):
+                    raise ValueError(
+                        "quality_failed may omit residual metrics only for "
+                        "non-finite optimizer output"
+                    )
         else:
             if residual_scale is None or cost is None or residual_rmse is None:
                 raise ValueError("successful results require residual fields")

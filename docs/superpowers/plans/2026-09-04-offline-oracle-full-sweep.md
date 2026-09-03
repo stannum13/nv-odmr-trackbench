@@ -137,7 +137,7 @@ supplied guess used for an optimizer attempt, never synthetic truth.
 | `insufficient_samples` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because sample-count preflight runs first | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `uninformative_sweep` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because `ptp(y)` is zero or non-finite | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `optimization_failed` | status/message retained, `nfev>=0` | positive scale; finite cost/RMSE retained when available, otherwise `None` | rank `None`; uncertainty `None` with required reason; initial guess present |
-| `quality_failed` | status/message retained, `nfev>=0` | positive scale and finite cost/RMSE | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
+| `quality_failed` | status/message retained, `nfev>=0` | positive scale and normally finite cost/RMSE; both are `None` only when a nominally successful optimizer returns non-finite parameters, residuals, or cost | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
 | success | status/message retained, `nfev>=0` | positive scale and finite cost/RMSE | full rank; uncertainty present or `None` only with a required covariance reason; initial guess present |
 
 All unsuccessful results have empty final resonance/Q arrays and no final
@@ -515,9 +515,11 @@ results.
   `insufficient_samples`. A constant sweep means `uninformative_sweep` before
   initialization regardless of `allow_fallback` or a supplied valid user guess;
   because no optimizer attempt occurs, `initial_guess` remains `None`.
-  Optimizer termination failure means
-  `optimization_failed`; any post-fit check means `quality_failed`. Failed
-  results retain diagnostics but no baseline/resonance estimate.
+  Optimizer termination failure means `optimization_failed`; a nominally
+  successful termination with non-finite optimizer outputs is a metric-less
+  `quality_failed`, and any other post-fit check is `quality_failed`. Failed
+  results retain diagnostics but no baseline/resonance estimate, and NaN is
+  never used as a missing-value sentinel.
   Compute the degree-matched baseline-only reference using the exact all-sample
   least-squares definition above.
 
