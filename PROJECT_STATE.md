@@ -4,8 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 implementation — Task 1 immutable sweep, configuration, and result
-contracts are complete; deterministic initialization is next.
+Stage 6.1 implementation — Task 2 deterministic baseline-aware initialization
+is complete; independent review and constrained fitting are next.
 
 ## Completed work
 
@@ -108,6 +108,12 @@ contracts are complete; deterministic initialization is next.
   oracle. Result records enforce the structured failure state machine, preserve
   attempted-guess provenance, and derive read-only signed Q values from public
   fitted centers and FWHM values without estimator access to hidden truth.
+- Added deterministic baseline-aware eight-line initialization using three
+  robust rejection updates and a final scaled polynomial trend, prominence-
+  ranked dip discovery, actual-frequency separation and width interpolation,
+  raw detrended amplitudes, and explicit-only feasible fallback geometry.
+  Structured diagnostics preserve candidate scarcity and invalid-window or
+  numerical baseline failures without fabricating a detected solution.
 
 ## Important scientific and design decisions
 
@@ -141,7 +147,7 @@ contracts are complete; deterministic initialization is next.
 
 ## Tests currently passing
 
-- `pytest`: 309 passed.
+- `pytest`: 325 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -172,7 +178,7 @@ contracts are complete; deterministic initialization is next.
 
 ## Next actions
 
-1. Implement and independently review the Stage 6.1 immutable fit contracts.
-2. Continue through deterministic initialization, constrained fitting, and the
-   repeated cold-start sweep wrapper.
+1. Independently review deterministic baseline-aware initialization.
+2. Continue through constrained fitting and the repeated cold-start sweep
+   wrapper.
 3. Run the integrated oracle/full-sweep verification gate.

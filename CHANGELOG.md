@@ -38,6 +38,11 @@ once a package version is introduced.
 
 ### Added
 
+- Deterministic baseline-aware initialization for complete sweeps, including
+  three robust baseline-rejection updates and a final discovery fit, physical-
+  frequency candidate separation and linewidth interpolation on nonuniform
+  grids, model-specific eta guesses, raw detrended amplitudes, explicit-only
+  feasible fallback guesses, and stable scarcity/failure diagnostics.
 - Frozen, slotted estimator contracts for complete sweeps, constrained fit
   configuration, initial guesses, initializer diagnostics, local covariance
   uncertainties, structured spectrum-fit outcomes, and sweep-level resource
