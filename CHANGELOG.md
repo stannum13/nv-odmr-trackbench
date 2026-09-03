@@ -42,7 +42,9 @@ once a package version is introduced.
   three robust baseline-rejection updates and a final discovery fit, physical-
   frequency candidate separation and linewidth interpolation on nonuniform
   grids, model-specific eta guesses, raw detrended amplitudes, explicit-only
-  feasible fallback guesses, and stable scarcity/failure diagnostics.
+  feasible fallback guesses, stable scarcity/failure diagnostics, a signal-
+  scaled floating-point discovery floor, and overflow-safe extreme-frequency
+  normalization.
 - Frozen, slotted estimator contracts for complete sweeps, constrained fit
   configuration, initial guesses, initializer diagnostics, local covariance
   uncertainties, structured spectrum-fit outcomes, and sweep-level resource

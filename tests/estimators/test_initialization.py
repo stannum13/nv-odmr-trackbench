@@ -231,6 +231,40 @@ def test_nonuniform_grid_uses_physical_frequency_for_selection_and_widths() -> N
         configuration.min_fwhm_hz <= item.fwhm_hz <= configuration.max_fwhm_hz
         for item in guess.resonances
     )
+    midpoint_hz = frequency_hz[0] / 2.0 + frequency_hz[-1] / 2.0
+    half_span_hz = frequency_hz[-1] / 2.0 - frequency_hz[0] / 2.0
+    trend = _fit_discovery_trend(
+        (frequency_hz - midpoint_hz) / half_span_hz,
+        sweep.fluorescence,
+        configuration.baseline_degree,
+    )
+    assert trend is not None
+    depth = np.maximum(
+        trend.values
+        - savgol_filter(
+            sweep.fluorescence,
+            window_length=configuration.savgol_window,
+            polyorder=configuration.savgol_polyorder,
+        ),
+        0.0,
+    )
+    selected = np.asarray(diagnostics.selected_indices)
+    _, _, left_positions, right_positions = peak_widths(
+        depth, selected, rel_height=0.5
+    )
+    sample_positions = np.arange(frequency_hz.size, dtype=np.float64)
+    expected_widths_hz = np.clip(
+        np.interp(right_positions, sample_positions, frequency_hz)
+        - np.interp(left_positions, sample_positions, frequency_hz),
+        configuration.min_fwhm_hz,
+        configuration.max_fwhm_hz,
+    )
+    assert_allclose(
+        [item.fwhm_hz for item in guess.resonances],
+        expected_widths_hz,
+        rtol=0.0,
+        atol=1e-9,
+    )
 
 
 def test_steep_linear_baseline_does_not_displace_detected_centers() -> None:
@@ -283,6 +317,116 @@ def test_flat_sweep_reports_zero_candidates_without_implicit_fallback() -> None:
     assert diagnostics.source == "none"
     assert diagnostics.candidate_count == 0
     assert not diagnostics.used_fallback
+
+
+@pytest.mark.parametrize(
+    ("baseline_degree", "linear_coefficient", "quadratic_coefficient"),
+    [(1, 1.0e-3, 0.0), (2, 1.0e-8, 1.0e-8)],
+)
+def test_exact_polynomial_baseline_roundoff_does_not_fabricate_candidates(
+    baseline_degree: int,
+    linear_coefficient: float,
+    quadratic_coefficient: float,
+) -> None:
+    frequency_hz = np.linspace(2.74e9, 3.02e9, 101)
+    midpoint_hz = frequency_hz[0] / 2.0 + frequency_hz[-1] / 2.0
+    half_span_hz = frequency_hz[-1] / 2.0 - frequency_hz[0] / 2.0
+    z = (frequency_hz - midpoint_hz) / half_span_hz
+    fluorescence = (
+        0.1 + linear_coefficient * z + quadratic_coefficient * z**2
+    )
+
+    guess, diagnostics = initialize_spectrum(
+        CompleteSweep(frequency_hz, fluorescence),
+        FitConfiguration(
+            baseline_degree=baseline_degree,
+            min_center_separation_hz=1.0,
+            relative_prominence=0.01,
+            allow_fallback=False,
+        ),
+    )
+
+    assert guess is None
+    assert diagnostics.source == "none"
+    assert diagnostics.candidate_count == 0
+    assert diagnostics.messages == ("discovery depth is at numerical floor",)
+
+
+def test_dips_above_numerical_floor_remain_discoverable() -> None:
+    frequency_hz = np.linspace(2.74e9, 3.02e9, 2801)
+    amplitudes = 1.0e-10 * (1.0 + 0.05 * np.arange(8))
+    sweep = _spectrum_sweep(frequency_hz, amplitudes=amplitudes)
+    configuration = FitConfiguration(
+        min_fwhm_hz=5.0e5,
+        max_fwhm_hz=5.0e6,
+        max_amplitude=1.0e-8,
+        min_resolved_amplitude=1.0e-12,
+        min_center_separation_hz=8.0e6,
+        relative_prominence=0.05,
+    )
+
+    guess, diagnostics = initialize_spectrum(sweep, configuration)
+
+    assert guess is not None
+    assert diagnostics.source == "detected"
+    assert diagnostics.candidate_count == 8
+
+
+@pytest.mark.parametrize(
+    ("frequency_hz", "baseline_degree"),
+    [
+        pytest.param(
+            np.linspace(1.0, 1.1, 11) * 1.0e308, degree, id=f"same-sign-d{degree}"
+        )
+        for degree in (1, 2)
+    ]
+    + [
+        pytest.param(
+            np.linspace(-1.0, 1.0, 11) * 1.0e308,
+            degree,
+            id=f"opposite-sign-d{degree}",
+        )
+        for degree in (1, 2)
+    ],
+)
+def test_extreme_finite_frequency_endpoints_return_without_numerical_warnings(
+    frequency_hz: np.ndarray,
+    baseline_degree: int,
+) -> None:
+    fluorescence = np.linspace(0.9, 1.1, frequency_hz.size)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        guess, diagnostics = initialize_spectrum(
+            CompleteSweep(frequency_hz, fluorescence),
+            FitConfiguration(savgol_window=5, baseline_degree=baseline_degree),
+        )
+
+    assert guess is None
+    assert diagnostics.source == "none"
+    assert diagnostics.candidate_count == 0
+    assert diagnostics.messages == ("discovery depth is at numerical floor",)
+
+
+def test_polynomial_backend_failure_becomes_stable_diagnostics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_polynomial_fit(*args: object, **kwargs: object) -> np.ndarray:
+        del args, kwargs
+        raise np.linalg.LinAlgError("forced numerical failure")
+
+    monkeypatch.setattr(np.polynomial.polynomial, "polyfit", fail_polynomial_fit)
+    frequency_hz = np.linspace(2.74e9, 3.02e9, 101)
+
+    guess, diagnostics = initialize_spectrum(
+        CompleteSweep(frequency_hz, np.linspace(0.9, 1.1, frequency_hz.size)),
+        FitConfiguration(),
+    )
+
+    assert guess is None
+    assert diagnostics.source == "none"
+    assert diagnostics.candidate_count == 0
+    assert diagnostics.messages == ("baseline trend fit failed numerically",)
 
 
 def test_seven_dips_report_candidate_scarcity_without_implicit_fallback() -> None:

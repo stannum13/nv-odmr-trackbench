@@ -17,6 +17,8 @@ from odmr_bench.estimators.types import (
 )
 from odmr_bench.models import Baseline, Resonance
 
+_DISCOVERY_ROUNDOFF_FACTOR = 64.0
+
 
 @dataclass(frozen=True, slots=True)
 class _TrendFit:
@@ -79,7 +81,7 @@ def _baseline_from_scaled_polynomial(
     coefficients: NDArray[np.float64], midpoint_hz: float, half_span_hz: float
 ) -> Baseline:
     quadratic = (
-        float(coefficients[2]) / half_span_hz**2
+        (float(coefficients[2]) / half_span_hz) / half_span_hz
         if coefficients.size == 3
         else 0.0
     )
@@ -134,17 +136,14 @@ def _fallback_guess(
     edge_margin_hz = max(
         configuration.min_center_separation_hz / 2.0, median_grid_step_hz
     )
-    span_hz = float(frequency_hz[-1] - frequency_hz[0])
-    if (
-        span_hz - 2.0 * edge_margin_hz
-        <= 7.0 * configuration.min_center_separation_hz
-    ):
+    midpoint_hz = float(frequency_hz[0]) / 2.0 + float(frequency_hz[-1]) / 2.0
+    half_span_hz = float(frequency_hz[-1]) / 2.0 - float(frequency_hz[0]) / 2.0
+    usable_half_span_hz = half_span_hz - edge_margin_hz
+    if usable_half_span_hz <= 3.5 * configuration.min_center_separation_hz:
         return None
 
-    centers_hz = np.linspace(
-        frequency_hz[0] + edge_margin_hz,
-        frequency_hz[-1] - edge_margin_hz,
-        8,
+    centers_hz = midpoint_hz + usable_half_span_hz * np.linspace(
+        -1.0, 1.0, 8
     )
     width_hz = float(
         np.clip(
@@ -199,6 +198,17 @@ def _scarcity_result(
     return None, _diagnostic_failure(candidate_count, message)
 
 
+def _discovery_numerical_floor(
+    fluorescence: NDArray[np.float64], trend: NDArray[np.float64]
+) -> float:
+    """Bound accumulated low-order fit and smoothing roundoff at signal scale."""
+    scale = max(
+        float(np.max(np.abs(fluorescence))),
+        float(np.max(np.abs(trend))),
+    )
+    return _DISCOVERY_ROUNDOFF_FACTOR * np.finfo(np.float64).eps * scale
+
+
 def initialize_spectrum(
     sweep: CompleteSweep, configuration: FitConfiguration
 ) -> tuple[FitInitialGuess | None, InitializationDiagnostics]:
@@ -210,10 +220,27 @@ def initialize_spectrum(
             0, "savgol_window exceeds sweep sample count"
         )
 
-    midpoint_hz = 0.5 * float(frequency_hz[0] + frequency_hz[-1])
-    half_span_hz = 0.5 * float(frequency_hz[-1] - frequency_hz[0])
+    midpoint_hz = float(frequency_hz[0]) / 2.0 + float(frequency_hz[-1]) / 2.0
+    half_span_hz = float(frequency_hz[-1]) / 2.0 - float(frequency_hz[0]) / 2.0
+    if (
+        not np.isfinite(midpoint_hz)
+        or not np.isfinite(half_span_hz)
+        or half_span_hz <= 0
+    ):
+        return None, _diagnostic_failure(
+            0, "frequency normalization failed numerically"
+        )
     z = np.asarray((frequency_hz - midpoint_hz) / half_span_hz, dtype=np.float64)
-    trend_fit = _fit_discovery_trend(z, fluorescence, configuration.baseline_degree)
+    if not np.all(np.isfinite(z)):
+        return None, _diagnostic_failure(
+            0, "frequency normalization failed numerically"
+        )
+    try:
+        trend_fit = _fit_discovery_trend(
+            z, fluorescence, configuration.baseline_degree
+        )
+    except (FloatingPointError, OverflowError, ValueError, np.linalg.LinAlgError):
+        return None, _diagnostic_failure(0, "baseline trend fit failed numerically")
     if trend_fit is None:
         return None, _diagnostic_failure(
             0, "baseline rejection left too few samples"
@@ -231,7 +258,7 @@ def initialize_spectrum(
     if np.all(fluorescence == fluorescence[0]):
         depth = np.zeros_like(depth)
     maximum_depth = float(np.max(depth))
-    if not np.isfinite(maximum_depth) or maximum_depth == 0.0:
+    if not np.isfinite(maximum_depth):
         return _scarcity_result(
             frequency_hz,
             configuration,
@@ -239,6 +266,18 @@ def initialize_spectrum(
             maximum_depth if np.isfinite(maximum_depth) else 0.0,
             0,
             "discovery depth is zero or non-finite",
+        )
+    numerical_floor = _discovery_numerical_floor(
+        fluorescence, trend_fit.values
+    )
+    if maximum_depth <= numerical_floor:
+        return _scarcity_result(
+            frequency_hz,
+            configuration,
+            baseline,
+            maximum_depth,
+            0,
+            "discovery depth is at numerical floor",
         )
 
     selected_indices, candidate_count = _select_candidate_indices(

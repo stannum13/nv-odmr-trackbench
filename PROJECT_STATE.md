@@ -113,7 +113,10 @@ is complete; independent review and constrained fitting are next.
   ranked dip discovery, actual-frequency separation and width interpolation,
   raw detrended amplitudes, and explicit-only feasible fallback geometry.
   Structured diagnostics preserve candidate scarcity and invalid-window or
-  numerical baseline failures without fabricating a detected solution.
+  numerical baseline failures without fabricating a detected solution. A
+  signal-scaled floating-point discovery floor rejects polynomial/smoothing
+  roundoff, while overflow-safe frequency normalization supports extreme finite
+  same-sign and opposite-sign endpoints.
 
 ## Important scientific and design decisions
 
@@ -147,7 +150,7 @@ is complete; independent review and constrained fitting are next.
 
 ## Tests currently passing
 
-- `pytest`: 325 passed.
+- `pytest`: 333 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
