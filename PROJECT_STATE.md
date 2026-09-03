@@ -141,7 +141,7 @@ contracts are complete; deterministic initialization is next.
 
 ## Tests currently passing
 
-- `pytest`: 295 passed.
+- `pytest`: 309 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
