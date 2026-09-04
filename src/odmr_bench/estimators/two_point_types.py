@@ -794,24 +794,12 @@ class TwoPointCalibrationSource:
             raise ValueError(
                 "caller_asserted physical_fit_epoch_s must be the public midpoint"
             )
-        expected_resources = PublicAcquisitionResources(
-            observations=len(source_observations),
-            integration_time_s=sum(
-                item.integration_time_s for item in source_observations
-            ),
-            nominal_exposure_photons=sum(
-                item.nominal_exposure_photons for item in source_observations
-            ),
-            realized_photons=sum(
-                item.realized_photons
-                for item in source_observations
-                if item.realized_photons is not None
-            ),
-            observations_without_realized_counts=sum(
-                item.realized_photons is None for item in source_observations
-            ),
-            virtual_elapsed_time_s=last_observation.timestamp_s
-            - source_start_timestamp_s,
+        from odmr_bench.estimators.two_point_resources import (
+            _replay_public_resources,
+        )
+
+        expected_resources = _replay_public_resources(
+            source_observations, source_frequency_overhead_s
         )
         if safe_resources != expected_resources:
             raise ValueError("safe_resources must equal the source observation trace")

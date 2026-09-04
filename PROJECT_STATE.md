@@ -28,7 +28,20 @@ history, age, pending-state, and safe-resource invariants; authentication of
 reset state, acquisition context, and evaluator resources remains with later
 owners. Task 3's per-task reviews found four Important intrinsic-state gaps and
 one scalar-subclass capability leak; all received focused RED/GREEN fixes, and
-the final spec and quality re-review passed with no findings. Task 4 is next.
+the final spec and quality re-review passed with no findings. Task 4 adds exact
+arrival-ordered estimator-safe resource replay and a caller-asserted source
+factory with defensive public-trace binding, complete-sweep fit-input facts,
+fixed construction-code precedence, and the exact public-midpoint epoch rule.
+Task 4 also corrects the Task 2 source constructor to validate stored safe
+resources through that same canonical replay, eliminating integer-seeded sums
+and endpoint-subtraction regrouping so long sources remain replace-stable. Its
+first per-task review found one Important nested-record error-boundary gap; the
+factory now reconstructs each exact public record at its assigned precedence
+stage so malformed nested values cannot leak bare construction exceptions.
+The final review also exposed a code-6 fitted-ID mismatch that could lose to a
+later code-7 malformed-fit failure. A focused combined witness now pins the
+first-applicable `fit_input_mismatch` result, and the final re-review approved
+Task 4 with zero Critical or Important findings.
 
 ## Completed work
 
@@ -322,8 +335,7 @@ the final spec and quality re-review passed with no findings. Task 4 is next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 676 passed.
-- `pytest`: 876 passed.
+- `pytest`: 899 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -366,6 +378,7 @@ the final spec and quality re-review passed with no findings. Task 4 is next.
 
 ## Next actions
 
-1. Execute Stage 6.3 Task 4: estimator-safe atomic resources and the caller-
-   asserted source factory.
-2. Run a fresh per-task spec and quality review before advancing to Task 5.
+1. Implement Stage 6.3 Task 5: the canonical local target model, analytic
+   center derivative, and calibrated discriminator-cell factory.
+2. Run the Task 5 per-task spec and quality review before advancing to tracker
+   construction in Task 6.

@@ -66,6 +66,19 @@ once a package version is introduced.
 
 ### Added
 
+- Added estimator-safe, arrival-ordered public resource atoms and replay for
+  calibrated two-point traces. The new caller-asserted calibration-source
+  factory snapshots the exact public trace, binds derived sweep endpoints,
+  fit-input facts, IDs, and safe resources without refitting, applies the
+  closed construction-error precedence, and requires the bit-exact ordered
+  mean of reconstructed first/last public midpoints. The calibration-source
+  intrinsic resource check now calls the same canonical replay, so long source
+  snapshots survive reconstruction without arithmetic regrouping. Review
+  hardening reconstructs every exact nested public record at its owning
+  precedence stage, preserving typed construction errors for malformed trace,
+  fit, identity, provenance, and clock values. A combined fitted-ID mismatch
+  and malformed-fit witness additionally fixes code-6/code-7 precedence; the
+  final task re-review reported zero Critical or Important findings.
 - Added exact frozen/slotted two-point query, partial-pair, pair-result,
   identity-estimate, aggregate-estimate, and update contracts. Intrinsic
   validation closes local query/observation echoes, alternating adjacent pair
