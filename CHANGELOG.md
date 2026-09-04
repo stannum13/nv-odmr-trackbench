@@ -66,6 +66,12 @@ once a package version is introduced.
 
 ### Added
 
+- Specified Stage 6.2 warm-started causal completed-sweep fitting: successful-
+  prior-only seeding, polynomial-baseline rebasing, explicit compatibility and
+  age rejection, retained warm/cold attempts, conditional same-sweep cold
+  recovery, stale active-estimate age, and acquisition-versus-compute resource
+  separation.
+
 - A cold-start `RepeatedFullSweepEstimator` that independently fits each
   completed sweep with `initial_guess=None`, retains successful and failed
   attempts in immutable evaluator history, advances `latest` on every attempt,

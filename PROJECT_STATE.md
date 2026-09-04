@@ -4,11 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 is locally complete — the constrained offline oracle, repeated
-cold-start full-sweep estimator, and integrated-review fix set, including the
-final fluorescence-origin/provenance follow-up, passed prescribed verification
-and independent re-review. The reviewed fix is ready for authorized
-synchronization before Stage 6.2 design.
+Stage 6.2 planning — The warm-started causal completed-sweep design passed
+adversarial review and its test-driven implementation plan is next.
 
 ## Completed work
 
@@ -169,6 +166,11 @@ synchronization before Stage 6.2 design.
   the configured significance threshold. A noisy direct-addition regression
   pins classification, IDs, rank, cost, RMSE, every public SE field, and local
   significance behavior under a `+1e6` fluorescence origin shift.
+- Specified the Stage 6.2 causal warm-start state machine: successful-prior-only
+  seeding, guarded polynomial rebasing, shared sweep/guess preflight, explicit
+  warm/cold attempt provenance, cold recovery, stale active estimates with
+  distinct age bases, nonoverlapping endpoints, and acquisition-versus-compute
+  resource accounting.
 
 ## Important scientific and design decisions
 
@@ -242,8 +244,7 @@ synchronization before Stage 6.2 design.
 
 ## Next actions
 
-1. Synchronize the reviewed Stage 6.1 commit through the authorized parent
-   workflow.
-2. Design Stage 6.2 warm-started causal sweep fitting, including stable
-   resonance identities, failure-state handling, estimate age, and resource
-   use.
+1. Write and review the Stage 6.2 test-driven implementation plan.
+2. Implement and independently review the causal wrapper, compatibility/rebase
+   helper, records, regressions, and researcher guidance.
+3. Run the integrated Stage 6.2 verification and synchronize it.

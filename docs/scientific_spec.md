@@ -221,6 +221,21 @@ without evaluating hidden truth. A separately declared nominal exposure such
 as baseline photon rate times integration duration may be public when it is
 known before the query.
 
+For warm-started completed-sweep fitting, estimator-owned prior state may be
+derived only from an earlier successful public fit. Every update records its
+current submitted-observation endpoint and, when a warm source is used, its
+earlier source update. External sequence-index distance and cumulative submitted
+sample count are distinct age bases and must not be mixed.
+If a current fit fails while an older successful estimate remains available,
+that active estimate must be labeled stale and aged in each available declared
+basis: submitted samples, external sequence indices, and timestamps. Retrying a
+cold optimization on the same
+already acquired sweep consumes compute but no additional acquisition samples,
+integration time, or photon exposure; the failed warm attempt must remain in
+the record. Constrained ordered centers preserve configured labels only in the
+resolved, noncrossing benchmark scope and are not evidence of physical identity
+through a collision.
+
 The timestamp convention must be explicit. The default is the end of the
 integration interval: a query beginning at virtual time \(t\) with duration
 \(\Delta t\) observes the declared time-averaged signal over
