@@ -49,6 +49,16 @@ once a package version is introduced.
 
 ### Added
 
+- A cold-start `RepeatedFullSweepEstimator` that independently fits each
+  completed sweep with `initial_guess=None`, retains successful and failed
+  attempts in immutable evaluator history, advances `latest` on every attempt,
+  and preserves only the submitted sweep's public completion metadata. Fixed-
+  seed two-sweep regression coverage pins cold-start provenance, resonance
+  ordering, metadata propagation, and declared center/FWHM tolerances.
+- Researcher guidance for the full-sweep model, initialization, constraints,
+  structured failures, local Jacobian uncertainty, ordered-center limitation,
+  and interpretation of external-recording fits, plus a download-free
+  pseudo-Voigt fitting example that prints finite center/FWHM/Q diagnostics.
 - Constrained eight-resonance Lorentzian and pseudo-Voigt oracle fitting with
   scaled bounded parameters, midpoint-fixed linear/quadratic baselines,
   deterministic TRF optimization, non-crossing center boxes, structured

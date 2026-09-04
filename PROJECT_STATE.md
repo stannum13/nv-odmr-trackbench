@@ -4,9 +4,9 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 implementation — Task 3 constrained Lorentzian and pseudo-Voigt
-oracle fitting is complete; independent review and the repeated cold-start
-sweep wrapper are next.
+Stage 6.1 implementation — the constrained offline oracle and repeated
+cold-start full-sweep estimator are implemented and locally verified;
+independent Task 4 review and the integrated Stage 6.1 review are next.
 
 ## Completed work
 
@@ -134,6 +134,14 @@ sweep wrapper are next.
   public covariance transform preserves rank and can leave an otherwise valid
   fit successful without uncertainty. Covariance tests pin the full public
   layout, strict SVD cutoff, and single-SVD implementation.
+- Added `RepeatedFullSweepEstimator`, which passes `initial_guess=None` for
+  every completed sweep, retains successful and structured failed attempts in
+  immutable evaluator history, advances `latest` on failures, copies only that
+  sweep's public completion metadata, and clears all retained state on reset.
+- Added a fixed-seed two-sweep generated regression with declared numerical
+  tolerances, researcher guidance for the model, initialization, bounds,
+  failures, local-linearized uncertainty, ordered-center scope, and recording
+  interpretation, plus a download-free synthetic fitting example.
 
 ## Important scientific and design decisions
 
@@ -167,7 +175,8 @@ sweep wrapper are next.
 
 ## Tests currently passing
 
-- `pytest`: 412 passed.
+- `pytest tests/estimators`: 219 passed.
+- `pytest`: 419 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -192,12 +201,18 @@ sweep wrapper are next.
 - End-to-end benchmark reproducibility has not yet been demonstrated beyond the
   installable package, command smoke tests, and deterministic synthetic
   configuration fixtures.
+- Completed-sweep fitting is cold-start only; warm-started causal sweep fitting
+  remains Stage 6.2 work.
 - The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
   schema and fixed query schedule; adaptive estimator orchestration is not yet
   implemented.
 
 ## Next actions
 
-1. Independently review constrained oracle fitting.
-2. Implement the repeated cold-start sweep wrapper and researcher guidance.
-3. Run the integrated oracle/full-sweep verification gate.
+1. Independently review the repeated cold-start wrapper, regression, and
+   researcher guidance.
+2. Run the integrated Stage 6.1 senior review and address its complete finding
+   set before authorized synchronization.
+3. Design Stage 6.2 warm-started causal sweep fitting, including stable
+   resonance identities, failure-state handling, estimate age, and resource
+   use.

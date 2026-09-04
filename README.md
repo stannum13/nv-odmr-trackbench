@@ -32,8 +32,21 @@ odmrbench simulate --config bundled:drift
 only an explicit local raw file and preserves its row-major order; it does not
 download data, infer timestamps by default, or assign resolved raw units.
 `simulate` runs the bundled fixed schedule through a seeded, synthetic
-eight-resonance virtual instrument. Neither command fits or tracks resonances;
-estimators are the next stage.
+eight-resonance virtual instrument. Neither command invokes an estimator.
+
+## Offline full-sweep estimator
+
+The package now includes a constrained eight-resonance Lorentzian and
+pseudo-Voigt fitter plus `RepeatedFullSweepEstimator`, which independently
+cold-starts a fit for each completed sweep. The wrapper retains immutable
+attempt history and preserves each sweep's public completion metadata,
+including structured failures.
+
+See [docs/estimators.md](docs/estimators.md) for model, initialization, bounds,
+uncertainty, failure, ordering, and recording-interpretation guidance. A
+download-free generated example is available at
+`python examples/fit_synthetic_sweep.py`; its diagnostics are a software
+fixture, not a benchmark result.
 
 The installed wheel includes the deterministic `bundled:drift` scenario, so the
 command above works from any current directory. A source checkout retains its

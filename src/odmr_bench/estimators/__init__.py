@@ -4,6 +4,7 @@ from odmr_bench.estimators.fitting import (
     fit_spectrum,
     linearized_standard_errors,
 )
+from odmr_bench.estimators.full_sweep import RepeatedFullSweepEstimator
 from odmr_bench.estimators.initialization import initialize_spectrum
 from odmr_bench.estimators.types import (
     CompleteSweep,
@@ -21,6 +22,7 @@ __all__ = [
     "FitInitialGuess",
     "FitUncertainty",
     "InitializationDiagnostics",
+    "RepeatedFullSweepEstimator",
     "SpectrumFitResult",
     "SweepEstimate",
     "fit_spectrum",
