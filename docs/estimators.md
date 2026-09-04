@@ -117,17 +117,89 @@ cross-recording causal checks belong to that evaluator.
 This complete-sweep API is distinct from the sample-wise adaptive estimator
 interface planned for a later stage.
 
+## Warm-started completed sweeps
+
+`WarmStartedFullSweepEstimator` is a causal, completed-sweep baseline. It
+accepts one already acquired `CompleteSweep` at a time and only the latest
+earlier successful public fit may be the next warm source. It does not receive
+dynamics, snapshots, truth, future observations, or evaluator-private photon
+information. Callers should submit every acquired sweep in order.
+
+The constructor takes an immutable `FitConfiguration` plus two keyword
+options. `retry_cold_on_warm_failure=True` retains an eligible failed warm
+attempt and then performs at most one cold recovery on the same acquired
+sweep. `max_warm_start_age_updates=None` disables an update-count age limit;
+an explicitly configured positive integer rejects older warm sources and runs
+one cold attempt. Rejection affects seeding, not the availability of an older
+successful estimate.
+
+Before a warm fit, the prior polynomial baseline is transformed to the current
+overflow-safe sweep midpoint. This baseline rebase preserves the old baseline
+function at the new reference; any overflow, nonzero underflow, or otherwise
+unrepresentable product rejects warm use rather than inventing a coefficient.
+Changed grids and spans are supported when the prior resonance parameters are
+compatible with the current center boxes and configured bounds. The ordered
+center boxes assume eight resolved, noncrossing components; fitted ID order is
+not evidence of collision identity.
+
+Each accepted update is a `WarmSweepEstimate`. Its `attempts` retain one
+`SweepFitAttempt`, or the ordered failed-warm/conditional-cold pair. Every
+attempt exposes `start_kind`, `warm_source_update_index`, its full `fit`, and
+attempt CPU time. `warm_start_disposition`, `warm_start_rejection_code`, and
+`warm_start_message` distinguish use, age rejection, compatibility rejection,
+no successful prior, and a start-independent preflight failure. A failed warm
+attempt therefore remains visible before conditional cold recovery.
+
+`current_fit` is the final attempt on the current update. `active_fit` is
+instead the current success or the latest older success, with
+`active_source_update_index` identifying its origin. Thus current failure and
+an older active success are distinct; `is_stale` reports that distinction.
+Stale age is recorded independently as
+`estimate_age_submitted_observations`, `estimate_age_sequence_indices`, and
+`estimate_age_s`. These submitted-observation, external sequence-index, and
+timestamp bases are never substituted for or mixed with one another. A
+successful current fit has zero age on every available basis.
+
+Resource fields copy the submitted sweep exactly: `observation_count`,
+`cumulative_observation_count`, optional sequence/timestamp endpoints,
+`total_integration_time_s`, and `total_nominal_exposure_photons`. Retries add
+CPU and `nfev` but no acquisition resources. `total_nfev` sums retained
+attempts. `cpu_time_s` is the measured update-core process CPU interval through
+the instant before record construction/state append, is at least the attempt
+sum, and is machine-dependent diagnostic data rather than an acquisition-time
+or performance guarantee.
+
+The estimator exposes immutable `configuration`, `latest`, `history`, and
+`latest_success` properties, plus `update_sweep()` and `reset()`. Sequence and
+timestamp endpoint availability must remain consistent within a recording;
+sequence ranges cannot overlap and timestamps must increase. Endpoint
+inconsistency, overlap, and unexpected exceptions abort an update atomically.
+A benchmark harness must not skip that acquired sweep and continue as though it
+had been recorded. Call `reset()` between independent recordings so endpoint-
+availability modes, earlier successes, stale age, and source provenance cannot
+cross recording boundaries.
+
+This completed-sweep baseline makes no within-sweep realtime claim. It does not
+establish temporal bandwidth, realtime utility, universal speedup, collision
+identity, or matched-budget superiority. CPU time and evaluation counts are
+descriptive diagnostics only and must be interpreted alongside the unchanged
+acquisition resources and machine/software environment.
+
 ## Synthetic example and recording interpretation
 
 From a source checkout with the package installed, run:
 
 ```bash
 python examples/fit_synthetic_sweep.py
+python examples/fit_warm_started_sweeps.py
 ```
 
-The example generates one deterministic pseudo-Voigt sweep in memory and
-prints finite fitted center, FWHM, and Q diagnostics. It does not download a
-recording and its generated fixture is not a benchmark measurement.
+The first example generates one deterministic pseudo-Voigt sweep in memory and
+prints finite fitted center, FWHM, and Q diagnostics. The warm-started example
+generates three causally submitted drift sweeps and reports source, age,
+attempt, optimizer-evaluation, and process-CPU diagnostics. Neither downloads
+a recording, and neither generated fixture is a benchmark measurement or a
+performance comparison.
 
 A fit to the optional external recording can be described only as an apparent
 observable or offline reference. That recording has no verified eight-line

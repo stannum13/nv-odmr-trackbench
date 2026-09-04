@@ -4,9 +4,10 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 implementation — Frozen compound-attempt/warm-estimate records,
-shared guarded warm-start preparation, and the causal wrapper are complete;
-generated drift integration and researcher guidance are next.
+Stage 6.2 integrated review — Frozen compound-attempt/warm-estimate records,
+shared guarded warm-start preparation, the causal wrapper, fixed-snapshot drift
+integration, researcher guidance, and the download-free diagnostic are
+implemented and verified; fresh Task 4 and full-range reviews are next.
 
 ## Completed work
 
@@ -203,6 +204,15 @@ generated drift integration and researcher guidance are next.
   exposes separately aged stale active fits, counts acquisition resources once,
   and commits history/endpoints only after globally monotonic process-CPU timing
   and every public record construction succeed.
+- Validated the completed-sweep wrapper on one immutable, fixed-seed three-grid
+  drift family. Cold and warm estimators receive the identical frozen sweep
+  objects, changed-midpoint baseline rebasing remains compatible, ordered IDs
+  and fixed-fixture center/FWHM/Q bounds hold, and cumulative observations and
+  zero-age source promotion are exact. Separate regressions cover constant-
+  sweep preflight staleness, update-age rejection, center-outside-sweep cold
+  fallback, and deterministic failed-warm/one-cold recovery without duplicating
+  acquisition resources. The download-free example reports source, attempt,
+  age, `nfev`, and measured process CPU diagnostics without a speedup claim.
 
 ## Important scientific and design decisions
 
@@ -239,9 +249,14 @@ generated drift integration and researcher guidance are next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 590 passed.
-- `pytest`: 790 passed.
+- `pytest tests/estimators`: 597 passed.
+- `pytest`: 797 passed.
 - `ruff check .`: All checks passed.
+- The fail-fast package smoke built exactly one
+  `nv_odmr_trackbench-0.1.0.tar.gz` and one
+  `nv_odmr_trackbench-0.1.0-py3-none-any.whl`, then installed the wheel into a
+  fresh environment, imported all Stage 6.2 public aliases and
+  `WarmStartedFullSweepEstimator`, and ran the three-update example there.
 
 ## Known scientific limitations
 
@@ -271,9 +286,15 @@ generated drift integration and researcher guidance are next.
 - The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
   schema and fixed query schedule; adaptive estimator orchestration is not yet
   implemented.
+- Warm-started fitting operates only after a sweep completes. Its measured
+  update-core process CPU interval and optimizer evaluation count are
+  machine-dependent descriptive diagnostics and establish neither within-sweep
+  realtime utility nor universal computational improvement.
 
 ## Next actions
 
-1. Add and independently review the fixed generated drift regression,
-   researcher guidance, and download-free warm-start example.
-2. Run the integrated Stage 6.2 verification and synchronize it.
+1. Run the fresh Task 4 scientific/software review and resolve every Critical
+   or Important finding.
+2. Run the integrated Stage 6.2 review from approved design commit `e8c8b44`
+   through the final implementation, then synchronize only after that review
+   and its complete verification gates are clean.

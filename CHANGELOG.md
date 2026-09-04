@@ -66,6 +66,14 @@ once a package version is introduced.
 
 ### Added
 
+- Added fixed-snapshot drift integration coverage and a download-free
+  warm-started completed-sweep example. The regressions freeze truth at sweep
+  construction, feed identical immutable sweeps to cold and warm paths, cover
+  changed-grid rebasing, stale/age and cold-recovery provenance, preserve
+  acquisition accounting, and treat CPU/`nfev` as descriptive diagnostics
+  rather than realtime or universal-speedup evidence. Researcher guidance now
+  documents warm-source, rebase, retry, staleness, age-base, resource, reset,
+  atomicity, ordered-center, and interpretation boundaries.
 - Added a causal warm-started completed-sweep estimator with successful-prior-
   only seeding, strict endpoint modes, explicit age/compatibility rejection,
   one eligible same-acquisition cold recovery, independently derived stale-fit

@@ -37,18 +37,27 @@ eight-resonance virtual instrument. Neither command invokes an estimator.
 ## Offline full-sweep estimator
 
 The package now includes a constrained eight-component Lorentzian and
-pseudo-Voigt fitter plus `RepeatedFullSweepEstimator`, which independently
-cold-starts a fit for each completed sweep. The wrapper retains immutable
-attempt history and preserves each sweep's public completion metadata,
-including structured failures. Fit success is conditional on the model,
-initializer, and configured quality thresholds; it does not prove the presence
-of eight physical resonances.
+pseudo-Voigt fitter plus two completed-sweep wrappers.
+`RepeatedFullSweepEstimator` independently cold-starts each sweep;
+`WarmStartedFullSweepEstimator` may seed from only the latest earlier
+successful public fit and records warm rejection, recovery, source, stale age,
+CPU, and evaluation diagnostics without duplicating acquisition resources. Fit
+success is conditional on the model, initializer, and configured quality
+thresholds; it does not prove the presence of eight physical resonances.
 
-See [docs/estimators.md](docs/estimators.md) for model, initialization, bounds,
-uncertainty, failure, ordering, and recording-interpretation guidance. A
-download-free generated example is available at
-`python examples/fit_synthetic_sweep.py`; its diagnostics are a software
-fixture, not a benchmark result.
+See [docs/estimators.md](docs/estimators.md), including its
+[warm-started completed-sweep guidance](docs/estimators.md#warm-started-completed-sweeps),
+for model, initialization, bounds, uncertainty, failure, source, age, resource,
+ordering, and recording-interpretation guidance. Download-free generated
+diagnostics are available at:
+
+```bash
+python examples/fit_synthetic_sweep.py
+python examples/fit_warm_started_sweeps.py
+```
+
+They are software fixtures, not benchmark results or evidence of a universal
+warm-start speedup.
 
 The installed wheel includes the deterministic `bundled:drift` scenario, so the
 command above works from any current directory. A source checkout retains its
