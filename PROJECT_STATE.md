@@ -4,8 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 planning — The warm-started causal completed-sweep design passed
-adversarial review and its test-driven implementation plan is next.
+Stage 6.2 implementation — The corrected four-task TDD plan passed adversarial
+re-review with no findings; immutable compound-attempt records are next.
 
 ## Completed work
 
@@ -171,6 +171,17 @@ adversarial review and its test-driven implementation plan is next.
   warm/cold attempt provenance, cold recovery, stale active estimates with
   distinct age bases, nonoverlapping endpoints, and acquisition-versus-compute
   resource accounting.
+- Drafted the complete four-gate Stage 6.2 TDD implementation plan: frozen
+  attempt/estimate contracts, shared fitter preparation and exact finite-float
+  baseline rebasing, the causal warm-start/recovery/age/CPU state machine, and
+  frozen-snapshot drift integration with documentation, example, build, and
+  isolated-wheel smoke. After its initial 0-Critical/7-Important/4-Minor review,
+  corrected the lost post-preflight rank variable, attempt/source and
+  disposition/active invariants, typed compatibility translation/precedence,
+  global timer ordering/atomicity, behavioral TDD increments, exact drift
+  configuration, wrapper-only constant failure, branch joins, and fail-fast
+  wheel/sdist smoke. The revised plan is awaiting re-review and does not
+  implement the feature.
 
 ## Important scientific and design decisions
 
@@ -244,7 +255,6 @@ adversarial review and its test-driven implementation plan is next.
 
 ## Next actions
 
-1. Write and review the Stage 6.2 test-driven implementation plan.
-2. Implement and independently review the causal wrapper, compatibility/rebase
+1. Implement and independently review the causal wrapper, compatibility/rebase
    helper, records, regressions, and researcher guidance.
-3. Run the integrated Stage 6.2 verification and synchronize it.
+2. Run the integrated Stage 6.2 verification and synchronize it.

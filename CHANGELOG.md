@@ -66,6 +66,17 @@ once a package version is introduced.
 
 ### Added
 
+- Drafted the four-task Stage 6.2 test-driven implementation plan covering
+  exhaustive warm-attempt/active-age contracts, shared start-independent fitter
+  preparation, overflow-safe polynomial rebasing, causal recovery and CPU
+  timing, frozen-snapshot drift regressions, researcher guidance, and isolated
+  wheel verification. Revised it after adversarial review to preserve the
+  post-preflight rank local, close diagnostic/disposition/active-state
+  invariants, type compatibility failures, globally validate timer ordering and
+  final-clock atomicity, freeze the scientific configuration, use behavioral
+  RED/GREEN increments, cover every source-selection join, and make exact
+  sdist/wheel/example smoke fail fast. The corrected plan is awaiting re-review;
+  no Stage 6.2 implementation is included yet.
 - Specified Stage 6.2 warm-started causal completed-sweep fitting: successful-
   prior-only seeding, polynomial-baseline rebasing, explicit compatibility and
   age rejection, retained warm/cold attempts, conditional same-sweep cold
