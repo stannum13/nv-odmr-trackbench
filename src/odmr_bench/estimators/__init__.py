@@ -14,6 +14,11 @@ from odmr_bench.estimators.types import (
     InitializationDiagnostics,
     SpectrumFitResult,
     SweepEstimate,
+    SweepFitAttempt,
+    SweepStartKind,
+    WarmStartDisposition,
+    WarmStartRejectionCode,
+    WarmSweepEstimate,
 )
 
 __all__ = [
@@ -25,6 +30,11 @@ __all__ = [
     "RepeatedFullSweepEstimator",
     "SpectrumFitResult",
     "SweepEstimate",
+    "SweepFitAttempt",
+    "SweepStartKind",
+    "WarmStartDisposition",
+    "WarmStartRejectionCode",
+    "WarmSweepEstimate",
     "fit_spectrum",
     "initialize_spectrum",
     "linearized_standard_errors",

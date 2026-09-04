@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from itertools import pairwise
 from numbers import Integral, Real
+from typing import Literal, TypeAlias
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -767,6 +769,383 @@ class SpectrumFitResult:
         object.__setattr__(self, "degrees_of_freedom", degrees_of_freedom)
         object.__setattr__(self, "jacobian_rank", jacobian_rank)
         object.__setattr__(self, "q_values", q_values)
+
+
+SweepStartKind: TypeAlias = Literal["preflight", "cold", "warm"]
+WarmStartDisposition: TypeAlias = Literal[
+    "no_successful_prior",
+    "used",
+    "rejected_age",
+    "rejected_compatibility",
+    "not_applicable_preflight",
+]
+WarmStartRejectionCode: TypeAlias = Literal[
+    "age_limit_exceeded",
+    "baseline_rebase_unrepresentable",
+    "center_outside_sweep",
+    "center_separation_incompatible",
+    "resonance_bounds_incompatible",
+    "parameterization_unrepresentable",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class SweepFitAttempt:
+    """One preflight, cold, or warm fit attempt for a submitted sweep."""
+
+    start_kind: SweepStartKind
+    warm_source_update_index: int | None
+    fit: SpectrumFitResult
+    cpu_time_s: float
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.start_kind, str):
+            raise TypeError("start_kind must be a string")
+        if self.start_kind not in {"preflight", "cold", "warm"}:
+            raise ValueError("start_kind must be preflight, cold, or warm")
+        if not isinstance(self.fit, SpectrumFitResult):
+            raise TypeError("fit must be a SpectrumFitResult")
+
+        if self.start_kind == "warm":
+            if self.warm_source_update_index is None:
+                raise ValueError("warm attempts require a source update index")
+            warm_source_update_index = _nonnegative_int(
+                self.warm_source_update_index, "warm_source_update_index"
+            )
+        else:
+            if self.warm_source_update_index is not None:
+                raise ValueError(
+                    "cold and preflight attempts cannot have a warm source"
+                )
+            warm_source_update_index = None
+
+        failure_code = self.fit.failure_code
+        source = self.fit.diagnostics.source
+        if self.start_kind == "preflight":
+            if (
+                self.fit.success
+                or failure_code
+                not in {"insufficient_samples", "uninformative_sweep"}
+                or source != "none"
+                or self.fit.nfev != 0
+                or self.fit.initial_guess is not None
+            ):
+                raise ValueError("preflight attempts require a preflight failure")
+        elif self.start_kind == "warm":
+            if (
+                (not self.fit.success and failure_code not in {
+                    "optimization_failed",
+                    "quality_failed",
+                })
+                or source != "user"
+            ):
+                raise ValueError("warm attempts require user-start optimizer outcomes")
+        elif failure_code in {"insufficient_samples", "uninformative_sweep"}:
+            raise ValueError("cold attempts cannot contain preflight failures")
+        elif failure_code == "initialization_failed":
+            if source not in {"detected", "fallback", "none"}:
+                raise ValueError("cold initialization provenance is invalid")
+        elif source not in {"detected", "fallback"}:
+            raise ValueError("cold optimizer attempts require automatic initialization")
+
+        object.__setattr__(
+            self, "warm_source_update_index", warm_source_update_index
+        )
+        object.__setattr__(
+            self, "cpu_time_s", _nonnegative_float(self.cpu_time_s, "cpu_time_s")
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class WarmSweepEstimate:
+    """A compound warm-start update and its selected active fit."""
+
+    update_index: int
+    attempts: Sequence[SweepFitAttempt]
+    warm_start_disposition: WarmStartDisposition
+    warm_start_rejection_code: WarmStartRejectionCode | None
+    warm_start_message: str | None
+    active_fit: SpectrumFitResult | None
+    active_source_update_index: int | None
+    estimate_age_submitted_observations: int | None
+    estimate_age_sequence_indices: int | None
+    estimate_age_s: float | None
+    observation_count: int
+    cumulative_observation_count: int
+    first_sequence_index: int | None
+    last_sequence_index: int | None
+    last_timestamp_s: float | None
+    total_integration_time_s: float | None
+    total_nominal_exposure_photons: float | None
+    cpu_time_s: float
+
+    def __post_init__(self) -> None:
+        update_index = _nonnegative_int(self.update_index, "update_index")
+        active_source_update_index = _optional_int(
+            self.active_source_update_index, "active_source_update_index"
+        )
+        estimate_age_submitted_observations = _optional_int(
+            self.estimate_age_submitted_observations,
+            "estimate_age_submitted_observations",
+        )
+        estimate_age_sequence_indices = _optional_int(
+            self.estimate_age_sequence_indices, "estimate_age_sequence_indices"
+        )
+        estimate_age_s = _optional_nonnegative_float(
+            self.estimate_age_s, "estimate_age_s"
+        )
+        observation_count = _nonnegative_int(
+            self.observation_count, "observation_count"
+        )
+        if observation_count == 0:
+            raise ValueError("observation_count must be positive")
+        cumulative_observation_count = _nonnegative_int(
+            self.cumulative_observation_count, "cumulative_observation_count"
+        )
+        first_sequence_index = (
+            None
+            if self.first_sequence_index is None
+            else _nonnegative_int(self.first_sequence_index, "first_sequence_index")
+        )
+        last_sequence_index = (
+            None
+            if self.last_sequence_index is None
+            else _nonnegative_int(self.last_sequence_index, "last_sequence_index")
+        )
+        last_timestamp_s = _optional_nonnegative_float(
+            self.last_timestamp_s, "last_timestamp_s"
+        )
+        total_integration_time_s = _optional_positive_float(
+            self.total_integration_time_s, "total_integration_time_s"
+        )
+        total_nominal_exposure_photons = _optional_nonnegative_float(
+            self.total_nominal_exposure_photons,
+            "total_nominal_exposure_photons",
+        )
+        cpu_time_s = _nonnegative_float(self.cpu_time_s, "cpu_time_s")
+
+        if isinstance(self.attempts, (str, bytes)):
+            raise TypeError("attempts must be a sequence of SweepFitAttempt values")
+        try:
+            attempts = tuple(self.attempts)
+        except TypeError as exc:
+            raise TypeError(
+                "attempts must be a sequence of SweepFitAttempt values"
+            ) from exc
+        if len(attempts) not in {1, 2}:
+            raise ValueError("attempts must contain one or two attempts")
+        if not all(isinstance(attempt, SweepFitAttempt) for attempt in attempts):
+            raise TypeError("attempts must contain only SweepFitAttempt values")
+        if any(
+            attempt.start_kind == "warm"
+            and (
+                attempt.warm_source_update_index is None
+                or attempt.warm_source_update_index >= update_index
+            )
+            for attempt in attempts
+        ):
+            raise ValueError("warm attempt sources must precede the update")
+
+        if not isinstance(self.warm_start_disposition, str):
+            raise TypeError("warm_start_disposition must be a string")
+        dispositions = {
+            "no_successful_prior",
+            "used",
+            "rejected_age",
+            "rejected_compatibility",
+            "not_applicable_preflight",
+        }
+        if self.warm_start_disposition not in dispositions:
+            raise ValueError("warm_start_disposition is not recognized")
+        rejection_code = _optional_string(
+            self.warm_start_rejection_code, "warm_start_rejection_code"
+        )
+        rejection_codes = {
+            "age_limit_exceeded",
+            "baseline_rebase_unrepresentable",
+            "center_outside_sweep",
+            "center_separation_incompatible",
+            "resonance_bounds_incompatible",
+            "parameterization_unrepresentable",
+        }
+        if rejection_code is not None and rejection_code not in rejection_codes:
+            raise ValueError("warm_start_rejection_code is not recognized")
+        message = _optional_string(self.warm_start_message, "warm_start_message")
+
+        disposition = self.warm_start_disposition
+        kinds = tuple(attempt.start_kind for attempt in attempts)
+        if disposition == "not_applicable_preflight":
+            if kinds != ("preflight",):
+                raise ValueError("preflight disposition requires one preflight attempt")
+        elif disposition in {
+            "no_successful_prior",
+            "rejected_age",
+            "rejected_compatibility",
+        }:
+            if kinds != ("cold",):
+                raise ValueError("ordinary dispositions require one cold attempt")
+        elif kinds == ("warm", "cold"):
+            if attempts[0].fit.failure_code not in {
+                "optimization_failed",
+                "quality_failed",
+            }:
+                raise ValueError("cold recovery requires a failed warm attempt")
+        elif kinds != ("warm",):
+            raise ValueError("used disposition requires warm or warm-cold attempts")
+
+        if disposition == "rejected_age":
+            if rejection_code != "age_limit_exceeded":
+                raise ValueError("rejected_age requires age_limit_exceeded")
+            message = _required_string(message, "warm_start_message")
+        elif disposition == "rejected_compatibility":
+            if rejection_code not in rejection_codes - {"age_limit_exceeded"}:
+                raise ValueError("rejected_compatibility requires a compatibility code")
+            message = _required_string(message, "warm_start_message")
+        elif rejection_code is not None or message is not None:
+            raise ValueError("this disposition cannot have a rejection code or message")
+
+        if self.active_fit is not None and not isinstance(
+            self.active_fit, SpectrumFitResult
+        ):
+            raise TypeError("active_fit must be a SpectrumFitResult or None")
+        if self.active_fit is not None and not self.active_fit.success:
+            raise ValueError("active_fit must be successful")
+
+        sequence_metadata_available = (
+            first_sequence_index is not None and last_sequence_index is not None
+        )
+        if (first_sequence_index is None) != (last_sequence_index is None):
+            raise ValueError("sequence endpoints must be jointly available")
+        timestamp_available = last_timestamp_s is not None
+        current_fit = attempts[-1].fit
+        if current_fit.success:
+            if self.active_fit is not current_fit:
+                raise ValueError("a current success must be the active fit")
+            if active_source_update_index != update_index:
+                raise ValueError("a current success must use the current source index")
+            if estimate_age_submitted_observations != 0:
+                raise ValueError("a current success must have zero submitted age")
+            expected_sequence_age = 0 if sequence_metadata_available else None
+            if estimate_age_sequence_indices != expected_sequence_age:
+                raise ValueError(
+                    "current sequence age contradicts endpoint availability"
+                )
+            expected_seconds_age = 0.0 if timestamp_available else None
+            if estimate_age_s != expected_seconds_age:
+                raise ValueError(
+                    "current seconds age contradicts timestamp availability"
+                )
+        elif self.active_fit is None:
+            if any(
+                value is not None
+                for value in (
+                    active_source_update_index,
+                    estimate_age_submitted_observations,
+                    estimate_age_sequence_indices,
+                    estimate_age_s,
+                )
+            ):
+                raise ValueError("no active fit permits no source or age fields")
+        else:
+            if (
+                active_source_update_index is None
+                or not 0 <= active_source_update_index < update_index
+            ):
+                raise ValueError("a stale fit requires an older source update")
+            if (
+                estimate_age_submitted_observations is None
+                or estimate_age_submitted_observations <= 0
+            ):
+                raise ValueError("a stale fit requires positive submitted age")
+            if sequence_metadata_available:
+                if (
+                    estimate_age_sequence_indices is None
+                    or estimate_age_sequence_indices <= 0
+                ):
+                    raise ValueError("a stale fit requires positive sequence age")
+            elif estimate_age_sequence_indices is not None:
+                raise ValueError("sequence age requires sequence endpoints")
+            if timestamp_available:
+                if estimate_age_s is None or estimate_age_s <= 0.0:
+                    raise ValueError("a stale fit requires positive seconds age")
+            elif estimate_age_s is not None:
+                raise ValueError("seconds age requires a completion timestamp")
+
+        if not current_fit.success:
+            if disposition == "no_successful_prior" and self.active_fit is not None:
+                raise ValueError("no_successful_prior cannot retain an active fit")
+            if disposition in {
+                "used",
+                "rejected_age",
+                "rejected_compatibility",
+            } and self.active_fit is None:
+                raise ValueError("a failed seeded update requires a stale active fit")
+            if (
+                disposition == "used"
+                and active_source_update_index
+                != attempts[0].warm_source_update_index
+            ):
+                raise ValueError("failed warm use must retain its warm source")
+
+        if cumulative_observation_count < observation_count:
+            raise ValueError(
+                "cumulative_observation_count cannot be below observation_count"
+            )
+        if sequence_metadata_available:
+            assert first_sequence_index is not None
+            assert last_sequence_index is not None
+            if first_sequence_index != last_sequence_index - observation_count + 1:
+                raise ValueError("sequence endpoints contradict observation_count")
+        if cpu_time_s < math.fsum(attempt.cpu_time_s for attempt in attempts):
+            raise ValueError("cpu_time_s cannot be below the attempt CPU sum")
+
+        object.__setattr__(self, "update_index", update_index)
+        object.__setattr__(self, "attempts", attempts)
+        object.__setattr__(self, "warm_start_rejection_code", rejection_code)
+        object.__setattr__(self, "warm_start_message", message)
+        object.__setattr__(
+            self, "active_source_update_index", active_source_update_index
+        )
+        object.__setattr__(
+            self,
+            "estimate_age_submitted_observations",
+            estimate_age_submitted_observations,
+        )
+        object.__setattr__(
+            self, "estimate_age_sequence_indices", estimate_age_sequence_indices
+        )
+        object.__setattr__(self, "estimate_age_s", estimate_age_s)
+        object.__setattr__(self, "observation_count", observation_count)
+        object.__setattr__(
+            self, "cumulative_observation_count", cumulative_observation_count
+        )
+        object.__setattr__(self, "first_sequence_index", first_sequence_index)
+        object.__setattr__(self, "last_sequence_index", last_sequence_index)
+        object.__setattr__(self, "last_timestamp_s", last_timestamp_s)
+        object.__setattr__(
+            self, "total_integration_time_s", total_integration_time_s
+        )
+        object.__setattr__(
+            self,
+            "total_nominal_exposure_photons",
+            total_nominal_exposure_photons,
+        )
+        object.__setattr__(self, "cpu_time_s", cpu_time_s)
+
+    @property
+    def current_fit(self) -> SpectrumFitResult:
+        return self.attempts[-1].fit
+
+    @property
+    def is_stale(self) -> bool:
+        return (
+            self.active_fit is not None
+            and self.active_source_update_index != self.update_index
+        )
+
+    @property
+    def total_nfev(self) -> int:
+        return sum(attempt.fit.nfev for attempt in self.attempts)
 
 
 @dataclass(frozen=True, slots=True)

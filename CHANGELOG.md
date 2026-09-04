@@ -66,6 +66,9 @@ once a package version is introduced.
 
 ### Added
 
+- Added frozen public warm-sweep attempt and estimate contracts with closed
+  provenance/disposition states, explicit active-result age, immutable compound
+  attempts, and validated acquisition/CPU resource accounting.
 - Drafted the four-task Stage 6.2 test-driven implementation plan covering
   exhaustive warm-attempt/active-age contracts, shared start-independent fitter
   preparation, overflow-safe polynomial rebasing, causal recovery and CPU
@@ -75,8 +78,8 @@ once a package version is introduced.
   invariants, type compatibility failures, globally validate timer ordering and
   final-clock atomicity, freeze the scientific configuration, use behavioral
   RED/GREEN increments, cover every source-selection join, and make exact
-  sdist/wheel/example smoke fail fast. The corrected plan is awaiting re-review;
-  no Stage 6.2 implementation is included yet.
+  sdist/wheel/example smoke fail fast. The corrected plan passed adversarial
+  re-review with no findings before implementation began.
 - Specified Stage 6.2 warm-started causal completed-sweep fitting: successful-
   prior-only seeding, polynomial-baseline rebasing, explicit compatibility and
   age rejection, retained warm/cold attempts, conditional same-sweep cold

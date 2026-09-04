@@ -4,8 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 implementation — The corrected four-task TDD plan passed adversarial
-re-review with no findings; immutable compound-attempt records are next.
+Stage 6.2 implementation — Frozen compound-attempt and warm-estimate records
+are complete; shared preflight and warm-start preparation are next.
 
 ## Completed work
 
@@ -180,8 +180,15 @@ re-review with no findings; immutable compound-attempt records are next.
   disposition/active invariants, typed compatibility translation/precedence,
   global timer ordering/atomicity, behavioral TDD increments, exact drift
   configuration, wrapper-only constant failure, branch joins, and fail-fast
-  wheel/sdist smoke. The revised plan is awaiting re-review and does not
-  implement the feature.
+  wheel/sdist smoke. The revised plan subsequently passed adversarial
+  re-review with no findings and preceded feature implementation.
+- Added frozen, slotted `SweepFitAttempt` and `WarmSweepEstimate` records with
+  closed public literals, immutable attempt tuples, exact warm/cold/preflight
+  provenance, disposition and rejection-code matrices, identity-based active
+  result selection, explicit stale-age semantics, endpoint/resource domains,
+  compound CPU accounting, and derived current-fit, staleness, and evaluation
+  totals. Constructors canonicalize supported NumPy scalars without using
+  array-valued fit-result equality.
 
 ## Important scientific and design decisions
 
@@ -218,8 +225,8 @@ re-review with no findings; immutable compound-attempt records are next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 289 passed.
-- `pytest`: 489 passed.
+- `pytest tests/estimators`: 443 passed.
+- `pytest`: 643 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -247,14 +254,15 @@ re-review with no findings; immutable compound-attempt records are next.
 - End-to-end benchmark reproducibility has not yet been demonstrated beyond the
   installable package, command smoke tests, and deterministic synthetic
   configuration fixtures.
-- Completed-sweep fitting is cold-start only; warm-started causal sweep fitting
-  remains Stage 6.2 work.
+- The public warm-sweep result contracts exist, but the preparation helper and
+  causal wrapper remain Stage 6.2 work; executable completed-sweep fitting is
+  still cold-start only.
 - The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
   schema and fixed query schedule; adaptive estimator orchestration is not yet
   implemented.
 
 ## Next actions
 
-1. Implement and independently review the causal wrapper, compatibility/rebase
-   helper, records, regressions, and researcher guidance.
+1. Implement and independently review the compatibility/rebase helper, causal
+   wrapper, regressions, and researcher guidance.
 2. Run the integrated Stage 6.2 verification and synchronize it.
