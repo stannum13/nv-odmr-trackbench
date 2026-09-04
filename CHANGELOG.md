@@ -66,6 +66,22 @@ once a package version is introduced.
 
 ### Added
 
+- Added exact frozen/slotted two-point query, partial-pair, pair-result,
+  identity-estimate, aggregate-estimate, and update contracts. Intrinsic
+  validation closes local query/observation echoes, alternating adjacent pair
+  sides, public reference/release selection, success/failure diagnostic
+  matrices, active-source and history equations, causal ages, pending/partial
+  states, stopped boundaries, safe resource counts, and update-side echoes.
+  Accepted IDs and closed string literals are canonicalized to exact built-in
+  strings, preventing capability-bearing string subclasses from remaining
+  reachable through the estimator record graph.
+  The estimator record graph remains free of hidden truth, full instrument
+  observations/resources, expected photons, callbacks, evaluator objects, and
+  futures; contextual reset, tracker, runner, and acquisition authentication
+  remains deliberately outside these constructors. After focused fixes for
+  diagnostic prefixes, accepted-trace endpoints, target-center echoes, exact
+  nested record types, and capability-bearing string subclasses, the task
+  passed final spec and quality re-review with no findings.
 - Added frozen/slotted Stage 6.3 calibration-source, per-identity-calibration,
   and aggregate-calibration contracts. Caller-asserted sources snapshot their
   declared fit, configuration, identity, observation, provenance, resource,

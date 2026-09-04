@@ -21,7 +21,14 @@ provenance construction is rejected; aggregate calibrations preserve the exact
 source object and snapshot tracker configuration and identity records. Task 2
 passed per-task spec and quality re-review after adding explicit nested-fit
 reconstruction for diagnostics, optional uncertainty, initial guesses, fitted
-parameters, and Q values. Task 3 is next.
+parameters, and Q values. Task 3 adds the exact frozen/slotted query, partial-
+pair, pair-result, identity-estimate, aggregate-estimate, and update records.
+Their constructors enforce only locally represented scalar, echo, diagnostic,
+history, age, pending-state, and safe-resource invariants; authentication of
+reset state, acquisition context, and evaluator resources remains with later
+owners. Task 3's per-task reviews found four Important intrinsic-state gaps and
+one scalar-subclass capability leak; all received focused RED/GREEN fixes, and
+the final spec and quality re-review passed with no findings. Task 4 is next.
 
 ## Completed work
 
@@ -268,6 +275,17 @@ parameters, and Q values. Task 3 is next.
   owning implementations. The plan is final-re-review-pending; no Stage 6.3
   production implementation has begun. The final bounded plan re-review
   reported zero Critical, Important, or Minor findings.
+- Added the six Stage 6.3 estimator-state records with exact public field
+  surfaces and exports. Query/partial/pair construction now rejects local
+  index, identity, side, observation, arrival, reference, release, and policy-
+  diagnostic contradictions. Identity/aggregate/update construction enforces
+  signed calibration references, nonnegative pair references/releases/ages,
+  active-source/history/counter/pending/partial equations, stopped boundaries,
+  safe resource counts, seeds, and accepted-side echoes. Recursive structural
+  coverage keeps truth, instrument, full observation/resource, expected-photon,
+  callback, evaluator, and future references outside the estimator graph;
+  accepted IDs and closed string literals are canonical built-in strings so
+  scalar subclasses cannot carry capabilities into that graph.
 
 ## Important scientific and design decisions
 
@@ -304,8 +322,8 @@ parameters, and Q values. Task 3 is next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 597 passed.
-- `pytest`: 797 passed.
+- `pytest tests/estimators`: 676 passed.
+- `pytest`: 876 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -348,6 +366,6 @@ parameters, and Q values. Task 3 is next.
 
 ## Next actions
 
-1. Execute Stage 6.3 Task 3: query, pair, identity-estimate,
-   aggregate-estimate, and update contracts using strict RED/GREEN cycles.
-2. Run a fresh per-task spec and quality review before advancing to Task 4.
+1. Execute Stage 6.3 Task 4: estimator-safe atomic resources and the caller-
+   asserted source factory.
+2. Run a fresh per-task spec and quality review before advancing to Task 5.
