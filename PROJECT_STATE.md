@@ -4,10 +4,9 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 integrated review — Frozen compound-attempt/warm-estimate records,
-shared guarded warm-start preparation, the causal wrapper, fixed-snapshot drift
-integration, researcher guidance, and the download-free diagnostic are
-implemented and verified; fresh Task 4 and full-range reviews are next.
+Stage 6.2 locally complete — The causal warm-started sweep estimator, generated
+drift regression, documentation, package smoke, and integrated re-review are
+clean. The reviewed range is ready for synchronization before Stage 6.3 design.
 
 ## Completed work
 
@@ -293,8 +292,6 @@ implemented and verified; fresh Task 4 and full-range reviews are next.
 
 ## Next actions
 
-1. Run the fresh Task 4 scientific/software review and resolve every Critical
-   or Important finding.
-2. Run the integrated Stage 6.2 review from approved design commit `e8c8b44`
-   through the final implementation, then synchronize only after that review
-   and its complete verification gates are clean.
+1. Synchronize the verified Stage 6.2 commit range and confirm remote CI.
+2. Design Stage 6.3 calibrated two-point center tracking without hidden-truth or
+   arbitrary-gain shortcuts.

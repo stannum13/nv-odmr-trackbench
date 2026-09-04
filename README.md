@@ -34,6 +34,14 @@ download data, infer timestamps by default, or assign resolved raw units.
 `simulate` runs the bundled fixed schedule through a seeded, synthetic
 eight-resonance virtual instrument. Neither command invokes an estimator.
 
+The installed wheel includes the deterministic `bundled:drift` scenario, so
+`odmrbench simulate --config bundled:drift` works from an arbitrary current
+directory. By contrast, paths under `configs/` and `examples/` refer to files
+in a source checkout and are not wheel-contained. The checkout retains its
+human-readable configuration at `configs/drift.yaml`; from the repository
+root, use `odmrbench simulate --config configs/drift.yaml` when changing or
+inspecting that file.
+
 ## Offline full-sweep estimator
 
 The package now includes a constrained eight-component Lorentzian and
@@ -48,8 +56,9 @@ thresholds; it does not prove the presence of eight physical resonances.
 See [docs/estimators.md](docs/estimators.md), including its
 [warm-started completed-sweep guidance](docs/estimators.md#warm-started-completed-sweeps),
 for model, initialization, bounds, uncertainty, failure, source, age, resource,
-ordering, and recording-interpretation guidance. Download-free generated
-diagnostics are available at:
+ordering, and recording-interpretation guidance. From the repository root of a
+source checkout with the package installed, run these download-free generated
+diagnostics:
 
 ```bash
 python examples/fit_synthetic_sweep.py
@@ -57,13 +66,9 @@ python examples/fit_warm_started_sweeps.py
 ```
 
 They are software fixtures, not benchmark results or evidence of a universal
-warm-start speedup.
-
-The installed wheel includes the deterministic `bundled:drift` scenario, so the
-command above works from any current directory. A source checkout retains its
-human-readable source example at `configs/drift.yaml`; use
-`odmrbench simulate --config configs/drift.yaml` when changing or inspecting
-that file.
+warm-start speedup. The `examples/` scripts are source-tree files, are not
+contained in the wheel, and require either the repository-root commands above
+or explicit paths to the checkout.
 
 Read [docs/datasets.md](docs/datasets.md) before obtaining or replaying the
 optional CC BY data, including its explicit download URL, size, checksum, and

@@ -126,12 +126,13 @@ dynamics, snapshots, truth, future observations, or evaluator-private photon
 information. Callers should submit every acquired sweep in order.
 
 The constructor takes an immutable `FitConfiguration` plus two keyword
-options. `retry_cold_on_warm_failure=True` retains an eligible failed warm
-attempt and then performs at most one cold recovery on the same acquired
-sweep. `max_warm_start_age_updates=None` disables an update-count age limit;
-an explicitly configured positive integer rejects older warm sources and runs
-one cold attempt. Rejection affects seeding, not the availability of an older
-successful estimate.
+options. `retry_cold_on_warm_failure=True` retains a failed warm attempt whose
+failure code is exactly `optimization_failed` or `quality_failed`, then
+performs at most one cold recovery on the same acquired sweep. Other failure
+codes do not trigger a retry. `max_warm_start_age_updates=None` disables an
+update-count age limit; an explicitly configured positive integer rejects older
+warm sources and runs one cold attempt. Rejection affects seeding, not the
+availability of an older successful estimate.
 
 Before a warm fit, the prior polynomial baseline is transformed to the current
 overflow-safe sweep midpoint. This baseline rebase preserves the old baseline
