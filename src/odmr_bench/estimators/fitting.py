@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from numbers import Integral, Real
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -34,6 +35,137 @@ def _free_parameter_count(configuration: FitConfiguration) -> int:
     )
 
 
+def _real_array(
+    value: ArrayLike, name: str
+) -> tuple[NDArray[np.float64] | None, str | None]:
+    """Validate a real numeric array without silently projecting complex values."""
+    try:
+        raw = np.asarray(value)
+    except (TypeError, ValueError):
+        return None, f"{name} must be a numeric array"
+    if np.iscomplexobj(raw) or (
+        raw.dtype == object and any(np.iscomplexobj(item) for item in raw.ravel())
+    ):
+        return None, f"{name} must not contain complex values"
+    try:
+        return np.asarray(raw, dtype=np.float64), None
+    except (TypeError, ValueError, OverflowError):
+        return None, f"{name} must be a numeric array"
+
+
+def _real_scalar(value: object, name: str) -> tuple[float | None, str | None]:
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (Real, np.integer, np.floating)
+    ):
+        return None, f"{name} must be a real scalar"
+    try:
+        canonical = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None, f"{name} must be finite"
+    if not np.isfinite(canonical):
+        return None, f"{name} must be finite"
+    return canonical, None
+
+
+def _stable_row_norms(matrix: NDArray[np.float64]) -> NDArray[np.float64]:
+    """Return Euclidean row norms without squaring extreme finite entries."""
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        return np.asarray(np.hypot.reduce(np.abs(matrix), axis=1), dtype=np.float64)
+
+
+def _packed_linearized_covariance_factor(
+    jacobian: ArrayLike,
+    scaled_cost: object,
+    degrees_of_freedom: object,
+    rank_rtol: object,
+) -> tuple[NDArray[np.float64] | None, int | None, str | None]:
+    """Return a packed covariance factor and rank from one validated SVD."""
+    matrix, array_reason = _real_array(jacobian, "Jacobian")
+    if matrix is None:
+        return None, None, array_reason
+    if matrix.ndim != 2 or matrix.shape[1] == 0:
+        return None, None, "Jacobian must be a nonempty two-dimensional matrix"
+    column_count = matrix.shape[1]
+    if not np.all(np.isfinite(matrix)):
+        return None, None, "Jacobian must be finite"
+    rank_tolerance, scalar_reason = _real_scalar(rank_rtol, "rank_rtol")
+    if rank_tolerance is None:
+        return None, None, scalar_reason
+    if not 0.0 < rank_tolerance < 1.0:
+        return None, None, "rank_rtol must be finite and within (0, 1)"
+    try:
+        _, singular_values, right_vectors_t = np.linalg.svd(matrix, full_matrices=False)
+    except np.linalg.LinAlgError:
+        return None, None, "Jacobian SVD failed"
+    if singular_values.size == 0 or not np.all(np.isfinite(singular_values)):
+        return None, None, "Jacobian SVD produced invalid singular values"
+    cutoff = float(np.max(singular_values)) * rank_tolerance
+    retained = singular_values > cutoff
+    rank = int(np.count_nonzero(retained))
+    if rank != column_count:
+        return None, rank, "scaled Jacobian is rank deficient"
+    if isinstance(degrees_of_freedom, (bool, np.bool_)) or not isinstance(
+        degrees_of_freedom, (Integral, np.integer)
+    ):
+        return None, rank, "degrees of freedom must be an integer"
+    canonical_dof = int(degrees_of_freedom)
+    if canonical_dof <= 0:
+        return None, rank, "degrees of freedom must be positive"
+    try:
+        dof_scale = float(canonical_dof)
+    except (ValueError, OverflowError):
+        return None, rank, "degrees of freedom must be finite"
+    if not np.isfinite(dof_scale):
+        return None, rank, "degrees of freedom must be finite"
+    canonical_cost, scalar_reason = _real_scalar(scaled_cost, "scaled cost")
+    if canonical_cost is None:
+        return None, rank, scalar_reason
+    if canonical_cost < 0.0:
+        return None, rank, "scaled cost must be finite and non-negative"
+
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        residual_scale = (
+            np.sqrt(canonical_cost) * np.sqrt(2.0) / np.sqrt(dof_scale)
+        )
+        covariance_factor = right_vectors_t.T * (
+            residual_scale / singular_values
+        )
+    if not np.all(np.isfinite(covariance_factor)):
+        return None, rank, "packed covariance is invalid"
+    packed_standard_errors = _stable_row_norms(covariance_factor)
+    if not np.all(np.isfinite(packed_standard_errors)) or (
+        canonical_cost > 0.0 and np.any(packed_standard_errors == 0.0)
+    ):
+        return None, rank, "packed covariance is invalid"
+    return np.asarray(covariance_factor, dtype=np.float64), rank, None
+
+
+def _public_standard_errors(
+    packed_covariance_factor: NDArray[np.float64], public_transform: ArrayLike
+) -> tuple[NDArray[np.float64] | None, str | None]:
+    column_count = packed_covariance_factor.shape[0]
+    transform, array_reason = _real_array(public_transform, "public transform")
+    if transform is None:
+        return None, array_reason
+    if transform.shape != (column_count, column_count):
+        return None, "public transform shape must match Jacobian columns"
+    if not np.all(np.isfinite(transform)):
+        return None, "public transform must be finite"
+
+    with np.errstate(over="ignore", invalid="ignore", under="ignore"):
+        public_covariance_factor = transform @ packed_covariance_factor
+    if not np.all(np.isfinite(public_covariance_factor)):
+        return None, "public covariance is invalid"
+    standard_errors = _stable_row_norms(public_covariance_factor)
+    nonzero_transform_rows = np.any(transform != 0.0, axis=1)
+    if not np.all(np.isfinite(standard_errors)) or (
+        np.any(packed_covariance_factor != 0.0)
+        and np.any((standard_errors == 0.0) & nonzero_transform_rows)
+    ):
+        return None, "public covariance is invalid"
+    return np.asarray(standard_errors, dtype=np.float64), None
+
+
 def linearized_standard_errors(
     jacobian: ArrayLike,
     scaled_cost: float,
@@ -42,56 +174,15 @@ def linearized_standard_errors(
     rank_rtol: float,
 ) -> tuple[NDArray[np.float64] | None, int | None, str | None]:
     """Return public-unit local-linearized errors from one scaled-Jacobian SVD."""
-    try:
-        matrix = np.asarray(jacobian, dtype=np.float64)
-    except (TypeError, ValueError):
-        return None, None, "Jacobian must be a numeric array"
-    if matrix.ndim != 2 or matrix.shape[1] == 0:
-        return None, None, "Jacobian must be a nonempty two-dimensional matrix"
-    column_count = matrix.shape[1]
-    if not np.all(np.isfinite(matrix)):
-        return None, None, "Jacobian must be finite"
-    if not np.isfinite(rank_rtol) or not 0.0 < rank_rtol < 1.0:
-        return None, None, "rank_rtol must be finite and within (0, 1)"
-    try:
-        _, singular_values, right_vectors_t = np.linalg.svd(matrix, full_matrices=False)
-    except np.linalg.LinAlgError:
-        return None, None, "Jacobian SVD failed"
-    if singular_values.size == 0 or not np.all(np.isfinite(singular_values)):
-        return None, None, "Jacobian SVD produced invalid singular values"
-    cutoff = float(np.max(singular_values)) * float(rank_rtol)
-    retained = singular_values > cutoff
-    rank = int(np.count_nonzero(retained))
-    if rank != column_count:
-        return None, rank, "scaled Jacobian is rank deficient"
-    if degrees_of_freedom <= 0:
-        return None, rank, "degrees of freedom must be positive"
-    if not np.isfinite(scaled_cost) or scaled_cost < 0.0:
-        return None, rank, "scaled cost must be finite and non-negative"
-    try:
-        transform = np.asarray(public_transform, dtype=np.float64)
-    except (TypeError, ValueError):
-        return None, rank, "public transform must be a numeric array"
-    if transform.shape != (column_count, column_count):
-        return None, rank, "public transform shape must match Jacobian columns"
-    if not np.all(np.isfinite(transform)):
-        return None, rank, "public transform must be finite"
-
-    variance = 2.0 * float(scaled_cost) / int(degrees_of_freedom)
-    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
-        packed_covariance = (
-            right_vectors_t.T @ np.diag(variance / singular_values**2) @ right_vectors_t
-        )
-        public_covariance = transform @ packed_covariance @ transform.T
-        diagonal = np.diag(public_covariance)
-        standard_errors = np.sqrt(diagonal)
-    if (
-        not np.all(np.isfinite(public_covariance))
-        or not np.all(np.isfinite(standard_errors))
-        or np.any(diagonal < 0.0)
-    ):
-        return None, rank, "public covariance is invalid"
-    return np.asarray(standard_errors, dtype=np.float64), rank, None
+    packed_covariance_factor, rank, reason = _packed_linearized_covariance_factor(
+        jacobian, scaled_cost, degrees_of_freedom, rank_rtol
+    )
+    if packed_covariance_factor is None:
+        return None, rank, reason
+    standard_errors, reason = _public_standard_errors(
+        packed_covariance_factor, public_transform
+    )
+    return standard_errors, rank, reason
 
 
 def _empty_diagnostics(message: str) -> InitializationDiagnostics:
@@ -322,6 +413,57 @@ def _uncertainty_from_errors(
     )
 
 
+def _amplitudes_have_local_significance(
+    fitted: FitInitialGuess,
+    packed_covariance_factor: NDArray[np.float64] | None,
+    configuration: FitConfiguration,
+    fluorescence_scale: float,
+) -> tuple[bool, str | None]:
+    """Apply a model-conditioned local amplitude/SE gate to every fitted line."""
+    unavailable_reason = (
+        "model-conditioned local amplitude significance is unavailable or non-finite"
+    )
+    if packed_covariance_factor is None:
+        return False, unavailable_reason
+
+    baseline_size = configuration.baseline_degree + 1
+    amplitude_indices = baseline_size + 3 * np.arange(8)
+    packed_standard_errors = _stable_row_norms(packed_covariance_factor)
+    packed_amplitude_errors = packed_standard_errors[amplitude_indices]
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        amplitude_standard_errors = packed_amplitude_errors * fluorescence_scale
+    if (
+        np.any((packed_amplitude_errors > 0.0) & (amplitude_standard_errors == 0.0))
+        or np.any(amplitude_standard_errors < 0.0)
+        or not np.all(np.isfinite(amplitude_standard_errors))
+    ):
+        return False, unavailable_reason
+
+    amplitudes = np.asarray(
+        [resonance.amplitude for resonance in fitted.resonances], dtype=np.float64
+    )
+    significance = np.empty(8, dtype=np.float64)
+    zero_error = amplitude_standard_errors == 0.0
+    positive_zero_error = zero_error & (amplitudes > 0.0)
+    significance[positive_zero_error] = np.inf
+    significance[zero_error & ~positive_zero_error] = np.nan
+    positive_error = ~zero_error
+    with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+        significance[positive_error] = (
+            amplitudes[positive_error] / amplitude_standard_errors[positive_error]
+        )
+    valid_evidence = np.isfinite(significance) | positive_zero_error
+    if not np.all(valid_evidence):
+        return False, unavailable_reason
+    if np.all(significance >= configuration.min_amplitude_significance):
+        return True, None
+    return (
+        False,
+        "one or more fitted amplitudes fail the model-conditioned local "
+        "min_amplitude_significance threshold",
+    )
+
+
 def fit_spectrum(
     sweep: CompleteSweep,
     configuration: FitConfiguration,
@@ -521,27 +663,14 @@ def fit_spectrum(
             jacobian_rank=None,
         )
 
-    transform_failure: str | None = None
-    try:
-        transform = public_parameter_transform(
-            configuration,
-            frequency_half_span_hz=frequency_half_span,
-            fluorescence_scale=fluorescence_scale,
+    packed_covariance_factor, rank, uncertainty_reason = (
+        _packed_linearized_covariance_factor(
+            optimization.jac,
+            float(optimization.cost),
+            degrees_of_freedom,
+            configuration.rank_rtol,
         )
-    except ValueError as error:
-        transform_failure = str(error)
-        transform = np.full((free_parameters, free_parameters), np.nan)
-    standard_errors, rank, uncertainty_reason = linearized_standard_errors(
-        optimization.jac,
-        float(optimization.cost),
-        degrees_of_freedom,
-        transform,
-        configuration.rank_rtol,
     )
-    if transform_failure is not None:
-        uncertainty_reason = (
-            f"public parameter transform unavailable: {transform_failure}"
-        )
     try:
         with np.errstate(over="ignore", invalid="ignore"):
             fitted = unpack_parameters(
@@ -575,6 +704,24 @@ def fit_spectrum(
             degrees_of_freedom=degrees_of_freedom,
             jacobian_rank=rank,
         )
+    significant, significance_reason = _amplitudes_have_local_significance(
+        fitted, packed_covariance_factor, configuration, fluorescence_scale
+    )
+
+    standard_errors: NDArray[np.float64] | None = None
+    if packed_covariance_factor is not None:
+        try:
+            transform = public_parameter_transform(
+                configuration,
+                frequency_half_span_hz=frequency_half_span,
+                fluorescence_scale=fluorescence_scale,
+            )
+        except ValueError as error:
+            uncertainty_reason = f"public parameter transform unavailable: {error}"
+        else:
+            standard_errors, uncertainty_reason = _public_standard_errors(
+                packed_covariance_factor, transform
+            )
     uncertainty = (
         _uncertainty_from_errors(standard_errors, configuration)
         if standard_errors is not None
@@ -610,6 +757,9 @@ def fit_spectrum(
         quality_reasons.append("fitted centers violate minimum separation")
     if not resolved:
         quality_reasons.append("one or more fitted amplitudes are unresolved")
+    if not significant:
+        assert significance_reason is not None
+        quality_reasons.append(significance_reason)
     if not np.isfinite(residual_rmse):
         quality_reasons.append("residual RMSE is non-finite")
     if improvement < configuration.min_baseline_sse_improvement:

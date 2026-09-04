@@ -199,10 +199,49 @@ def test_scaled_polynomial_is_converted_explicitly_to_public_hz_units() -> None:
         np.array([1.1, 0.03, 0.015]), midpoint_hz, half_span_hz
     )
 
+    assert baseline is not None
     assert baseline.intercept == 1.1
     assert baseline.reference_hz == midpoint_hz
     assert baseline.slope_per_hz == pytest.approx(0.03 / half_span_hz)
     assert baseline.quadratic_per_hz2 == pytest.approx(0.015 / half_span_hz**2)
+
+
+@pytest.mark.parametrize(
+    "coefficients",
+    [
+        np.array([1.0, 1.0e-300]),
+        np.array([1.0, 0.0, 1.0e-200]),
+    ],
+)
+def test_scaled_polynomial_rejects_nonzero_coefficients_that_underflow_publicly(
+    coefficients: np.ndarray,
+) -> None:
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        baseline = _baseline_from_scaled_polynomial(
+            coefficients, midpoint_hz=0.0, half_span_hz=1.0e100
+        )
+
+    assert baseline is None
+
+
+def test_unrepresentable_public_baseline_conversion_is_structured_without_warning() -> (
+    None
+):
+    frequency_hz = np.linspace(0.0, 1.0e-310, 101)
+    sweep = CompleteSweep(frequency_hz, np.linspace(0.9, 1.1, frequency_hz.size))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        guess, diagnostics = initialize_spectrum(
+            sweep, FitConfiguration(savgol_window=5)
+        )
+
+    assert guess is None
+    assert diagnostics.source == "none"
+    assert diagnostics.messages == (
+        "baseline conversion to public units failed numerically",
+    )
 
 
 def test_nonuniform_grid_uses_physical_frequency_for_selection_and_widths() -> None:
@@ -405,7 +444,12 @@ def test_extreme_finite_frequency_endpoints_return_without_numerical_warnings(
     assert guess is None
     assert diagnostics.source == "none"
     assert diagnostics.candidate_count == 0
-    assert diagnostics.messages == ("discovery depth is at numerical floor",)
+    expected_message = (
+        "baseline conversion to public units failed numerically"
+        if baseline_degree == 2
+        else "discovery depth is at numerical floor"
+    )
+    assert diagnostics.messages == (expected_message,)
 
 
 def test_polynomial_backend_failure_becomes_stable_diagnostics(

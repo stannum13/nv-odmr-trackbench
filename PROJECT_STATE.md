@@ -4,9 +4,10 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.1 implementation — the constrained offline oracle and repeated
-cold-start full-sweep estimator are implemented and locally verified;
-independent Task 4 review and the integrated Stage 6.1 review are next.
+Stage 6.1 is locally complete — the constrained offline oracle, repeated
+cold-start full-sweep estimator, and integrated-review fix set passed final
+verification and independent re-review. The reviewed commit is ready for
+authorized synchronization before Stage 6.2 design.
 
 ## Completed work
 
@@ -142,6 +143,24 @@ independent Task 4 review and the integrated Stage 6.1 review are next.
   tolerances, researcher guidance for the model, initialization, bounds,
   failures, local-linearized uncertainty, ordered-center scope, and recording
   interpretation, plus a download-free synthetic fitting example.
+- Addressed the integrated Stage 6.1 findings with a positive finite
+  `min_amplitude_significance` configuration (default `3.0`) and an all-line
+  model-conditioned local amplitude/standard-error gate derived from the same
+  packed covariance as public uncertainty. Fixed noisy seven-line seeds 1 and
+  2 now fail quality instead of promoting a noise-supported eighth component;
+  normal clean/noisy eight-component fixtures retain their declared recovery.
+- Guarded unrepresentable initializer baseline conversion, strengthened result
+  provenance across baseline degree/reference, IDs, diagnostic source, and
+  optimizer-attempt state, and rejected non-finite Q without leaking numerical
+  warnings. The public linearized-error helper now rejects complex arrays,
+  bool/non-integral degrees of freedom, and invalid scalar inputs without lossy
+  coercion. Its covariance uses square-root SVD factors to avoid premature
+  overflow/underflow, and finite scaled baseline coefficients that would
+  overflow or underflow in public units fail initialization explicitly.
+- Added fit-level regressions for zero baseline-only SSE, rank deficiency,
+  affine raw diagnostics and public errors, nonuniform grids, covariance
+  unavailability, exact-zero amplitude errors, and weak false components near
+  the configured significance threshold.
 
 ## Important scientific and design decisions
 
@@ -158,6 +177,9 @@ independent Task 4 review and the integrated Stage 6.1 review are next.
   centers at the instrument-validation boundary without redefining Q.
 - The initial benchmark represents eight electronic resonances. Optional
   hyperfine components may later retain parent electronic-resonance identities.
+- An offline-oracle success means an eight-component fit passed the declared
+  model, candidate-conditioned initializer, and configured quality thresholds.
+  It is not calibrated evidence that eight physical resonances are present.
 - Scenario truth belongs to the virtual instrument and evaluation harness; an
   estimator receives only observations and permitted public metadata.
 - Recorded playback cannot evaluate adaptive frequencies that were not present
@@ -175,8 +197,8 @@ independent Task 4 review and the integrated Stage 6.1 review are next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 219 passed.
-- `pytest`: 419 passed.
+- `pytest tests/estimators`: 269 passed.
+- `pytest`: 469 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -195,6 +217,9 @@ independent Task 4 review and the integrated Stage 6.1 review are next.
   `conflicted_unverified` unit status; it is not a photon-count or timing claim.
 - The fixed CLI emulator is synthetic. Its seeded output does not establish
   estimator accuracy, realtime performance, or agreement with the recording.
+- The Stage 6.1 model does not resolve arbitrary overlapping, hyperfine-rich,
+  asymmetric, or otherwise model-mismatched features. Its local amplitude
+  significance is not a calibrated detector or false-discovery guarantee.
 
 ## Known software limitations
 
@@ -209,10 +234,8 @@ independent Task 4 review and the integrated Stage 6.1 review are next.
 
 ## Next actions
 
-1. Independently review the repeated cold-start wrapper, regression, and
-   researcher guidance.
-2. Run the integrated Stage 6.1 senior review and address its complete finding
-   set before authorized synchronization.
-3. Design Stage 6.2 warm-started causal sweep fitting, including stable
+1. Synchronize the reviewed Stage 6.1 commit through the authorized parent
+   workflow.
+2. Design Stage 6.2 warm-started causal sweep fitting, including stable
    resonance identities, failure-state handling, estimate age, and resource
    use.

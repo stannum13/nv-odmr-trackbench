@@ -9,6 +9,7 @@ import numpy as np
 from numpy.typing import NDArray
 from scipy.signal import find_peaks, peak_widths, savgol_filter
 
+from odmr_bench.estimators.parameterization import _finite_product_ratio
 from odmr_bench.estimators.types import (
     CompleteSweep,
     FitConfiguration,
@@ -79,17 +80,38 @@ def _diagnostic_failure(
 
 def _baseline_from_scaled_polynomial(
     coefficients: NDArray[np.float64], midpoint_hz: float, half_span_hz: float
-) -> Baseline:
-    quadratic = (
-        (float(coefficients[2]) / half_span_hz) / half_span_hz
-        if coefficients.size == 3
-        else 0.0
+) -> Baseline | None:
+    """Convert scaled coefficients when every public value is representable."""
+    try:
+        slope = _finite_product_ratio(
+            (float(coefficients[1]),),
+            (half_span_hz,),
+            "baseline slope conversion",
+        )
+        quadratic = (
+            _finite_product_ratio(
+                (float(coefficients[2]),),
+                (half_span_hz, half_span_hz),
+                "baseline quadratic conversion",
+            )
+            if coefficients.size == 3
+            else 0.0
+        )
+    except (TypeError, ValueError, OverflowError):
+        return None
+    public_values = (
+        float(coefficients[0]),
+        midpoint_hz,
+        slope,
+        quadratic,
     )
+    if not np.all(np.isfinite(public_values)):
+        return None
     return Baseline(
-        intercept=float(coefficients[0]),
-        reference_hz=midpoint_hz,
-        slope_per_hz=float(coefficients[1]) / half_span_hz,
-        quadratic_per_hz2=quadratic,
+        intercept=public_values[0],
+        reference_hz=public_values[1],
+        slope_per_hz=public_values[2],
+        quadratic_per_hz2=public_values[3],
     )
 
 
@@ -249,6 +271,10 @@ def initialize_spectrum(
     baseline = _baseline_from_scaled_polynomial(
         trend_fit.coefficients, midpoint_hz, half_span_hz
     )
+    if baseline is None:
+        return None, _diagnostic_failure(
+            0, "baseline conversion to public units failed numerically"
+        )
     smoothed = savgol_filter(
         fluorescence,
         window_length=configuration.savgol_window,

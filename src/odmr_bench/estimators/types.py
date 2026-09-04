@@ -19,7 +19,10 @@ def _finite_float(value: object, name: str) -> float:
         value, (Real, np.integer, np.floating)
     ):
         raise TypeError(f"{name} must be a real scalar")
-    canonical = float(value)
+    try:
+        canonical = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{name} must be finite") from None
     if not np.isfinite(canonical):
         raise ValueError(f"{name} must be finite")
     return canonical
@@ -265,6 +268,7 @@ class FitConfiguration:
     max_nfev: int = 4000
     rank_rtol: float = 1.0e-10
     min_baseline_sse_improvement: float = 1.0e-4
+    min_amplitude_significance: float = 3.0
 
     def __post_init__(self) -> None:
         if self.model_kind not in {"lorentzian", "pseudo_voigt"}:
@@ -316,6 +320,9 @@ class FitConfiguration:
         )
         if not 0.0 <= min_baseline_sse_improvement < 1.0:
             raise ValueError("min_baseline_sse_improvement must be within [0, 1)")
+        min_amplitude_significance = _positive_float(
+            self.min_amplitude_significance, "min_amplitude_significance"
+        )
 
         object.__setattr__(self, "baseline_degree", baseline_degree)
         object.__setattr__(self, "resonance_ids", resonance_ids)
@@ -334,6 +341,11 @@ class FitConfiguration:
             self,
             "min_baseline_sse_improvement",
             min_baseline_sse_improvement,
+        )
+        object.__setattr__(
+            self,
+            "min_amplitude_significance",
+            min_amplitude_significance,
         )
 
 
@@ -551,6 +563,47 @@ class SpectrumFitResult:
         elif initial_guess is None:
             raise ValueError("an optimizer attempt requires an initial_guess snapshot")
 
+        optimizer_attempted = success or failure_code in {
+            "optimization_failed",
+            "quality_failed",
+        }
+        if optimizer_attempted and self.diagnostics.source == "none":
+            raise ValueError("optimizer attempts require a diagnostic source")
+        if failure_code in {"insufficient_samples", "uninformative_sweep"} and (
+            self.diagnostics.source != "none"
+        ):
+            raise ValueError(f"{failure_code} requires diagnostic source 'none'")
+        if (
+            failure_code == "initialization_failed"
+            and self.diagnostics.source == "user"
+        ):
+            raise ValueError(
+                "initialization_failed cannot have diagnostic source 'user'"
+            )
+
+        if (
+            baseline_degree == 1
+            and initial_guess is not None
+            and initial_guess.baseline.quadratic_per_hz2 != 0.0
+        ):
+            raise ValueError("linear-baseline initial guesses require zero quadratic")
+        if success:
+            assert initial_guess is not None
+            assert baseline_estimate is not None
+            if baseline_estimate.quadratic_per_hz2 != 0.0 and baseline_degree == 1:
+                raise ValueError("linear-baseline estimates require zero quadratic")
+            fitted_ids = tuple(item.resonance_id for item in resonance_estimates)
+            initial_ids = tuple(item.resonance_id for item in initial_guess.resonances)
+            if fitted_ids != initial_ids:
+                raise ValueError(
+                    "successful fitted resonance IDs and order must match the "
+                    "initial guess"
+                )
+            if baseline_estimate.reference_hz != initial_guess.baseline.reference_hz:
+                raise ValueError(
+                    "successful final and initial baseline references must match"
+                )
+
         if self.uncertainty is not None and not isinstance(
             self.uncertainty, FitUncertainty
         ):
@@ -664,13 +717,16 @@ class SpectrumFitResult:
             if jacobian_rank != free_parameters:
                 raise ValueError("successful results require a full-rank Jacobian")
 
-        q_values = np.asarray(
-            q_factor(
-                np.array([item.center_hz for item in resonance_estimates]),
-                np.array([item.fwhm_hz for item in resonance_estimates]),
-            ),
-            dtype=np.float64,
-        ).copy()
+        with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
+            q_values = np.asarray(
+                q_factor(
+                    np.array([item.center_hz for item in resonance_estimates]),
+                    np.array([item.fwhm_hz for item in resonance_estimates]),
+                ),
+                dtype=np.float64,
+            ).copy()
+        if success and not np.all(np.isfinite(q_values)):
+            raise ValueError("successful results require finite representable Q values")
         q_values.setflags(write=False)
 
         object.__setattr__(self, "success", success)

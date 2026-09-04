@@ -139,6 +139,7 @@ def _configuration(**overrides: object) -> FitConfiguration:
         "max_fwhm_hz": 8.0e6,
         "max_amplitude": 0.25,
         "min_resolved_amplitude": 1.0e-4,
+        "min_amplitude_significance": 3.0,
         "min_center_separation_hz": 1.0e6,
         "savgol_window": 11,
         "savgol_polyorder": 2,
@@ -164,7 +165,17 @@ def test_fit_configuration_canonicalizes_the_oracle_constraints() -> None:
     assert configuration.baseline_degree == 2
     assert configuration.resonance_ids == tuple(f"r{i}" for i in range(8))
     assert type(configuration.min_fwhm_hz) is float
+    assert type(configuration.min_amplitude_significance) is float
     assert type(configuration.allow_fallback) is bool
+
+
+def test_fit_configuration_pins_default_amplitude_significance() -> None:
+    assert FitConfiguration().min_amplitude_significance == 3.0
+
+
+def test_fit_configuration_rejects_unrepresentable_amplitude_significance() -> None:
+    with pytest.raises(ValueError, match="min_amplitude_significance must be finite"):
+        FitConfiguration(min_amplitude_significance=10**10000)
 
 
 @pytest.mark.parametrize(
@@ -184,6 +195,9 @@ def test_fit_configuration_canonicalizes_the_oracle_constraints() -> None:
         {"max_amplitude": True},
         {"min_resolved_amplitude": 0.0},
         {"min_resolved_amplitude": 0.251},
+        {"min_amplitude_significance": True},
+        {"min_amplitude_significance": 0.0},
+        {"min_amplitude_significance": np.inf},
         {"min_center_separation_hz": 0.0},
         {"savgol_window": 10},
         {"savgol_window": 3},
@@ -390,6 +404,148 @@ def test_successful_fit_derives_read_only_signed_q_and_snapshots_guess() -> None
     assert result.initial_guess == initial_guess
 
 
+def test_successful_fit_rejects_unrepresentable_q_without_warning() -> None:
+    resonances = list(_resonances())
+    resonances[-1] = Resonance(
+        resonance_id=resonances[-1].resonance_id,
+        center_hz=np.finfo(np.float64).max,
+        fwhm_hz=np.nextafter(0.0, 1.0),
+        amplitude=resonances[-1].amplitude,
+        eta=resonances[-1].eta,
+    )
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        with pytest.raises(ValueError, match="finite representable Q"):
+            _success_result(resonance_estimates=tuple(resonances))
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        (
+            {
+                "initial_guess": FitInitialGuess(
+                    _resonances(),
+                    Baseline(1.0, 2.88e9, quadratic_per_hz2=1.0e-20),
+                )
+            },
+            "linear-baseline initial guesses",
+        ),
+        (
+            {
+                "baseline_estimate": Baseline(
+                    1.0, 2.88e9, quadratic_per_hz2=1.0e-20
+                )
+            },
+            "linear-baseline estimates",
+        ),
+        (
+            {
+                "resonance_estimates": tuple(
+                    Resonance(
+                        resonance_id=(
+                            "r1"
+                            if index == 0
+                            else "r0"
+                            if index == 1
+                            else item.resonance_id
+                        ),
+                        center_hz=item.center_hz,
+                        fwhm_hz=item.fwhm_hz,
+                        amplitude=item.amplitude,
+                        eta=item.eta,
+                    )
+                    for index, item in enumerate(_resonances())
+                )
+            },
+            "IDs and order",
+        ),
+        (
+            {"baseline_estimate": Baseline(1.0, 2.89e9)},
+            "baseline references",
+        ),
+    ],
+)
+def test_successful_result_rejects_cross_field_contradictions(
+    overrides: dict[str, object], message: str
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _success_result(**overrides)
+
+
+def test_failed_linear_result_rejects_quadratic_attempted_baseline() -> None:
+    invalid_guess = FitInitialGuess(
+        _resonances(), Baseline(1.0, 2.88e9, quadratic_per_hz2=1.0e-20)
+    )
+
+    with pytest.raises(ValueError, match="linear-baseline initial guesses"):
+        _success_result(
+            success=False,
+            failure_code="optimization_failed",
+            resonance_estimates=(),
+            baseline_estimate=None,
+            initial_guess=invalid_guess,
+            uncertainty=None,
+            uncertainty_reason="optimizer stopped",
+            scipy_status=0,
+            scipy_message="stopped",
+            nfev=1,
+            cost=0.01,
+            residual_rmse=0.02,
+            residual_scale=0.1,
+            jacobian_rank=None,
+        )
+
+
+@pytest.mark.parametrize(
+    ("success", "failure_code", "source"),
+    [
+        (True, None, "none"),
+        (False, "optimization_failed", "none"),
+        (False, "quality_failed", "none"),
+        (False, "insufficient_samples", "user"),
+        (False, "uninformative_sweep", "detected"),
+        (False, "initialization_failed", "user"),
+    ],
+)
+def test_result_rejects_incompatible_diagnostic_source_and_attempt_state(
+    success: bool, failure_code: str | None, source: str
+) -> None:
+    attempted = success or failure_code in {"optimization_failed", "quality_failed"}
+    with pytest.raises(ValueError, match="diagnostic source"):
+        _success_result(
+            success=success,
+            failure_code=failure_code,
+            resonance_estimates=_resonances() if success else (),
+            baseline_estimate=(Baseline(1.0, 2.88e9) if success else None),
+            diagnostics=_diagnostics(source),
+            initial_guess=_initial_guess() if attempted else None,
+            uncertainty=(
+                _uncertainty(eta=np.full(8, 1.0e-3)) if success else None
+            ),
+            uncertainty_reason=None if success else "not available",
+            scipy_status=1 if attempted else None,
+            scipy_message="stopped" if attempted else None,
+            nfev=1 if attempted else 0,
+            cost=0.01 if attempted else None,
+            residual_rmse=0.02 if attempted else None,
+            residual_scale=(
+                None
+                if failure_code in {"insufficient_samples", "uninformative_sweep"}
+                else 0.1
+            ),
+            degrees_of_freedom=0 if failure_code == "insufficient_samples" else 100,
+            jacobian_rank=(
+                34
+                if success
+                else 10
+                if failure_code == "quality_failed"
+                else None
+            ),
+        )
+
+
 def test_lorentzian_result_rejects_a_retained_guess_with_nonunit_eta() -> None:
     lorentzian_resonances = tuple(
         Resonance(
@@ -426,11 +582,17 @@ def test_failure_result_has_no_final_estimates_or_uncertainty(
     failure_code: str,
 ) -> None:
     optimizer_attempted = failure_code in {"optimization_failed", "quality_failed"}
+    diagnostics = (
+        _diagnostics("none")
+        if failure_code in {"insufficient_samples", "uninformative_sweep"}
+        else _diagnostics()
+    )
     result = _success_result(
         success=False,
         failure_code=failure_code,
         resonance_estimates=(),
         baseline_estimate=None,
+        diagnostics=diagnostics,
         initial_guess=_initial_guess() if optimizer_attempted else None,
         uncertainty=None,
         uncertainty_reason="fit did not produce a covariance estimate",

@@ -48,6 +48,7 @@ def _configuration(
         "max_fwhm_hz": 8.0e6,
         "max_amplitude": 0.08,
         "min_resolved_amplitude": 1.0e-4,
+        "min_amplitude_significance": 3.0,
         "min_center_separation_hz": 1.0e6,
         "relative_prominence": 0.01,
         "max_nfev": 4000,
@@ -182,6 +183,57 @@ def test_linearized_standard_errors_use_one_svd_and_public_transform() -> None:
     assert_allclose(errors, np.sqrt(np.diag(expected_covariance)), rtol=1e-14)
 
 
+@pytest.mark.parametrize(
+    ("jacobian_scale", "scaled_cost", "expected_error"),
+    [
+        (1.0e200, 5.0e299, 1.0e-50),
+        (1.0e-200, 5.0e-301, 1.0e50),
+    ],
+)
+def test_linearized_standard_errors_are_stable_across_extreme_scales(
+    jacobian_scale: float,
+    scaled_cost: float,
+    expected_error: float,
+) -> None:
+    errors, rank, reason = linearized_standard_errors(
+        np.array([[jacobian_scale]]),
+        scaled_cost=scaled_cost,
+        degrees_of_freedom=1,
+        public_transform=np.eye(1),
+        rank_rtol=1.0e-12,
+    )
+
+    assert rank == 1
+    assert reason is None
+    assert errors is not None
+    assert_allclose(errors, [expected_error], rtol=2.0e-15, atol=0.0)
+
+
+@pytest.mark.parametrize(
+    ("jacobian_scale", "public_scale"),
+    [
+        (1.0e200, 1.0e200),
+        (1.0e-200, 1.0e-200),
+    ],
+)
+def test_public_transform_can_restore_extreme_packed_error_scales(
+    jacobian_scale: float,
+    public_scale: float,
+) -> None:
+    errors, rank, reason = linearized_standard_errors(
+        np.array([[jacobian_scale]]),
+        scaled_cost=0.5,
+        degrees_of_freedom=1,
+        public_transform=np.array([[public_scale]]),
+        rank_rtol=1.0e-12,
+    )
+
+    assert rank == 1
+    assert reason is None
+    assert errors is not None
+    assert_allclose(errors, [1.0], rtol=2.0e-15, atol=0.0)
+
+
 def test_covariance_covers_complete_public_layout_in_declared_order() -> None:
     configuration = _configuration()
     transform = public_parameter_transform(
@@ -275,6 +327,97 @@ def test_linearized_standard_error_failures_are_explicit(
     assert errors is None
     assert rank == expected_rank
     assert reason
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid", "expected_rank", "expected_reason"),
+    [
+        (
+            "jacobian",
+            np.eye(2, dtype=np.complex128) + 1.0j,
+            None,
+            "Jacobian must not contain complex values",
+        ),
+        (
+            "transform",
+            np.eye(2, dtype=np.complex128) + 1.0j,
+            2,
+            "public transform must not contain complex values",
+        ),
+        ("dof", True, 2, "degrees of freedom must be an integer"),
+        ("dof", 2.5, 2, "degrees of freedom must be an integer"),
+        ("dof", np.asarray(3), 2, "degrees of freedom must be an integer"),
+        ("cost", True, 2, "scaled cost must be a real scalar"),
+        ("cost", 1.0 + 0.0j, 2, "scaled cost must be a real scalar"),
+        ("cost", np.asarray(1.0), 2, "scaled cost must be a real scalar"),
+        ("rank_rtol", True, None, "rank_rtol must be a real scalar"),
+        ("rank_rtol", 1.0e-10 + 0.0j, None, "rank_rtol must be a real scalar"),
+        (
+            "rank_rtol",
+            np.asarray(1.0e-10),
+            None,
+            "rank_rtol must be a real scalar",
+        ),
+    ],
+)
+def test_linearized_standard_errors_reject_silent_scalar_or_complex_coercion(
+    field: str,
+    invalid: object,
+    expected_rank: int | None,
+    expected_reason: str,
+) -> None:
+    arguments: dict[str, object] = {
+        "jacobian": np.eye(2),
+        "scaled_cost": 1.0,
+        "degrees_of_freedom": 3,
+        "public_transform": np.eye(2),
+        "rank_rtol": 1.0e-10,
+    }
+    argument_names = {
+        "transform": "public_transform",
+        "dof": "degrees_of_freedom",
+        "cost": "scaled_cost",
+    }
+    arguments[argument_names.get(field, field)] = invalid
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", np.exceptions.ComplexWarning)
+        errors, rank, reason = linearized_standard_errors(**arguments)  # type: ignore[arg-type]
+
+    assert errors is None
+    assert rank == expected_rank
+    assert reason == expected_reason
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid", "expected_rank", "expected_reason"),
+    [
+        ("scaled_cost", 10**10000, 2, "scaled cost must be finite"),
+        ("degrees_of_freedom", 10**10000, 2, "degrees of freedom must be finite"),
+        ("rank_rtol", 10**10000, None, "rank_rtol must be finite"),
+    ],
+    ids=["cost-overflow", "degrees-of-freedom-overflow", "rank-rtol-overflow"],
+)
+def test_linearized_standard_errors_structure_extreme_integral_scalar_failures(
+    field: str,
+    invalid: int,
+    expected_rank: int | None,
+    expected_reason: str,
+) -> None:
+    arguments: dict[str, object] = {
+        "jacobian": np.eye(2),
+        "scaled_cost": 1.0,
+        "degrees_of_freedom": 3,
+        "public_transform": np.eye(2),
+        "rank_rtol": 1.0e-10,
+    }
+    arguments[field] = invalid
+
+    errors, rank, reason = linearized_standard_errors(**arguments)  # type: ignore[arg-type]
+
+    assert errors is None
+    assert rank == expected_rank
+    assert reason == expected_reason
 
 
 @pytest.mark.parametrize(
@@ -594,6 +737,181 @@ def test_large_finite_baseline_coordinate_is_not_artificially_bounded(
     assert result.failure_code == "optimization_failed"
 
 
+def test_integrated_rank_deficient_fit_is_a_quality_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rank_deficient_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del kwargs
+        residual = fun(x0)  # type: ignore[operator]
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size - 1, : x0.size - 1] = np.eye(x0.size - 1)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="rank deficient",
+            nfev=1,
+            x=x0,
+            fun=residual,
+            cost=0.5 * float(residual @ residual),
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares",
+        rank_deficient_least_squares,
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.jacobian_rank == 34
+    assert result.uncertainty_reason == (
+        "scaled Jacobian is not full column rank; model-conditioned local "
+        "amplitude significance is unavailable or non-finite"
+    )
+
+
+def test_nonfinite_local_amplitude_evidence_fails_conservatively(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def ill_scaled_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del kwargs
+        residual = fun(x0)  # type: ignore[operator]
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size) * 1.0e-320
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="full rank but covariance unavailable",
+            nfev=1,
+            x=x0,
+            fun=residual,
+            cost=0.5 * float(residual @ residual),
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", ill_scaled_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.jacobian_rank == 35
+    assert result.uncertainty_reason == (
+        "model-conditioned local amplitude significance is unavailable or non-finite"
+    )
+
+
+def test_zero_local_amplitude_standard_errors_pass_for_positive_amplitudes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def exact_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="zero residual",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", exact_least_squares
+    )
+
+    result = fit_spectrum(
+        _sweep(),
+        _configuration(min_amplitude_significance=1.0e300),
+        _guess(),
+    )
+
+    assert result.success
+    assert result.failure_code is None
+
+
+@pytest.mark.parametrize(
+    ("target_significance", "expected_success"),
+    [(1.99, False), (2.0, True), (2.01, True)],
+)
+def test_local_amplitude_significance_threshold_is_inclusive_and_configurable(
+    monkeypatch: pytest.MonkeyPatch,
+    target_significance: float,
+    expected_success: bool,
+) -> None:
+    sweep = _sweep()
+    configuration = _configuration(min_amplitude_significance=2.0)
+    degrees_of_freedom = FREQUENCY_HZ.size - 35
+
+    def controlled_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        first_amplitude_index = configuration.baseline_degree + 1
+        packed_standard_error = (
+            x0[first_amplitude_index] / target_significance
+        )
+        scaled_cost = (
+            0.5 * degrees_of_freedom * packed_standard_error**2
+        )
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="controlled local evidence",
+            nfev=1,
+            x=x0,
+            fun=np.full(
+                FREQUENCY_HZ.size,
+                np.sqrt(2.0 * scaled_cost / FREQUENCY_HZ.size),
+            ),
+            cost=scaled_cost,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", controlled_least_squares
+    )
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting._baseline_only_sse", lambda *args: 1.0
+    )
+
+    result = fit_spectrum(sweep, configuration, _guess())
+
+    assert result.success is expected_success
+    assert result.failure_code == (None if expected_success else "quality_failed")
+
+
+def test_zero_baseline_only_sse_cannot_pass_quality_gate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting._baseline_only_sse", lambda *args: 0.0
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.uncertainty_reason == (
+        "baseline-only SSE improvement is insufficient"
+    )
+
+
 def test_nonfinite_covariance_transform_keeps_identified_fit_without_uncertainty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -785,6 +1103,29 @@ def test_constant_sweep_is_uninformative_before_any_guess(mode: str) -> None:
     assert result.jacobian_rank is None
 
 
+def test_tiny_frequency_span_fails_initialization_without_warning() -> None:
+    frequency_hz = np.linspace(0.0, 1.0e-310, 101)
+    sweep = CompleteSweep(frequency_hz, np.linspace(0.9, 1.1, frequency_hz.size))
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = fit_spectrum(sweep, FitConfiguration(savgol_window=5))
+
+    assert not result.success
+    assert result.failure_code == "initialization_failed"
+    assert result.diagnostics.source == "none"
+    assert result.uncertainty_reason == (
+        "baseline conversion to public units failed numerically"
+    )
+    assert result.residual_scale == pytest.approx(0.2)
+    assert result.cost is None
+    assert result.residual_rmse is None
+    assert result.scipy_status is None
+    assert result.scipy_message is None
+    assert result.nfev == 0
+    assert result.jacobian_rank is None
+
+
 def test_nonfinite_variation_scale_is_uninformative_without_warning() -> None:
     fluorescence = np.concatenate(
         (
@@ -851,6 +1192,29 @@ def test_clean_sweep_auto_initialization_recovers_without_truth_input() -> None:
 
     _assert_recovery(result, "pseudo_voigt", 2)
     assert result.diagnostics.source == "detected"
+
+
+def test_nonuniform_grid_fit_recovers_without_sample_distance_assumptions() -> None:
+    unit_interval = np.linspace(0.0, 1.0, FREQUENCY_HZ.size)
+    frequency_hz = FREQUENCY_HZ[0] + np.ptp(FREQUENCY_HZ) * (
+        0.7 * unit_interval + 0.3 * unit_interval**2
+    )
+    resonances, baseline = _truth()
+    sweep = CompleteSweep(
+        frequency_hz,
+        multi_resonance_spectrum(frequency_hz, resonances, baseline),
+    )
+
+    result = fit_spectrum(sweep, _configuration())
+
+    assert result.success
+    assert result.diagnostics.source == "detected"
+    assert_allclose(
+        [item.center_hz for item in result.resonance_estimates],
+        CENTERS_HZ,
+        rtol=0.0,
+        atol=10.0,
+    )
 
 
 def test_fixed_seed_low_noise_auto_fit_meets_declared_regression_bounds() -> None:
@@ -920,6 +1284,48 @@ def test_fallback_does_not_turn_seven_dips_into_success() -> None:
     assert not result.success
     assert result.failure_code == "quality_failed"
     assert result.diagnostics.source == "fallback"
+
+
+@pytest.mark.parametrize("seed", [1, 2])
+def test_noisy_seven_line_false_component_fails_local_significance(seed: int) -> None:
+    resonances, baseline = _truth()
+    noise = np.random.default_rng(seed).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
+    sweep = CompleteSweep(
+        FREQUENCY_HZ,
+        multi_resonance_spectrum(
+            FREQUENCY_HZ, resonances[:7], baseline, additive_noise=noise
+        ),
+    )
+
+    result = fit_spectrum(sweep, _configuration())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.diagnostics.source == "detected"
+    assert result.uncertainty_reason == (
+        "one or more fitted amplitudes fail the model-conditioned local "
+        "min_amplitude_significance threshold"
+    )
+
+
+def test_seed_one_false_candidate_is_between_true_lines_with_permissive_gate() -> None:
+    resonances, baseline = _truth()
+    noise = np.random.default_rng(1).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
+    sweep = CompleteSweep(
+        FREQUENCY_HZ,
+        multi_resonance_spectrum(
+            FREQUENCY_HZ, resonances[:7], baseline, additive_noise=noise
+        ),
+    )
+
+    result = fit_spectrum(
+        sweep, _configuration(min_amplitude_significance=2.0)
+    )
+
+    assert result.success
+    inserted_center_hz = result.resonance_estimates[6].center_hz
+    assert CENTERS_HZ[5] < inserted_center_hz < CENTERS_HZ[6]
+    assert abs(inserted_center_hz - CENTERS_HZ[6]) > 3.0 * FWHM_HZ[6]
 
 
 def _replace_resonance(
@@ -1055,6 +1461,10 @@ def test_multiplicative_fluorescence_units_preserve_scientific_fit(
     assert scaled.success == base.success
     assert scaled.failure_code == base.failure_code
     assert scaled.jacobian_rank == base.jacobian_rank
+    assert scaled.cost == pytest.approx(base.cost * scale**2, rel=2.0e-5)
+    assert scaled.residual_rmse == pytest.approx(
+        base.residual_rmse * scale, rel=1.0e-5
+    )
     assert_array_equal(
         [item.resonance_id for item in scaled.resonance_estimates],
         [item.resonance_id for item in base.resonance_estimates],
@@ -1091,6 +1501,24 @@ def test_multiplicative_fluorescence_units_preserve_scientific_fit(
         [x.amplitude for x in base.resonance_estimates],
         rtol=5e-6,
     )
+    assert base.uncertainty is not None
+    assert scaled.uncertainty is not None
+    assert_allclose(
+        scaled.uncertainty.baseline_standard_errors / scale,
+        base.uncertainty.baseline_standard_errors,
+        rtol=2.0e-5,
+    )
+    assert_allclose(
+        scaled.uncertainty.amplitude / scale,
+        base.uncertainty.amplitude,
+        rtol=2.0e-5,
+    )
+    for field in ("center_hz", "fwhm_hz", "eta"):
+        assert_allclose(
+            getattr(scaled.uncertainty, field),
+            getattr(base.uncertainty, field),
+            rtol=2.0e-5,
+        )
     _assert_recovery(base, "pseudo_voigt", 2)
     inverse_baseline = replace(
         scaled.baseline_estimate,

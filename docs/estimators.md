@@ -1,8 +1,10 @@
 # Offline full-sweep estimation
 
-The Stage 6.1 estimator fits a completed ODMR frequency sweep with eight
-resolved dips. It is a reference for later estimator evaluation, not a result
-from a matched-budget comparison.
+The Stage 6.1 estimator fits a completed ODMR frequency sweep with a constrained
+eight-component model. A successful result is conditional on that model, its
+initializer, and the configured quality thresholds; it is not proof that the
+spectrum contains eight physical resonances. The fit is a reference for later
+estimator evaluation, not a result from a matched-budget comparison.
 
 ## Input and model
 
@@ -22,10 +24,21 @@ each reported Q is calculated as `center_hz / fwhm_hz`.
 
 Automatic initialization is deterministic and data-derived. It estimates and
 removes a low-order trend, smooths only for candidate discovery, finds dips by
-prominence, and estimates their local depths and half-depth widths. No expected
-center positions are supplied by the generated-data evaluator. If discovery
-does not find eight candidates, fitting stops unless the configuration
-explicitly enables the evenly spaced fallback; diagnostics record that choice.
+prominence, and estimates their local depths and half-prominence widths. No
+expected center positions are supplied by the generated-data evaluator. If
+discovery does not find eight candidates, fitting stops unless the
+configuration explicitly enables the evenly spaced fallback; diagnostics
+record that choice.
+
+The center search is local and candidate-conditioned. For adjacent ordered
+initial centers `g_i < g_(i+1)`, let `m_i = (g_i + g_(i+1)) / 2` and let `d` be
+`min_center_separation_hz`. The boxes use
+`upper_i = m_i - d / 2` and `lower_(i+1) = m_i + d / 2`, with
+`lower_0 = f_min` and `upper_7 = f_max`. Preflight rejects empty boxes and
+infeasible boundary geometry. These boxes preserve minimum separation, but a
+noise peak or unresolved feature chosen by the initializer can constrain the
+optimizer to the wrong neighborhood. Ordered output IDs likewise do not prove
+physical identity.
 
 Optimization constrains eight unique resonance identities to strictly ordered
 centers inside the sweep interval. FWHM is positive and bounded by the
@@ -48,11 +61,24 @@ diagnostics but do not expose plausible-looking resonance or baseline
 estimates. Malformed arrays or configurations raise validation errors before
 optimization.
 
+Success also requires every amplitude to meet both the absolute
+`min_resolved_amplitude` gate and the configured
+positive finite `min_amplitude_significance` gate, whose default is 3.0. For
+each component, the latter is fitted amplitude divided by its public-unit
+amplitude standard error from the same local packed covariance used for
+uncertainty. A positive
+amplitude with an exactly zero standard error has infinite significance;
+unavailable or non-finite evidence fails conservatively.
+
 When the final scaled residual Jacobian has full numerical column rank and
 positive degrees of freedom, standard errors are transformed back to public
 units. These are local linearized Jacobian uncertainties. They are not
-experimental coverage guarantees; an unavailable or numerically
-unrepresentable covariance is reported with a reason rather than fabricated.
+experimental coverage guarantees. In particular, amplitude significance is a
+model-conditioned local diagnostic, not a calibrated line-detection statistic
+or false-discovery guarantee. An unavailable or numerically unrepresentable
+covariance is reported with a reason rather than fabricated. Unresolved,
+overlapping, hyperfine-rich, or otherwise model-mismatched spectra can still be
+misclassified and remain outside the Stage 6.1 oracle's validated scope.
 
 ## Repeated cold-start sweeps
 

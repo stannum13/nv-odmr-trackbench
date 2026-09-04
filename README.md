@@ -36,11 +36,13 @@ eight-resonance virtual instrument. Neither command invokes an estimator.
 
 ## Offline full-sweep estimator
 
-The package now includes a constrained eight-resonance Lorentzian and
+The package now includes a constrained eight-component Lorentzian and
 pseudo-Voigt fitter plus `RepeatedFullSweepEstimator`, which independently
 cold-starts a fit for each completed sweep. The wrapper retains immutable
 attempt history and preserves each sweep's public completion metadata,
-including structured failures.
+including structured failures. Fit success is conditional on the model,
+initializer, and configured quality thresholds; it does not prove the presence
+of eight physical resonances.
 
 See [docs/estimators.md](docs/estimators.md) for model, initialization, bounds,
 uncertainty, failure, ordering, and recording-interpretation guidance. A

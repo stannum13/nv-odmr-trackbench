@@ -5,8 +5,15 @@
 > superpowers:executing-plans to implement this plan task-by-task. Steps use
 > checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Add a deterministic, constrained eight-resonance Lorentzian and
+**Goal:** Add a deterministic, constrained eight-component Lorentzian and
 pseudo-Voigt offline fitter plus a cold-start repeated full-sweep estimator.
+Its success label is conditional on the model, initializer, and configured
+quality thresholds, not proof of eight physical resonances.
+
+**Implementation status (2026-09-04):** Tasks 1–4 and the integrated-review
+fix set are implemented locally. Final tests, lint, build, isolated-wheel
+smoke, example execution, and independent re-review are clean; only authorized
+synchronization remains.
 
 **Architecture:** Validated immutable sweep/config/result contracts isolate raw
 observations from truth. A deterministic initializer produces an explicit guess
@@ -22,8 +29,10 @@ independently without warm starts.
   `src/odmr_bench/estimators/` and is importable from `odmr_bench.estimators`.
 - Public frequency and linewidth values are Hz; FWHM is the only public
   linewidth convention and `Q = center_hz / fwhm_hz`.
-- Every successful fit contains exactly eight unique resonance identities;
-  centers are strictly ordered for this resolved, non-crossing oracle scope.
+- Every successful fit contains exactly eight unique model-component
+  identities; centers are strictly ordered for this resolved, non-crossing
+  oracle scope. This structural contract does not establish physical identity
+  or the existence of eight physical lines.
 - Lorentzian mode fixes `eta = 1`; pseudo-Voigt mode bounds every eta to
   `[0, 1]`.
 - Fits never receive synthetic truth, future sweeps, hidden dynamics,
@@ -110,7 +119,7 @@ Stable failure codes are `initialization_failed`, `insufficient_samples`,
 `uninformative_sweep`, `optimization_failed`, and `quality_failed`. SciPy status remains a separate
 optional integer. Invalid types, non-finite arrays, configuration incompatibility,
 or an invalid caller-supplied guess raise before optimization. Scientifically
-valid data that cannot identify or converge to eight lines return an
+valid data that cannot identify or converge to eight model components return an
 unsuccessful result. A failed fit carries its completed sweep's metadata and
 resource totals in `SweepEstimate`.
 
@@ -122,6 +131,12 @@ Diagnostics combinations are validated as follows:
 | `fallback` | 0 or more detected candidates | empty | `True` |
 | `user` | 0 | empty | `False` |
 | `none` | 0 or more detected candidates | empty | `False` |
+
+Diagnostic provenance and optimizer state are also cross-validated. `none` is
+restricted to pre-optimization failures; `user` requires an optimizer attempt;
+and `detected` or `fallback` accompanies an optimizer attempt or an
+`initialization_failed` result when the generated guess itself fails numerical
+preflight. Sample-count and uninformative-sweep preflights always use `none`.
 
 The result scalar fields use these types:
 `scipy_status: int | None`, `scipy_message: str | None`, `nfev: int`,
@@ -153,7 +168,9 @@ and eight larger for pseudo-Voigt. The fitter requires
 For post-fit identifiability, singular values `s` of the scaled residual
 Jacobian define rank as `count(s > max(s) * rank_rtol)`. Success requires full
 column rank, positive degrees of freedom, every fitted amplitude at least
-`min_resolved_amplitude`, and
+`min_resolved_amplitude`, every fitted amplitude divided by its local
+linearized public amplitude standard error to be at least
+`min_amplitude_significance` (positive finite, default `3.0`), and
 
 ```text
 (baseline_only_sse - fitted_sse) / baseline_only_sse
@@ -163,14 +180,24 @@ column rank, positive degrees of freedom, every fitted amplitude at least
 with a strictly positive finite baseline-only SSE. Flat data therefore cannot
 be successful. If the baseline-only SSE is zero, the result is
 `quality_failed`. A fallback guess may enter optimization, but it passes or
-fails these same checks.
+fails these same checks. The amplitude evidence uses the packed covariance and
+fluorescence-scale factor before the unrelated full public transform is
+attempted. A positive amplitude with zero standard error passes as positive
+infinity; unavailable or non-finite evidence fails conservatively. This is a
+model-conditioned local diagnostic, not calibrated detection evidence.
+The threshold failure reason is exactly `one or more fitted amplitudes fail the
+model-conditioned local min_amplitude_significance threshold`; unavailable or
+non-finite evidence uses `model-conditioned local amplitude significance is
+unavailable or non-finite`.
 
 `baseline_only_sse` is the minimum unweighted SSE from
 `numpy.linalg.lstsq` applied to all raw finite samples using columns `[1, z]`
 or `[1, z, z**2]`, where `z` uses the same sweep midpoint and half-span as the
 fitter. `fitted_sse = 2 * cost` in raw squared-fluorescence units. The quality
-gate tests a zero-SSE polynomial, seven dips, and improvement values immediately
-below, exactly at, and immediately above the configured threshold.
+gate tests a zero-SSE polynomial, noisy seven-line spectra with seeds 1 and 2
+at noise sigma `2e-4` (including a false component inserted between true
+lines), and improvement values immediately below, exactly at, and immediately
+above the configured threshold.
 
 `RepeatedFullSweepEstimator.latest` is `None` before the first attempted fit and
 otherwise refers to the most recently completed attempt, including a structured
@@ -275,6 +302,7 @@ results.
       max_fwhm_hz=8.0e6,
       max_amplitude=0.25,
       min_resolved_amplitude=1.0e-4,
+      min_amplitude_significance=3.0,
       min_center_separation_hz=1.0e6,
       savgol_window=11,
       savgol_polyorder=2,
@@ -287,7 +315,8 @@ results.
   ```
 
   Reject invalid model/degree, anything other than eight unique nonempty IDs,
-  invalid width/amplitude/resolved-amplitude/separation bounds, even or
+  invalid width/amplitude/resolved-amplitude/significance/separation bounds,
+  even or
   undersized Savitzky–Golay
   windows, `relative_prominence` outside `(0, 1]`, `rank_rtol` outside `(0, 1)`,
   improvement outside `[0, 1)`, invalid polynomial order/fallback/max
@@ -306,7 +335,12 @@ results.
   status/diagnostics, and cannot claim uncertainties. Validate residual RMSE,
   cost, degrees of freedom, evaluation count, and optional uncertainty shapes.
   Parameterize all failure codes and reject every contradictory combination in
-  the failure-field matrix above.
+  the failure-field matrix above. For degree one, require zero quadratic terms
+  in retained initial and final baselines. Successful fitted IDs/order and the
+  final baseline reference must exactly match the retained initial guess.
+  Diagnostic sources must be compatible with whether optimization was
+  attempted. Derive Q under a guarded numerical context and reject a successful
+  result whose Q is non-finite or unrepresentable.
 
 - [ ] **Step 5: Implement contracts and verify Task 1**
 
@@ -378,7 +412,10 @@ results.
   bound it to `[min_fwhm_hz, max_fwhm_hz]`. Initialize eta to `1.0` for
   Lorentzian and `0.5` for pseudo-Voigt. Convert the scaled baseline polynomial
   explicitly into `Baseline(intercept, reference_hz, slope_per_hz,
-  quadratic_per_hz2)`.
+  quadratic_per_hz2)`. If a finite scaled polynomial cannot be represented in
+  public per-Hz units, including nonzero coefficients that underflow to zero,
+  return `source="none"`; a finite `0..1e-310` sweep must therefore produce
+  `initialization_failed` without an exception or warning.
 
 - [ ] **Step 5: Write failing scarcity/fallback/window tests**
 
@@ -398,7 +435,8 @@ results.
   `span - 2*edge_margin > 7*min_center_separation_hz`; strict `>` ensures every
   midpoint constraint box has positive width. If infeasible, return
   `source="none"` with a stable diagnostic message. The separate exact fallback
-  fixture above—not the ordinary regression family—proves successful fitting.
+  fixture above—not the ordinary regression family—demonstrates successful
+  model fitting.
 
 - [ ] **Step 6: Implement fallback/failure diagnostics and verify Task 2**
 
@@ -514,8 +552,9 @@ results.
   optimizer success, finite parameters/residuals/cost, centers separated by at
   least `min_center_separation_hz`, all public bounds satisfied, positive
   degrees of freedom, full scaled-Jacobian column rank, every amplitude at least
-  `min_resolved_amplitude`, finite residual RMSE, and configured baseline-only
-  SSE improvement. Populate public raw-fluorescence cost as
+  `min_resolved_amplitude`, every amplitude meeting the configured
+  model-conditioned local `min_amplitude_significance`, finite residual RMSE,
+  and configured baseline-only SSE improvement. Populate public raw-fluorescence cost as
   `scaled_optimizer_cost * S**2`; compute RMSE from unscaled residuals. No guess
   means `initialization_failed` without SciPy. Insufficient sample count means
   `insufficient_samples`. A constant sweep means `uninformative_sweep` before
@@ -534,7 +573,10 @@ results.
   For a full-column-rank scaled Jacobian and positive degrees of freedom,
   compute one SVD `J=U @ diag(s) @ Vt`. Define retained singular values with
   the same strict gate `s > max(s)*rank_rtol`; only full rank proceeds. Compute
-  `C_packed=Vt.T @ diag((2*scaled_cost/dof)/s**2) @ Vt`, then
+  `sigma=sqrt(scaled_cost)*sqrt(2)/sqrt(dof)` and form the square-root factor
+  `F=Vt.T * (sigma/s)` columnwise, then `C_packed=F @ F.T`. This is algebraically
+  `Vt.T @ diag((2*scaled_cost/dof)/s**2) @ Vt` without prematurely squaring
+  extreme singular values. Then compute
   `C_public=T @ C_packed @ T.T`; compare standard errors to
   `sqrt(diag(C_public))`. Include a diagonal transform with distinct Hz,
   FWHM, amplitude, and baseline factors. Baseline re-reference covariance is
@@ -548,7 +590,21 @@ results.
   In a well-conditioned noisy fit, assert
   finite non-negative public standard-error arrays with shapes matching baseline
   coefficients and eight resonance parameters; label the method local linearized
-  Jacobian covariance.
+  Jacobian covariance. The public helper rejects boolean or non-integral degrees
+  of freedom, non-real scalar cost/tolerance values, and complex Jacobian or
+  transform arrays with structured reasons before any lossy conversion. Extreme
+  integral scalar values that cannot enter floating-point covariance arithmetic
+  also return structured unavailability rather than escaping as exceptions.
+
+  After the full-rank SVD covariance is available, derive each public amplitude
+  standard error directly from its packed covariance diagonal and the
+  fluorescence scale. Apply `amplitude / amplitude_se >=
+  min_amplitude_significance` before attempting the full public transform, so
+  an unrepresentable slope or quadratic transform does not erase otherwise
+  available amplitude evidence. Zero amplitude SE with positive amplitude is
+  positive infinity; unavailable or non-finite evidence is a conservative
+  quality failure. Do not describe this local, model-conditioned ratio as a
+  calibrated detection statistic.
 
 - [ ] **Step 6: Write failing initializer/failure/noisy regression tests**
 
@@ -559,7 +615,10 @@ results.
   looser bounds from the fixed table. A constant sweep with auto initialization,
   enabled fallback, or a valid user guess must always return
   `uninformative_sweep` with the exact preflight fields above. With fallback
-  enabled, a seven-dip input must return `quality_failed`, while an identifiable eight-dip fixture
+  enabled, a seven-dip input must return `quality_failed`. Noisy seven-line
+  fixtures at sigma `2e-4` with fixed seeds 1 and 2 must also return
+  `quality_failed`, including when noise initialization inserts a false
+  component between true lines. An identifiable eight-dip fixture
   whose deliberately high discovery prominence forces fallback must succeed and
   retain `source="fallback"`. Invalid user guesses raise for ID order, eta,
   baseline reference, interval, separation, or configured bounds and record
@@ -663,3 +722,10 @@ real-data claims, API/package quality, and regression strength. One fix agent
 addresses the complete Critical/Important finding set, followed by re-review.
 Only a clean integrated range receives final local verification and authorized
 push to `origin/main`.
+
+Integrated-review acceptance does not promote the Stage 6.1 success bit into a
+physical line detector. It means only that the fitted eight-component solution
+passed the declared model, initializer, rank, amplitude, local-significance,
+and baseline-improvement checks. Unresolved or model-mismatched spectral
+features remain outside the validated scope and must be counted as a limitation
+in later benchmark reporting.

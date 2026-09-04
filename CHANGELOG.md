@@ -10,6 +10,20 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed the integrated Stage 6.1 oracle findings. Fit success now requires
+  every component to meet a configurable model-conditioned local amplitude
+  significance threshold (`3.0` by default) derived from the same packed
+  covariance as public uncertainty; unavailable/non-finite evidence fails
+  conservatively, while unrelated public-transform unavailability does not
+  erase usable amplitude evidence. Fixed noisy seven-line seeds no longer pass
+  by inserting a noise-supported eighth component. Initializer baseline
+  conversion now rejects both overflow and nonzero-to-zero underflow. Result
+  cross-field provenance, finite-Q derivation, and public linearized-error
+  input validation are guarded at their numerical/type boundaries, and the
+  covariance is formed from square-root SVD factors so representable errors are
+  not lost to premature singular-value squaring. Documentation now states
+  explicitly that an oracle success is
+  model/initializer/threshold-conditioned, not proof of eight physical lines.
 - Hardened constrained oracle fitting against empty initialization reasons,
   rounded public-bound violations, unrepresentable center separations,
   collapsed resonance bounds, and extreme finite fluorescence origins.
