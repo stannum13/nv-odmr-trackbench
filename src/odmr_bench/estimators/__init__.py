@@ -20,6 +20,7 @@ from odmr_bench.estimators.types import (
     WarmStartRejectionCode,
     WarmSweepEstimate,
 )
+from odmr_bench.estimators.warm_sweep import WarmStartedFullSweepEstimator
 
 __all__ = [
     "CompleteSweep",
@@ -34,6 +35,7 @@ __all__ = [
     "SweepStartKind",
     "WarmStartDisposition",
     "WarmStartRejectionCode",
+    "WarmStartedFullSweepEstimator",
     "WarmSweepEstimate",
     "fit_spectrum",
     "initialize_spectrum",

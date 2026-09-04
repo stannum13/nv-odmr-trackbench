@@ -4,8 +4,9 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 implementation — Frozen compound-attempt/warm-estimate records and
-shared guarded warm-start preparation are complete; the causal wrapper is next.
+Stage 6.2 implementation — Frozen compound-attempt/warm-estimate records,
+shared guarded warm-start preparation, and the causal wrapper are complete;
+generated drift integration and researcher guidance are next.
 
 ## Completed work
 
@@ -196,6 +197,12 @@ shared guarded warm-start preparation are complete; the causal wrapper is next.
   exact-cancellation handling, explicit overflow/nonzero-underflow rejection,
   and a guarded successful-prior conversion that deterministically returns one
   of five closed compatibility codes in the specified first-failure order.
+- Added `WarmStartedFullSweepEstimator`, which validates causal endpoints before
+  preparation, seeds only from the latest selected success, rejects over-age or
+  incompatible starts explicitly, retains one eligible same-sweep cold retry,
+  exposes separately aged stale active fits, counts acquisition resources once,
+  and commits history/endpoints only after globally monotonic process-CPU timing
+  and every public record construction succeed.
 
 ## Important scientific and design decisions
 
@@ -232,8 +239,8 @@ shared guarded warm-start preparation are complete; the causal wrapper is next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 528 passed.
-- `pytest`: 728 passed.
+- `pytest tests/estimators`: 590 passed.
+- `pytest`: 790 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -261,15 +268,12 @@ shared guarded warm-start preparation are complete; the causal wrapper is next.
 - End-to-end benchmark reproducibility has not yet been demonstrated beyond the
   installable package, command smoke tests, and deterministic synthetic
   configuration fixtures.
-- The public warm-sweep result contracts and internal guarded preparation helper
-  exist, but the causal wrapper remains Stage 6.2 work; executable
-  completed-sweep fitting is still cold-start only.
 - The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
   schema and fixed query schedule; adaptive estimator orchestration is not yet
   implemented.
 
 ## Next actions
 
-1. Implement and independently review the causal wrapper, regressions, and
-   researcher guidance.
+1. Add and independently review the fixed generated drift regression,
+   researcher guidance, and download-free warm-start example.
 2. Run the integrated Stage 6.2 verification and synchronize it.

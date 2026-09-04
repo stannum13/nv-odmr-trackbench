@@ -66,6 +66,10 @@ once a package version is introduced.
 
 ### Added
 
+- Added a causal warm-started completed-sweep estimator with successful-prior-
+  only seeding, strict endpoint modes, explicit age/compatibility rejection,
+  one eligible same-acquisition cold recovery, independently derived stale-fit
+  ages, and globally monotonic process-CPU timing with atomic state commits.
 - Added one internal fit-preparation contract shared by cold and future warm
   paths: exact Stage 6.1 sample/variation/origin preflight results, typed
   initial-guess compatibility validation, overflow-safe linear/quadratic
