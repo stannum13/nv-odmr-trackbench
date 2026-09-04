@@ -66,6 +66,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added the Stage 6.3 calibrated two-point tracker's initial public contracts:
+  immutable/slotted resource, budget, identity, normalized-fluorescence,
+  clock, configuration, and run-metadata records; closed typed construction
+  errors; and only their task-owned estimator exports. Canonical scalar and
+  intrinsic cross-field validation preserves the estimator-safe public boundary
+  without exposing calibration, query, update, or tracker implementation APIs.
+  Task review then added strict capture-fraction-below-offset validation and
+  restricted ID/sampling-rule snapshots to ordered tuple/list inputs, rejecting
+  unordered sets, mappings, and generators. The amended task passed spec and
+  quality re-review with no findings.
 - Drafted and revised the twenty-task Stage 6.3 test-driven implementation
   plan for the approved calibrated two-point tracker. Its independently reviewable gates
   cover truth-excluding public contracts, exact safe/full resource arithmetic,

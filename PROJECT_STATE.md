@@ -10,8 +10,11 @@ re-review are on `origin/main`; synchronized CI passed all 797 tests. The Stage
 6.3 calibrated two-point tracker design passed its final adversarial re-review
 with zero Critical, Important, or Minor findings. Its separate twenty-task,
 86-test implementation plan also passed final adversarial re-review with zero
-Critical, Important, or Minor findings. Stage 6.3 implementation is beginning
-at Task 1.
+Critical, Important, or Minor findings. Stage 6.3 implementation is active.
+Task 1 passed its per-task spec and quality re-review and supplies the
+frozen/slotted public resource, budget,
+identity, fluorescence-provenance, clock, configuration, metadata, and typed
+error primitives; Task 2 remains next.
 
 ## Completed work
 
@@ -338,6 +341,6 @@ at Task 1.
 
 ## Next actions
 
-1. Execute Stage 6.3 Task 1: estimator-facing records, errors, and
-   truth-excluding public shape, using strict RED/GREEN cycles.
-2. Run a fresh per-task review before advancing to Task 2.
+1. Execute Stage 6.3 Task 2: calibration-source and calibration-record
+   contracts, using strict RED/GREEN cycles.
+2. Run a fresh per-task spec and quality review before advancing to Task 3.
