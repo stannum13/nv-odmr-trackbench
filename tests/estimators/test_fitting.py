@@ -27,6 +27,7 @@ from odmr_bench.estimators.parameterization import (
     pack_parameters,
     public_parameter_transform,
 )
+from odmr_bench.estimators.preparation import validate_initial_guess
 from odmr_bench.models import Baseline, Resonance, multi_resonance_spectrum
 
 FREQUENCY_HZ = np.linspace(2.740e9, 3.020e9, 4481)
@@ -479,6 +480,45 @@ def test_optimizer_failure_is_structured(monkeypatch: pytest.MonkeyPatch) -> Non
     assert result.baseline_estimate is None
 
 
+def test_user_guess_calls_shared_validator_exactly_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def counting_validator(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        calls += 1
+        return validate_initial_guess(*args, **kwargs)  # type: ignore[arg-type]
+
+    def failed_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        return SimpleNamespace(
+            success=False,
+            status=0,
+            message="shared validator observed",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=np.zeros((FREQUENCY_HZ.size, x0.size)),
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.preparation.validate_initial_guess",
+        counting_validator,
+    )
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", failed_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert result.failure_code == "optimization_failed"
+    assert calls == 1
+
+
 def test_nonfinite_public_parameters_from_successful_optimizer_fail_quality(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -773,6 +813,68 @@ def test_integrated_rank_deficient_fit_is_a_quality_failure(
         "scaled Jacobian is not full column rank; model-conditioned local "
         "amplitude significance is unavailable or non-finite"
     )
+
+
+def test_postoptimization_free_parameter_local_accepts_full_rank_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def full_rank_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="full-rank characterization",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", full_rank_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert result.success
+    assert result.jacobian_rank == 35
+
+
+def test_postoptimization_free_parameter_local_rejects_rank_deficient_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rank_deficient_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        jacobian = np.zeros((FREQUENCY_HZ.size, x0.size))
+        jacobian[: x0.size - 1, : x0.size - 1] = np.eye(x0.size - 1)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="rank-deficient characterization",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", rank_deficient_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert not result.success
+    assert result.failure_code == "quality_failed"
+    assert result.jacobian_rank == 34
+    assert "scaled Jacobian is not full column rank" in result.uncertainty_reason
 
 
 def test_nonfinite_local_amplitude_evidence_fails_conservatively(

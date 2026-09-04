@@ -66,6 +66,12 @@ once a package version is introduced.
 
 ### Added
 
+- Added one internal fit-preparation contract shared by cold and future warm
+  paths: exact Stage 6.1 sample/variation/origin preflight results, typed
+  initial-guess compatibility validation, overflow-safe linear/quadratic
+  baseline rebasing, and guarded successful-prior conversion with five closed,
+  deterministic first-failure compatibility codes. The public `fit_spectrum`
+  API and its sole-optimizer-entry-point behavior remain unchanged.
 - Added frozen public warm-sweep attempt and estimate contracts with closed
   provenance/disposition states, explicit active-result age, immutable compound
   attempts, and validated acquisition/CPU resource accounting.

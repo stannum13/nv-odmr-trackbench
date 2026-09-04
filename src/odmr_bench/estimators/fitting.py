@@ -9,12 +9,16 @@ import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.optimize import least_squares
 
+import odmr_bench.estimators.preparation as preparation
 from odmr_bench.estimators.initialization import initialize_spectrum
 from odmr_bench.estimators.parameterization import (
-    pack_parameters,
-    parameter_bounds,
     public_parameter_transform,
     unpack_parameters,
+)
+from odmr_bench.estimators.preparation import (
+    _preoptimization_failure,
+    _stable_fluorescence_reference,
+    start_independent_preflight,
 )
 from odmr_bench.estimators.types import (
     CompleteSweep,
@@ -25,14 +29,6 @@ from odmr_bench.estimators.types import (
     SpectrumFitResult,
 )
 from odmr_bench.models import multi_resonance_spectrum
-
-
-def _free_parameter_count(configuration: FitConfiguration) -> int:
-    return (
-        configuration.baseline_degree
-        + 1
-        + 8 * (4 if configuration.model_kind == "pseudo_voigt" else 3)
-    )
 
 
 def _real_array(
@@ -185,118 +181,6 @@ def linearized_standard_errors(
     return standard_errors, rank, reason
 
 
-def _empty_diagnostics(message: str) -> InitializationDiagnostics:
-    return InitializationDiagnostics(
-        source="none",
-        candidate_count=0,
-        selected_indices=(),
-        used_fallback=False,
-        messages=(message,),
-    )
-
-
-def _preoptimization_failure(
-    configuration: FitConfiguration,
-    failure_code: str,
-    diagnostics: InitializationDiagnostics,
-    degrees_of_freedom: int,
-    *,
-    residual_scale: float | None = None,
-) -> SpectrumFitResult:
-    reason = (
-        diagnostics.messages[-1]
-        if diagnostics.messages
-        else f"{failure_code.replace('_', ' ')} before optimization"
-    )
-    return SpectrumFitResult(
-        success=False,
-        failure_code=failure_code,
-        model_kind=configuration.model_kind,
-        baseline_degree=configuration.baseline_degree,
-        resonance_estimates=(),
-        baseline_estimate=None,
-        diagnostics=diagnostics,
-        initial_guess=None,
-        uncertainty=None,
-        uncertainty_reason=reason,
-        scipy_status=None,
-        scipy_message=None,
-        nfev=0,
-        cost=None,
-        residual_rmse=None,
-        residual_scale=residual_scale,
-        degrees_of_freedom=degrees_of_freedom,
-        jacobian_rank=None,
-    )
-
-
-def _validate_guess(
-    guess: FitInitialGuess,
-    configuration: FitConfiguration,
-    *,
-    frequency_min_hz: float,
-    frequency_max_hz: float,
-    frequency_reference_hz: float,
-    frequency_half_span_hz: float,
-    fluorescence_reference: float,
-    fluorescence_scale: float,
-) -> tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]:
-    ids = tuple(item.resonance_id for item in guess.resonances)
-    if ids != configuration.resonance_ids:
-        raise ValueError("guess resonance IDs must exactly match configured order")
-    if configuration.model_kind == "lorentzian" and any(
-        item.eta != 1.0 for item in guess.resonances
-    ):
-        raise ValueError("lorentzian guesses require eta exactly equal to one")
-    for resonance in guess.resonances:
-        if (
-            not configuration.min_fwhm_hz
-            <= resonance.fwhm_hz
-            <= configuration.max_fwhm_hz
-        ):
-            raise ValueError("guess FWHM lies outside configured bounds")
-        if not 0.0 <= resonance.amplitude <= configuration.max_amplitude:
-            raise ValueError("guess amplitude lies outside configured bounds")
-
-    packed = pack_parameters(
-        guess,
-        configuration,
-        frequency_reference_hz=frequency_reference_hz,
-        frequency_half_span_hz=frequency_half_span_hz,
-        fluorescence_reference=fluorescence_reference,
-        fluorescence_scale=fluorescence_scale,
-    )
-    lower, upper = parameter_bounds(
-        guess,
-        configuration,
-        frequency_min_hz=frequency_min_hz,
-        frequency_max_hz=frequency_max_hz,
-        frequency_reference_hz=frequency_reference_hz,
-        frequency_half_span_hz=frequency_half_span_hz,
-        fluorescence_scale=fluorescence_scale,
-    )
-    baseline_size = configuration.baseline_degree + 1
-    if (
-        not np.all(np.isfinite(packed))
-        or np.any(np.isnan(lower))
-        or np.any(np.isnan(upper))
-    ):
-        raise ValueError("numerical parameterization contains invalid values")
-    if not np.all(np.isneginf(lower[:baseline_size])) or not np.all(
-        np.isposinf(upper[:baseline_size])
-    ):
-        raise ValueError("baseline parameter bounds must be intentionally infinite")
-    if not np.all(np.isfinite(lower[baseline_size:])) or not np.all(
-        np.isfinite(upper[baseline_size:])
-    ):
-        raise ValueError("configured resonance bounds must be finite")
-    if np.any(lower >= upper):
-        raise ValueError("numerical parameterization must have strict bounds")
-    if np.any(packed < lower) or np.any(packed > upper):
-        raise ValueError("guess parameters must lie inside optimizer bounds")
-    return packed, lower, upper
-
-
 def _append_diagnostic_message(
     diagnostics: InitializationDiagnostics, message: str
 ) -> InitializationDiagnostics:
@@ -395,12 +279,6 @@ def _raw_fit_metrics(
     return raw_cost, rmse
 
 
-def _stable_fluorescence_reference(fluorescence: NDArray[np.float64]) -> float:
-    """Return the median origin without summing large same-sign endpoints."""
-    anchor = float(fluorescence[0])
-    return float(anchor + np.median(fluorescence - anchor))
-
-
 def _baseline_only_sse(
     sweep: CompleteSweep, reference_hz: float, half_span_hz: float, degree: int
 ) -> float:
@@ -494,38 +372,17 @@ def fit_spectrum(
     if initial_guess is not None and not isinstance(initial_guess, FitInitialGuess):
         raise TypeError("initial_guess must be a FitInitialGuess or None")
 
-    free_parameters = _free_parameter_count(configuration)
-    degrees_of_freedom = int(sweep.frequency_hz.size - free_parameters)
-    if degrees_of_freedom <= 0:
-        return _preoptimization_failure(
-            configuration,
-            "insufficient_samples",
-            _empty_diagnostics("sample count must exceed the free parameter count"),
-            degrees_of_freedom,
-        )
-
-    frequency_min = float(sweep.frequency_hz[0])
-    frequency_max = float(sweep.frequency_hz[-1])
-    frequency_reference = frequency_min / 2.0 + frequency_max / 2.0
-    frequency_half_span = frequency_max / 2.0 - frequency_min / 2.0
-    with np.errstate(over="ignore", invalid="ignore"):
-        fluorescence_scale = float(np.ptp(sweep.fluorescence))
-    if not np.isfinite(fluorescence_scale) or fluorescence_scale == 0.0:
-        return _preoptimization_failure(
-            configuration,
-            "uninformative_sweep",
-            _empty_diagnostics("fluorescence variation is zero or non-finite"),
-            degrees_of_freedom,
-        )
-    with np.errstate(over="ignore", invalid="ignore"):
-        fluorescence_reference = _stable_fluorescence_reference(sweep.fluorescence)
-    if not np.isfinite(fluorescence_reference):
-        return _preoptimization_failure(
-            configuration,
-            "uninformative_sweep",
-            _empty_diagnostics("fluorescence origin is non-finite numerically"),
-            degrees_of_freedom,
-        )
+    preflight = start_independent_preflight(sweep, configuration)
+    if isinstance(preflight, SpectrumFitResult):
+        return preflight
+    free_parameters = preflight.free_parameter_count
+    degrees_of_freedom = preflight.degrees_of_freedom
+    frequency_min = preflight.frequency_min_hz
+    frequency_max = preflight.frequency_max_hz
+    frequency_reference = preflight.frequency_reference_hz
+    frequency_half_span = preflight.frequency_half_span_hz
+    fluorescence_reference = preflight.fluorescence_reference
+    fluorescence_scale = preflight.fluorescence_scale
 
     if initial_guess is None:
         guess, diagnostics = initialize_spectrum(sweep, configuration)
@@ -549,15 +406,8 @@ def fit_spectrum(
     assert guess is not None
 
     try:
-        packed, lower, upper = _validate_guess(
-            guess,
-            configuration,
-            frequency_min_hz=frequency_min,
-            frequency_max_hz=frequency_max,
-            frequency_reference_hz=frequency_reference,
-            frequency_half_span_hz=frequency_half_span,
-            fluorescence_reference=fluorescence_reference,
-            fluorescence_scale=fluorescence_scale,
+        packed, lower, upper = preparation.validate_initial_guess(
+            guess, configuration, preflight
         )
     except ValueError as error:
         if initial_guess is not None:

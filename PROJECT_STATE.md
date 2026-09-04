@@ -4,8 +4,8 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 implementation — Frozen compound-attempt and warm-estimate records
-are complete; shared preflight and warm-start preparation are next.
+Stage 6.2 implementation — Frozen compound-attempt/warm-estimate records and
+shared guarded warm-start preparation are complete; the causal wrapper is next.
 
 ## Completed work
 
@@ -189,6 +189,13 @@ are complete; shared preflight and warm-start preparation are next.
   compound CPU accounting, and derived current-fit, staleness, and evaluation
   totals. Constructors canonicalize supported NumPy scalars without using
   array-valued fit-result equality.
+- Extracted the Stage 6.1 sample/variation/origin preflight and initial-guess
+  validation into one package-internal preparation path shared by the unchanged
+  `fit_spectrum` entry point and future warm-start orchestration. Added exact
+  finite-float linear/quadratic baseline rebasing with zero-coefficient and
+  exact-cancellation handling, explicit overflow/nonzero-underflow rejection,
+  and a guarded successful-prior conversion that deterministically returns one
+  of five closed compatibility codes in the specified first-failure order.
 
 ## Important scientific and design decisions
 
@@ -225,8 +232,8 @@ are complete; shared preflight and warm-start preparation are next.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 443 passed.
-- `pytest`: 643 passed.
+- `pytest tests/estimators`: 528 passed.
+- `pytest`: 728 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
@@ -254,15 +261,15 @@ are complete; shared preflight and warm-start preparation are next.
 - End-to-end benchmark reproducibility has not yet been demonstrated beyond the
   installable package, command smoke tests, and deterministic synthetic
   configuration fixtures.
-- The public warm-sweep result contracts exist, but the preparation helper and
-  causal wrapper remain Stage 6.2 work; executable completed-sweep fitting is
-  still cold-start only.
+- The public warm-sweep result contracts and internal guarded preparation helper
+  exist, but the causal wrapper remains Stage 6.2 work; executable
+  completed-sweep fitting is still cold-start only.
 - The proof-of-concept emulator CLI accepts only its explicit Poisson-noise
   schema and fixed query schedule; adaptive estimator orchestration is not yet
   implemented.
 
 ## Next actions
 
-1. Implement and independently review the compatibility/rebase helper, causal
-   wrapper, regressions, and researcher guidance.
+1. Implement and independently review the causal wrapper, regressions, and
+   researcher guidance.
 2. Run the integrated Stage 6.2 verification and synchronize it.
