@@ -198,7 +198,9 @@ The instrument evaluates hidden state at the causal measurement time, samples
 the configured observation model, returns an observation, and advances virtual
 time without calling `sleep()`. Adaptive frequency sampling, two-point and
 multi-point tracking, FSK, and lock-in-inspired modulation must be evaluated in
-this mode.
+this mode. Its immutable nominal photon rate and per-query frequency overhead
+must be readable by the evaluator runner as configuration properties; these are
+not hidden truth and are not estimator inputs.
 
 The initial observation schema contains at least:
 
@@ -246,14 +248,33 @@ Instrument overheads such as frequency-settling or readout dead time may later
 be configured separately. When present, they advance virtual elapsed time but
 do not contribute photon integration time.
 
+An adaptive two-point center update is not complete after its first flank. The
+two observations must be an adjacent causal pair whose requested frequencies
+are frozen before the first result can move the center. From estimator-safe
+endpoint records, the public pair reference is the overflow-safe ordered mean
+`t_first + (t_second - t_first) / 2` of the two reconstructed values
+`endpoint - integration/2`. The evaluator must separately retain each actual
+instrument evaluation midpoint, using the instrument's exact arithmetic
+association, and use their overflow-safe ordered mean for hidden-truth lookup.
+The two values may differ by binary64 ULPs and must not be substituted. A pair
+is unavailable until the second observation's endpoint, so reports preserve
+the public reference, actual evaluator reference, and causal release endpoint.
+A successful exact-zero correction still refreshes that identity's active pair
+source and ages. A lone acquired flank consumes its full resources but produces
+no discriminator or center update. Two-point identity domains must be fixed
+from the public calibration and source-sweep bounds; the center, both probes,
+and the complete capture-plus-probe envelope must remain inside the assigned
+domain. A finite candidate that exits it is a zero-step policy failure, not
+permission to relabel a resonance.
+
 ### 4.3 Common estimator boundary
 
 Realtime estimators should converge on a common behavioral contract:
 
 ```python
 class Estimator:
-    def reset(self, public_metadata, seed): ...
-    def choose_next_query(self, budget_state): ...
+    def reset(self, public_metadata, budget_ceiling, *, seed): ...
+    def choose_next_query(self): ...
     def update(self, observation): ...
     def estimate(self): ...
 ```
@@ -277,11 +298,68 @@ physics-informed estimator. The acquisition resources used to obtain a
 calibration spectrum count toward the benchmark unless a result is explicitly
 labeled as conditional on free pre-calibration.
 
+Every calibration used online must distinguish the physical source epoch of
+its parameters from the causal time/index at which the completed calibration
+became available. It may not seed a query before that availability boundary.
+The public calibration input must be one immutable bound source carrying its
+fit, exact expected-ID check or explicit fit-ID adoption, estimator-safe source
+observations, normalized-fluorescence provenance, sweep bounds, first/last
+times and indices, physical fit epoch, availability endpoint, safe acquisition
+resources, and declared unit-scale clock mapping. A verified emulator source
+uses the overflow-safe ordered mean of actual first/last instrument evaluation
+midpoints for its physical epoch. A caller-asserted source instead requires the
+exact overflow-safe ordered mean of the first/last public midpoints reconstructed
+as `endpoint - integration/2`; a neighboring ULP is invalid. Raw acquisition
+endpoints and all ages are nonnegative; a mapped source/reference coordinate
+may be a finite signed value and must not be clamped.
+
+Emulator-controlled acquisition-and-fit construction may be labeled verified
+only through an evaluator-owned opaque run token bound to the issuing runner,
+instrument identity, immutable nominal photon rate/overhead, exact success
+outcome, and source. A typed verified-acquisition success or failure must retain
+every committed full observation and exact safe view, aligned validated
+measurement-time-or-`None` slots, before/after resource boundaries, and
+canonical safe/full resource replays whenever the raw record joins the
+authoritative ledger. A `resource_join_unavailable` failure instead preserves
+the malformed raw record and authoritative cumulative snapshots but exposes no
+fabricated delta or aggregate replay. This includes corruption of evaluator-
+only expected photons, which remains absent from the safe view. Mid-acquisition
+query failure, returned-observation mismatch, structured fit failure, fitting
+exception, and source-binding failure may not discard the trace. Only defects
+proven before acquisition may raise without a typed outcome. Caller-supplied
+linkage remains caller-asserted and must not be upgraded by copying or
+validation of scalar fields.
+Its budget treatment is a required, machine-readable choice with no implicit
+default: `included_same_run` charges and reports the calibration in the run, and
+`conditional_free_precalibration` reports its resources separately while
+labeling every dependent result as conditional. `included_same_run` additionally
+requires the exact issuing outcome/source/token/instrument, shared clock,
+continuous calibration-to-tracking ledger boundary, and exact three-way
+equality of source, instrument, and tracking-metadata nominal rate and overhead.
+The conditional label makes no cross-run identity or boundary claim and does
+not make the calibration acquisition cost vanish. The total run ceiling is
+bound before the first adaptive query and snapshotted in every estimate; a pair
+may start only when applying the exact one-query prospective transition twice
+stays within every ceiling.
+
 Tests must include sentinels or separated types that make accidental truth
 access difficult. Benchmark orchestration must not pass a scenario or
 instrument object directly to an estimator when a restricted observation view
 is sufficient. Recorded playback likewise must not pass an offline iterator to
 an estimator when its causal runner can pass one restricted observation instead.
+For each step the evaluator runner first obtains the idempotent pending query,
+handles a budget-stop `None`, and then snapshots the pre-update estimate that
+contains that query. If an instrument query commits but the following
+estimator update raises an ordinary `Exception`, the runner retains the full
+and safe unaccepted observation, exact measurement time when authenticated,
+before/after snapshots, and exact resource charge in a machine-readable abort;
+the equal pre/post tracker snapshots include the pending query. A raw record
+that cannot replay to the authoritative ledger instead produces the distinct
+resource-unavailable abort above. Either ordinary outcome is terminal without
+retry or another query. Arbitrary process-control `BaseException` is outside
+this transactional outcome guarantee. The same runner owns explicit
+calibration, start, step, run-until-event, and external-stop transitions, so no
+separate harness may silently adopt different failure semantics.
 
 ## 6. Resource accounting and fair comparisons
 
@@ -298,9 +376,28 @@ Each run and estimate must account for:
 
 Fluorescence samples and photon counts are not interchangeable. One sample may
 represent a different integration duration and expected photon count from
-another. Expected photon budget is the primary deterministic budget for
-cross-seed matching; realized photon count is an outcome and is reported for
-diagnostics.
+another. Expected photon count is a deterministic evaluator-side resource for
+a fixed hidden trajectory, while realized photon count is a stochastic outcome.
+Neither is exposed to an estimator merely to make a stopping decision.
+
+Resource totals use the instrument ledger's atomic arrival-order arithmetic:
+each successful observation performs one left-associated `old + atomic_value`
+transition per field. Safe and evaluator totals must replay those same atomic
+terms in the same order. Calibration and tracking subtotals may be reported
+separately, but a same-run charged total must not be reconstructed by regrouping
+those subtotals, by subtraction, or by `math.fsum`. Evaluator-only expected
+photons are joined from the retained full observations by exact sequence and
+safe-view equality after estimation; incomplete pairs retain their one acquired
+observation in both safe and full totals. A successfully returned observation
+whose estimator update aborts after an authenticated resource join is not part
+of the estimator's accepted trace, but remains in an evaluator-only unaccepted
+tuple and final physical tracking/charged totals. Before adding that optional
+atom, the builder must replay the accepted-only charged prefix and require its
+safe projection to equal the estimate's mode-dependent charged resources. A
+resource-unavailable raw record remains visible with the final authoritative
+cumulative instrument snapshot but has no invented aggregate evaluator total.
+Incomplete accepted-pair count and unaccepted-abort count are independent and
+may both equal one after a second-side abort.
 
 Comparisons may match one of the following primary budgets:
 
@@ -315,6 +412,14 @@ blocks, the harness must use a declared stopping rule, report the discrepancy,
 and avoid presenting the result as exactly matched. A full sweep receiving
 substantially more photons than a sparse tracker is not a fair accuracy
 comparison unless accuracy is explicitly plotted against that resource.
+
+For the first Stage 6.5 comparison, the primary matched budget is equal total
+integration time. When every method shares the same public nominal photon rate,
+equal integration time also gives equal nominal exposure; otherwise nominal
+exposure is not equal and the discrepancy must be reported. Signal-conditioned
+expected photons remain evaluator-only and are reported alongside all methods,
+but they are neither an estimator input nor the Stage 6.5 primary stopping
+budget.
 
 Realtime performance is determined by measurement latency, integration time,
 query count and schedule, acquisition overhead, and compute latency. Fast
@@ -396,6 +501,14 @@ a reference estimate, but it must be labeled an offline reference or oracle,
 not exact ground truth. Its model assumptions, fit failures, and uncertainty
 limitations must be retained with results.
 
+An online tracker's `tracking`, `step_limited`, or `lost` value is a public
+policy classification only. It must not be presented as truth-certified lock.
+Synthetic evaluators compute any truth-based lock metric separately and only
+after the corresponding estimate's causal release. For a two-point pair, the
+truth lookup time is the evaluator-retained ordered mean of the two actual
+instrument evaluation midpoints, never the neighboring public reference
+reconstructed from estimator-safe endpoints.
+
 The oracle may use complete scans and future data only after the online replay
 has been isolated. It is an accuracy reference and is not automatically a
 realtime competitor.
@@ -452,7 +565,10 @@ uses the fast center estimate as a prior and may update less frequently than the
 center loop.
 
 The first benchmark must state exactly how the full sweep and sparse tracker
-budgets are matched. Estimator-specific query scheduling is exercised only in
+budgets are matched. Its primary match is equal total integration time; equal
+nominal exposure follows only when the nominal photon rate is shared. Expected
+photons are joined and reported by the evaluator without being exposed to the
+estimators. Estimator-specific query scheduling is exercised only in
 closed-loop mode.
 
 ## 13. Scientific claims and limitations

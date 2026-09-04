@@ -66,6 +66,37 @@ once a package version is introduced.
 
 ### Added
 
+- Specified the Stage 6.3 calibrated two-point center tracker without starting
+  implementation: one immutable calibration source binds its public fit,
+  exact-ID check or explicit fit-ID adoption, normalized safe trace, sweep
+  bounds, resources, physical epoch, availability endpoint, and clock mapping;
+  same-run versus conditional-free calibration treatment remains required with
+  no default. The corrected design also fixes conservative source/Voronoi
+  identity domains, analytic target-only normalized-discriminator slopes,
+  adjacent/alternating pairs, reset-bound ceilings, exact pending/query/update
+  and aggregate-state joins, instrument-compatible atomic resource arithmetic,
+  bounded hertz corrections, policy-only lock/common-mode diagnostics,
+  distinct overflow-safe public and actual-instrument pair references,
+  evaluator full-observation joins, terminal post-query abort records,
+  nonnegative deterministic seeds, and fully frozen static/Poisson/drift/
+  contrast-loss regressions. The second-review corrections bind verified
+  source provenance to an opaque runner token, exact instrument rate/overhead,
+  and a continuous same-run ledger; split intrinsic record validation from
+  contextual joins; preserve every committed calibration observation in typed
+  success/failure outcomes; and give one evaluator runner exact normal,
+  instrument-failure, external-stop, budget-stop, and terminal-abort semantics.
+  They also pin successful zero-step source refresh and signed mapped-reference
+  domains. The latest re-review corrections snapshot the issued pending query
+  before covered update failures; separate resource-unavailable raw records
+  from authenticated replays; close public construction, observation, update,
+  and preflight error codes; require caller-asserted public-midpoint epochs; and
+  join accepted charged prefixes before an optional authenticated abort atom.
+  The final bounded adversarial design review reported zero Critical,
+  Important, or Minor findings, closing the design gate before implementation
+  planning.
+  The scientific specification fixes equal integration time as the Stage 6.5
+  primary budget, with equal nominal exposure only under a shared nominal rate
+  and expected photons reported evaluator-side only.
 - Added fixed-snapshot drift integration coverage and a download-free
   warm-started completed-sweep example. The regressions freeze truth at sweep
   construction, feed identical immutable sweeps to cold and warm paths, cover

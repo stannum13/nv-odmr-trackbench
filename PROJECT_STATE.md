@@ -4,9 +4,12 @@ Last updated: 2026-09-04
 
 ## Current stage
 
-Stage 6.2 locally complete — The causal warm-started sweep estimator, generated
-drift regression, documentation, package smoke, and integrated re-review are
-clean. The reviewed range is ready for synchronization before Stage 6.3 design.
+Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
+generated drift regression, documentation, package smoke, and integrated
+re-review are on `origin/main`; synchronized CI passed all 797 tests. The Stage
+6.3 calibrated two-point tracker design passed its final adversarial re-review
+with zero Critical, Important, or Minor findings. Its separate test-driven
+implementation plan is next; no Stage 6.3 implementation code has started.
 
 ## Completed work
 
@@ -212,6 +215,30 @@ clean. The reviewed range is ready for synchronization before Stage 6.3 design.
   fallback, and deterministic failed-warm/one-cold recovery without duplicating
   acquisition resources. The download-free example reports source, attempt,
   age, `nfev`, and measured process CPU diagnostics without a speedup claim.
+- Synchronized the reviewed Stage 6.2 range to `origin/main`; remote CI passed
+  the 797-test suite.
+- Drafted the Stage 6.3 calibrated two-point center-tracker design: mandatory
+  calibration-budget labeling; one immutable source binding the fit, exact or
+  adopted IDs, safe acquisition trace, normalized scale, sweep bounds,
+  resources, epochs, availability, and clock mapping; analytic target-only
+  discriminator slopes; fixed conservative calibration cells; identity-keyed
+  adjacent pairs; reset-bound total ceilings; canonical instrument-ledger
+  arithmetic; bounded proportional updates; policy-state/common-mode
+  diagnostics; distinct public and actual-instrument pair references; evaluator
+  joins; partial/aborted acquisition accounting; truth isolation; and fully
+  specified generated regressions. Two adversarial reviews exposed remaining
+  causal contract gaps. This corrected revision adds an opaque source-run
+  provenance token and exact rate/overhead/ledger continuity, lossless typed
+  calibration failures, one evaluator runner with explicit normal and terminal
+  transitions, intrinsic-versus-contextual validation ownership, successful
+  zero-step source refresh, and signed mapped-reference rules. The latest
+  corrections make the pending query part of every ordinary-exception abort
+  snapshot, separate malformed raw acquisitions from authenticated resource
+  replays, close every public error-code contract, fix caller-asserted epochs to
+  the public-midpoint convention, and join the accepted charged prefix before
+  an optional abort atom. The final bounded adversarial re-review reported zero
+  Critical, Important, or Minor findings. This remains design, not
+  implementation.
 
 ## Important scientific and design decisions
 
@@ -292,6 +319,6 @@ clean. The reviewed range is ready for synchronization before Stage 6.3 design.
 
 ## Next actions
 
-1. Synchronize the verified Stage 6.2 commit range and confirm remote CI.
-2. Design Stage 6.3 calibrated two-point center tracking without hidden-truth or
-   arbitrary-gain shortcuts.
+1. Write the separate Stage 6.3 test-driven implementation plan from the
+   approved calibrated two-point tracker design.
+2. Adversarially review the plan before beginning implementation.
