@@ -126,11 +126,14 @@ sweep wrapper are next.
   regressions cover clean/noisy recovery, affine fluorescence changes,
   initialization/fallback behavior, and exact baseline-improvement boundaries.
 - Hardened the oracle review boundary with nonempty initializer-preflight
-  reasons, finite representable optimizer bounds, explicit public-parameter and
-  rounded center-box checks, overflow-safe quadratic scaling and fluorescence
-  origins, and a distinct metric-less `quality_failed` state for nominally
-  successful optimizers that return non-finite outputs. Covariance tests now
-  pin the full public layout, strict SVD cutoff, and single-SVD implementation.
+  reasons, intentional infinite baseline bounds plus finite feasible resonance
+  bounds, explicit public-parameter and rounded center-box checks,
+  exponent-aware quadratic scaling, and overflow-safe fluorescence origins. A
+  distinct metric-less `quality_failed` state covers nominally successful
+  optimizers with any non-finite required output, while an unrepresentable
+  public covariance transform preserves rank and can leave an otherwise valid
+  fit successful without uncertainty. Covariance tests pin the full public
+  layout, strict SVD cutoff, and single-SVD implementation.
 
 ## Important scientific and design decisions
 
@@ -164,7 +167,7 @@ sweep wrapper are next.
 
 ## Tests currently passing
 
-- `pytest`: 404 passed.
+- `pytest`: 410 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

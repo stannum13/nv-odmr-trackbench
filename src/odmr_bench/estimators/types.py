@@ -648,6 +648,12 @@ class SpectrumFitResult:
                         "quality_failed may omit residual metrics only for "
                         "non-finite optimizer output"
                     )
+                if cost is not None and uncertainty_reason == (
+                    "optimizer returned non-finite parameters, residuals, or cost"
+                ):
+                    raise ValueError(
+                        "non-finite optimizer reason must omit residual metrics"
+                    )
         else:
             if residual_scale is None or cost is None or residual_rmse is None:
                 raise ValueError("successful results require residual fields")

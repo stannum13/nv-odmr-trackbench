@@ -44,16 +44,13 @@ def linearized_standard_errors(
     """Return public-unit local-linearized errors from one scaled-Jacobian SVD."""
     try:
         matrix = np.asarray(jacobian, dtype=np.float64)
-        transform = np.asarray(public_transform, dtype=np.float64)
     except (TypeError, ValueError):
-        return None, None, "Jacobian and public transform must be numeric arrays"
+        return None, None, "Jacobian must be a numeric array"
     if matrix.ndim != 2 or matrix.shape[1] == 0:
         return None, None, "Jacobian must be a nonempty two-dimensional matrix"
     column_count = matrix.shape[1]
-    if transform.shape != (column_count, column_count):
-        return None, None, "public transform shape must match Jacobian columns"
-    if not np.all(np.isfinite(matrix)) or not np.all(np.isfinite(transform)):
-        return None, None, "Jacobian and public transform must be finite"
+    if not np.all(np.isfinite(matrix)):
+        return None, None, "Jacobian must be finite"
     if not np.isfinite(rank_rtol) or not 0.0 < rank_rtol < 1.0:
         return None, None, "rank_rtol must be finite and within (0, 1)"
     try:
@@ -71,6 +68,14 @@ def linearized_standard_errors(
         return None, rank, "degrees of freedom must be positive"
     if not np.isfinite(scaled_cost) or scaled_cost < 0.0:
         return None, rank, "scaled cost must be finite and non-negative"
+    try:
+        transform = np.asarray(public_transform, dtype=np.float64)
+    except (TypeError, ValueError):
+        return None, rank, "public transform must be a numeric array"
+    if transform.shape != (column_count, column_count):
+        return None, rank, "public transform shape must match Jacobian columns"
+    if not np.all(np.isfinite(transform)):
+        return None, rank, "public transform must be finite"
 
     variance = 2.0 * float(scaled_cost) / int(degrees_of_freedom)
     with np.errstate(over="ignore", invalid="ignore", divide="ignore"):
@@ -179,15 +184,25 @@ def _validate_guess(
         frequency_half_span_hz=frequency_half_span_hz,
         fluorescence_scale=fluorescence_scale,
     )
-    if np.any(packed < lower) or np.any(packed > upper):
-        raise ValueError("guess parameters must lie inside optimizer bounds")
+    baseline_size = configuration.baseline_degree + 1
     if (
         not np.all(np.isfinite(packed))
-        or not np.all(np.isfinite(lower))
-        or not np.all(np.isfinite(upper))
-        or np.any(lower >= upper)
+        or np.any(np.isnan(lower))
+        or np.any(np.isnan(upper))
     ):
-        raise ValueError("numerical parameterization must have finite strict bounds")
+        raise ValueError("numerical parameterization contains invalid values")
+    if not np.all(np.isneginf(lower[:baseline_size])) or not np.all(
+        np.isposinf(upper[:baseline_size])
+    ):
+        raise ValueError("baseline parameter bounds must be intentionally infinite")
+    if not np.all(np.isfinite(lower[baseline_size:])) or not np.all(
+        np.isfinite(upper[baseline_size:])
+    ):
+        raise ValueError("configured resonance bounds must be finite")
+    if np.any(lower >= upper):
+        raise ValueError("numerical parameterization must have strict bounds")
+    if np.any(packed < lower) or np.any(packed > upper):
+        raise ValueError("guess parameters must lie inside optimizer bounds")
     return packed, lower, upper
 
 
@@ -423,12 +438,20 @@ def fit_spectrum(
     raw_cost, residual_rmse = _raw_fit_metrics(
         optimization.fun, optimization.cost, fluorescence_scale
     )
-    finite_solution = (
-        np.asarray(optimization.x).shape == packed.shape
-        and np.all(np.isfinite(optimization.x))
-        and raw_cost is not None
-        and residual_rmse is not None
-    )
+    try:
+        optimizer_x = np.asarray(optimization.x, dtype=np.float64)
+        optimizer_fun = np.asarray(optimization.fun, dtype=np.float64)
+        optimizer_cost = float(optimization.cost)
+        finite_payload = (
+            optimizer_x.shape == packed.shape
+            and optimizer_fun.shape == sweep.fluorescence.shape
+            and np.all(np.isfinite(optimizer_x))
+            and np.all(np.isfinite(optimizer_fun))
+            and np.isfinite(optimizer_cost)
+            and optimizer_cost >= 0.0
+        )
+    except (TypeError, ValueError):
+        finite_payload = False
     if not optimization.success:
         return SpectrumFitResult(
             success=False,
@@ -450,7 +473,7 @@ def fit_spectrum(
             degrees_of_freedom=degrees_of_freedom,
             jacobian_rank=None,
         )
-    if not finite_solution:
+    if not finite_payload:
         return SpectrumFitResult(
             success=False,
             failure_code="quality_failed",
@@ -467,18 +490,47 @@ def fit_spectrum(
             scipy_status=int(optimization.status),
             scipy_message=str(optimization.message),
             nfev=int(optimization.nfev),
-            cost=raw_cost,
-            residual_rmse=residual_rmse,
+            cost=None,
+            residual_rmse=None,
             residual_scale=fluorescence_scale,
             degrees_of_freedom=degrees_of_freedom,
             jacobian_rank=None,
         )
 
-    transform = public_parameter_transform(
-        configuration,
-        frequency_half_span_hz=frequency_half_span,
-        fluorescence_scale=fluorescence_scale,
-    )
+    if raw_cost is None or residual_rmse is None:
+        return SpectrumFitResult(
+            success=False,
+            failure_code="quality_failed",
+            model_kind=configuration.model_kind,
+            baseline_degree=configuration.baseline_degree,
+            resonance_estimates=(),
+            baseline_estimate=None,
+            diagnostics=diagnostics,
+            initial_guess=guess,
+            uncertainty=None,
+            uncertainty_reason=(
+                "optimizer returned non-finite parameters, residuals, or cost"
+            ),
+            scipy_status=int(optimization.status),
+            scipy_message=str(optimization.message),
+            nfev=int(optimization.nfev),
+            cost=None,
+            residual_rmse=None,
+            residual_scale=fluorescence_scale,
+            degrees_of_freedom=degrees_of_freedom,
+            jacobian_rank=None,
+        )
+
+    transform_failure: str | None = None
+    try:
+        transform = public_parameter_transform(
+            configuration,
+            frequency_half_span_hz=frequency_half_span,
+            fluorescence_scale=fluorescence_scale,
+        )
+    except ValueError as error:
+        transform_failure = str(error)
+        transform = np.full((free_parameters, free_parameters), np.nan)
     standard_errors, rank, uncertainty_reason = linearized_standard_errors(
         optimization.jac,
         float(optimization.cost),
@@ -486,6 +538,10 @@ def fit_spectrum(
         transform,
         configuration.rank_rtol,
     )
+    if transform_failure is not None:
+        uncertainty_reason = (
+            f"public parameter transform unavailable: {transform_failure}"
+        )
     try:
         with np.errstate(over="ignore", invalid="ignore"):
             fitted = unpack_parameters(

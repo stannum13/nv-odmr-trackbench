@@ -12,10 +12,15 @@ once a package version is introduced.
 
 - Hardened constrained oracle fitting against empty initialization reasons,
   rounded public-bound violations, unrepresentable center separations,
-  quadratic-scaling overflow, collapsed optimizer bounds, and extreme finite
-  fluorescence origins. Successful optimizer termination with non-finite
-  outputs is now an explicit metric-less `quality_failed`, while unsuccessful
-  termination remains `optimization_failed`.
+  collapsed resonance bounds, and extreme finite fluorescence origins.
+  Quadratic scaling now uses exponent-aware product/ratio evaluation so any
+  representable result is independent of multiplication association. Baseline
+  optimizer coordinates remain intentionally unbounded while every resonance
+  bound is finite and numerically feasible. Successful optimizer termination
+  with any non-finite required output is now an explicit metric-less
+  `quality_failed`; that reason cannot accompany finite residual metrics.
+  A non-representable public covariance transform leaves uncertainty
+  unavailable without discarding an otherwise identified fit.
 - Built-in Poisson and Gaussian noise strategies now fix their recorded
   sampling-rule provenance at construction, and public Figshare attribution
   consistently uses the checked creator string, `Liu`.

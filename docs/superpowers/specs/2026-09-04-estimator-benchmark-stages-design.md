@@ -113,7 +113,9 @@ The baseline is linear by default and optionally quadratic, centered on an
 explicit reference frequency. Public parameters remain center Hz, FWHM Hz,
 amplitude in spectrum units, eta, and Q. Optimization may use transformed or
 scaled internal variables, but conversion to public units is explicit and
-tested.
+tested. Quadratic packing, unpacking, and public covariance factors use
+exponent-aware product/ratio evaluation so intermediate overflow cannot reject
+a mathematically finite representable result.
 
 Constraints require:
 
@@ -156,7 +158,11 @@ That preflight does not retain an unused auto, fallback, or user guess.
 Consequently, in exact arithmetic adding a constant fluorescence offset does
 not change the spectral residual Jacobian. Finite-precision offset
 representations may change SciPy's discrete termination status or evaluation
-count without changing the public scientific success/rank decision. A
+count without changing the public scientific success/rank decision. A finite
+packed initial point is required before SciPy. Baseline coordinates use
+intentional infinite optimizer bounds because their public coefficients are
+otherwise unconstrained finite values; all configured resonance bounds must be
+finite, strictly ordered, and numerically feasible. A
 `SpectrumFitResult` contains:
 
 - model kind and baseline degree;
@@ -190,7 +196,10 @@ The reported fit cost is converted to raw squared-fluorescence units and
 residual RMSE to fluorescence units. Uncertainties are labeled local linearized fit uncertainties, not
 experimental coverage guarantees. If covariance is non-finite after the public
 transform, uncertainty is `None` with a diagnostic reason and the otherwise
-identified fit may remain successful.
+identified fit may remain successful. The same rule applies when the public
+transform itself is not representable: rank is still computed from the shared
+single SVD, no public standard errors are fabricated, and the transform failure
+is reported precisely.
 
 An optimizer termination flag alone is insufficient for scientific success.
 The result is unsuccessful when parameters are non-finite, bounds are violated,
@@ -203,8 +212,9 @@ observation.
 An unsuccessful optimizer termination is `optimization_failed`. A nominally
 successful termination with non-finite parameters, residuals, or cost is
 instead `quality_failed`; its raw cost and RMSE remain `None` rather than using
-NaN or manufacturing finite metrics. Other quality failures retain finite raw
-cost and RMSE diagnostics.
+NaN or manufacturing finite metrics. This special non-finite-output reason is
+invalid when finite raw metrics are present. Other quality failures retain
+finite raw cost and RMSE diagnostics.
 
 Initialization follows one explicit state machine. No guess means
 `initialization_failed` and SciPy is not called. An explicitly enabled fallback

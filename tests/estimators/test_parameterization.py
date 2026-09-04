@@ -142,15 +142,73 @@ def test_quadratic_scaling_is_overflow_safe_at_extreme_binary_span() -> None:
     assert transform[2, 2] == quadratic
 
 
-def test_public_transform_rejects_nonfinite_sequential_factors() -> None:
+def test_quadratic_scaling_avoids_any_intermediate_overflow() -> None:
+    half_span = np.ldexp(1.0, 300)
+    scale = np.ldexp(1.0, 600)
+    quadratic = np.ldexp(1.0, 800)
+    configuration = FitConfiguration(
+        model_kind="lorentzian",
+        baseline_degree=2,
+        min_fwhm_hz=1.0,
+        max_fwhm_hz=8.0,
+        max_amplitude=16.0,
+        min_resolved_amplitude=0.5,
+        min_center_separation_hz=1.0,
+    )
+    guess = FitInitialGuess(
+        resonances=_guess("lorentzian", 2).resonances,
+        baseline=Baseline(0.0, 0.0, quadratic_per_hz2=quadratic),
+    )
+
+    packed = pack_parameters(
+        guess,
+        configuration,
+        frequency_reference_hz=0.0,
+        frequency_half_span_hz=half_span,
+        fluorescence_reference=0.0,
+        fluorescence_scale=scale,
+    )
+    unpacked = unpack_parameters(
+        packed,
+        configuration,
+        frequency_reference_hz=0.0,
+        frequency_half_span_hz=half_span,
+        fluorescence_reference=0.0,
+        fluorescence_scale=scale,
+    )
+    transform = public_parameter_transform(
+        configuration,
+        frequency_half_span_hz=half_span,
+        fluorescence_scale=scale,
+    )
+
+    assert packed[2] == quadratic
+    assert unpacked.baseline.quadratic_per_hz2 == quadratic
+    assert transform[2, 2] == 1.0
+
+
+def test_public_transform_rejects_unrepresentable_factors() -> None:
     configuration = FitConfiguration(model_kind="lorentzian", baseline_degree=2)
 
-    with pytest.raises(ValueError, match="transform failed numerically"):
+    with pytest.raises(ValueError, match="not representable"):
         public_parameter_transform(
             configuration,
             frequency_half_span_hz=np.nextafter(0.0, 1.0),
             fluorescence_scale=np.finfo(np.float64).max,
         )
+
+
+def test_linear_public_transform_does_not_evaluate_quadratic_factor() -> None:
+    half_span = np.ldexp(1.0, -600)
+    configuration = FitConfiguration(model_kind="lorentzian", baseline_degree=1)
+
+    transform = public_parameter_transform(
+        configuration,
+        frequency_half_span_hz=half_span,
+        fluorescence_scale=1.0,
+    )
+
+    assert transform[1, 1] == np.ldexp(1.0, 600)
 
 
 def test_center_boxes_enforce_minimum_separation_including_exact_gaps() -> None:
@@ -206,8 +264,10 @@ def test_parameter_bounds_scale_all_public_limits() -> None:
         fluorescence_scale=8.0,
     )
 
-    assert np.all(np.isfinite(lower))
-    assert np.all(np.isfinite(upper))
+    assert np.all(np.isneginf(lower[:2]))
+    assert np.all(np.isposinf(upper[:2]))
+    assert np.all(np.isfinite(lower[2:]))
+    assert np.all(np.isfinite(upper[2:]))
     for index in range(8):
         start = 2 + 3 * index
         assert_array_equal(lower[start : start + 3][[0, 2]], [0.0, 0.04])

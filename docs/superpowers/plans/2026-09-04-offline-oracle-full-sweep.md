@@ -137,7 +137,7 @@ supplied guess used for an optimizer attempt, never synthetic truth.
 | `insufficient_samples` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because sample-count preflight runs first | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `uninformative_sweep` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because `ptp(y)` is zero or non-finite | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `optimization_failed` | status/message retained, `nfev>=0` | positive scale; finite cost/RMSE retained when available, otherwise `None` | rank `None`; uncertainty `None` with required reason; initial guess present |
-| `quality_failed` | status/message retained, `nfev>=0` | positive scale and normally finite cost/RMSE; both are `None` only when a nominally successful optimizer returns non-finite parameters, residuals, or cost | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
+| `quality_failed` | status/message retained, `nfev>=0` | positive scale and normally finite cost/RMSE; both are `None` only when a nominally successful optimizer returns non-finite parameters, residuals, or cost, and that special reason is invalid when finite metrics are present | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
 | success | status/message retained, `nfev>=0` | positive scale and finite cost/RMSE | full rank; uncertainty present or `None` only with a required covariance reason; initial guess present |
 
 All unsuccessful results have empty final resonance/Q arrays and no final
@@ -458,12 +458,18 @@ results.
   only for pseudo-Voigt. Reject a caller guess whose baseline reference is not
   exactly `f_ref`; exact ID order must equal `configuration.resonance_ids`, eta
   must match model semantics, and every center/width/amplitude/separation bound
-  must hold before SciPy.
+  must hold before SciPy. Evaluate the quadratic expressions with an
+  exponent-aware product/ratio operation; do not form `h**2` or depend on a
+  multiplication association that may overflow when the mathematical result
+  is finite and representable.
 
   Unpack the public intercept as `y_ref + S*b0_scaled`. Evaluate with the
   existing FWHM-native `multi_resonance_spectrum` and use
   scaled residual `(model-y)/S`. Pass deterministic `x_scale=1.0` because every
-  packed coordinate is dimensionless. The public transform `T` is diagonal in
+  packed coordinate is dimensionless. Baseline coordinates use intentional
+  `(-inf, +inf)` SciPy bounds because their public coefficients are constrained
+  only to be finite; resonance bounds must remain finite, strictly ordered, and
+  numerically feasible. The public transform `T` is diagonal in
   this fixed-reference layout: factors are `S`, `S/h`, `S/h**2` for baseline;
   `S`, `h`, `h` for each amplitude/center/FWHM; and one for eta. There is no
   baseline re-referencing in Stage 6.1.
@@ -535,8 +541,11 @@ results.
   not tested because Stage 6.1 fixes the public reference to sweep midpoint and
   rejects re-referenced guesses. For rank
   deficiency, non-finite input, non-positive degrees of freedom, invalid shapes,
-  or invalid covariance, require `(None, computed_rank_or_None, reason)`. In a
-  well-conditioned noisy fit, assert
+  or invalid covariance, require `(None, computed_rank_or_None, reason)`. A
+  public transform that is not representable is uncertainty unavailability:
+  run the same one Jacobian SVD, retain its computed rank, do not fabricate
+  standard errors, and permit an otherwise full-rank fit to remain successful.
+  In a well-conditioned noisy fit, assert
   finite non-negative public standard-error arrays with shapes matching baseline
   coefficients and eight resonance parameters; label the method local linearized
   Jacobian covariance.

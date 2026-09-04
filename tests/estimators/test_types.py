@@ -575,6 +575,28 @@ def test_quality_failed_result_rejects_rank_above_its_free_parameter_count() -> 
         )
 
 
+def test_nonfinite_optimizer_reason_rejects_finite_residual_metrics() -> None:
+    with pytest.raises(ValueError, match="must omit residual metrics"):
+        _success_result(
+            success=False,
+            failure_code="quality_failed",
+            resonance_estimates=(),
+            baseline_estimate=None,
+            initial_guess=_initial_guess(),
+            uncertainty=None,
+            uncertainty_reason=(
+                "optimizer returned non-finite parameters, residuals, or cost"
+            ),
+            scipy_status=1,
+            scipy_message="stopped",
+            nfev=1,
+            cost=0.01,
+            residual_rmse=0.02,
+            residual_scale=0.1,
+            jacobian_rank=None,
+        )
+
+
 def test_sweep_estimate_canonicalizes_completion_metadata_for_a_failure() -> None:
     fit = _success_result(
         success=False,

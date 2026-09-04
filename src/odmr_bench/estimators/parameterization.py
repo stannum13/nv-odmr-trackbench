@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from itertools import pairwise
 
 import numpy as np
@@ -10,10 +11,50 @@ from numpy.typing import ArrayLike, NDArray
 from odmr_bench.estimators.types import FitConfiguration, FitInitialGuess
 from odmr_bench.models import Baseline, Resonance
 
-# Scaled baseline coordinates are expected to be order unity. This finite limit
-# remains scientifically nonbinding while avoiding overflow in TRF's internal
-# products of distances to bounds.
-_FINITE_BOUND = 1.0e6
+
+def _finite_product_ratio(
+    numerators: tuple[float, ...],
+    denominators: tuple[float, ...],
+    name: str,
+) -> float:
+    """Evaluate a finite product/ratio through mantissas and base-two exponents."""
+    numerator_values = tuple(float(value) for value in numerators)
+    denominator_values = tuple(float(value) for value in denominators)
+    if not all(
+        np.isfinite(value) for value in (*numerator_values, *denominator_values)
+    ):
+        raise ValueError(f"{name} requires finite factors")
+    if any(value == 0.0 for value in denominator_values):
+        raise ValueError(f"{name} requires nonzero divisors")
+    if any(value == 0.0 for value in numerator_values):
+        return 0.0
+
+    sign = 1.0
+    mantissa = 1.0
+    exponent = 0
+    for value in numerator_values:
+        if value < 0.0:
+            sign = -sign
+        factor_mantissa, factor_exponent = math.frexp(abs(value))
+        mantissa *= factor_mantissa
+        exponent += factor_exponent
+        mantissa, adjustment = math.frexp(mantissa)
+        exponent += adjustment
+    for value in denominator_values:
+        if value < 0.0:
+            sign = -sign
+        factor_mantissa, factor_exponent = math.frexp(abs(value))
+        mantissa /= factor_mantissa
+        exponent -= factor_exponent
+        mantissa, adjustment = math.frexp(mantissa)
+        exponent += adjustment
+    try:
+        result = math.ldexp(sign * mantissa, exponent)
+    except OverflowError as error:
+        raise ValueError(f"{name} is not representable") from error
+    if not np.isfinite(result) or result == 0.0:
+        raise ValueError(f"{name} is not representable")
+    return result
 
 
 def _normalization_values(
@@ -59,13 +100,13 @@ def pack_parameters(
         guess.baseline.slope_per_hz * half_span / scale,
     ]
     if configuration.baseline_degree == 2:
-        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-            quadratic = (guess.baseline.quadratic_per_hz2 * half_span) * (
-                half_span / scale
+        packed.append(
+            _finite_product_ratio(
+                (guess.baseline.quadratic_per_hz2, half_span, half_span),
+                (scale,),
+                "quadratic packing",
             )
-        if not np.isfinite(quadratic):
-            raise ValueError("quadratic packing failed numerically")
-        packed.append(quadratic)
+        )
     elif guess.baseline.quadratic_per_hz2 != 0.0:
         raise ValueError("linear baseline guesses require zero quadratic coefficient")
 
@@ -106,14 +147,15 @@ def unpack_parameters(
     if not np.all(np.isfinite(values)) or not np.isfinite(y_reference):
         raise ValueError("packed parameters and fluorescence_reference must be finite")
 
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        quadratic = (
-            ((values[2] * scale) / half_span) / half_span
-            if configuration.baseline_degree == 2
-            else 0.0
+    quadratic = (
+        _finite_product_ratio(
+            (float(values[2]), scale),
+            (half_span, half_span),
+            "quadratic unpacking",
         )
-    if not np.isfinite(quadratic):
-        raise ValueError("quadratic unpacking failed numerically")
+        if configuration.baseline_degree == 2
+        else 0.0
+    )
 
     baseline = Baseline(
         intercept=y_reference + scale * values[0],
@@ -154,10 +196,13 @@ def public_parameter_transform(
     )
     with np.errstate(over="ignore", under="ignore", invalid="ignore"):
         slope_factor = scale / half_span
-        quadratic_factor = slope_factor / half_span
     factors = [scale, slope_factor]
     if configuration.baseline_degree == 2:
-        factors.append(quadratic_factor)
+        factors.append(
+            _finite_product_ratio(
+                (scale,), (half_span, half_span), "quadratic public transform"
+            )
+        )
     factors.extend([scale, half_span, half_span] * 8)
     if configuration.model_kind == "pseudo_voigt":
         factors.extend([1.0] * 8)
@@ -234,8 +279,8 @@ def parameter_bounds(
         configuration.min_center_separation_hz,
     )
     baseline_size = configuration.baseline_degree + 1
-    lower = [-_FINITE_BOUND] * baseline_size
-    upper = [_FINITE_BOUND] * baseline_size
+    lower = [-np.inf] * baseline_size
+    upper = [np.inf] * baseline_size
     for low_hz, high_hz in zip(center_lower, center_upper, strict=True):
         lower.extend(
             [

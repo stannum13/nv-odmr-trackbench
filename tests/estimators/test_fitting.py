@@ -258,8 +258,8 @@ def test_rank_and_covariance_share_one_svd_call(
         (np.array([[1.0, np.nan]]), 1.0, 2, np.eye(2), None),
         (np.eye(2), 1.0, 0, np.eye(2), 2),
         (np.eye(2), np.nan, 2, np.eye(2), 2),
-        (np.eye(2), 1.0, 2, np.eye(3), None),
-        (np.eye(2), 1.0, 2, np.diag([1.0, np.inf]), None),
+        (np.eye(2), 1.0, 2, np.eye(3), 2),
+        (np.eye(2), 1.0, 2, np.diag([1.0, np.inf]), 2),
     ],
 )
 def test_linearized_standard_error_failures_are_explicit(
@@ -416,6 +416,40 @@ def test_successful_optimizer_with_nonfinite_outputs_fails_quality_without_metri
     assert result.nfev == 4
 
 
+def test_successful_optimizer_with_nan_x_discards_finite_residual_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def nan_x_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        fitted = x0.copy()
+        fitted[0] = np.nan
+        return SimpleNamespace(
+            success=True,
+            status=2,
+            message="terminated with NaN x",
+            nfev=4,
+            x=fitted,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=np.eye(FREQUENCY_HZ.size, x0.size),
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", nan_x_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), _guess())
+
+    assert result.failure_code == "quality_failed"
+    assert result.cost is None
+    assert result.residual_rmse is None
+    assert result.uncertainty_reason == (
+        "optimizer returned non-finite parameters, residuals, or cost"
+    )
+
+
 def test_detected_exact_separation_preflight_failure_has_stable_reason(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -522,6 +556,121 @@ def test_underflowed_parameter_bounds_are_rejected_before_scipy(
 
     with pytest.raises(ValueError, match="parameterization"):
         fit_spectrum(CompleteSweep(FREQUENCY_HZ, fluorescence), configuration, guess)
+
+
+def test_large_finite_baseline_coordinate_is_not_artificially_bounded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    guess = _guess()
+    guess = FitInitialGuess(
+        guess.resonances, replace(guess.baseline, intercept=1.0e100)
+    )
+
+    def observing_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun
+        lower, upper = kwargs["bounds"]
+        assert np.all(np.isneginf(lower[:3]))
+        assert np.all(np.isposinf(upper[:3]))
+        assert np.isfinite(x0[0])
+        return SimpleNamespace(
+            success=False,
+            status=0,
+            message="baseline accepted",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(FREQUENCY_HZ.size),
+            cost=0.0,
+            jac=np.zeros((FREQUENCY_HZ.size, x0.size)),
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", observing_least_squares
+    )
+
+    result = fit_spectrum(_sweep(), _configuration(), guess)
+
+    assert result.failure_code == "optimization_failed"
+
+
+def test_nonfinite_covariance_transform_keeps_identified_fit_without_uncertainty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    span = np.ldexp(1.0, -900)
+    fluorescence_scale = np.ldexp(1.0, 900)
+    frequency = np.linspace(0.0, span, 101)
+    sweep = CompleteSweep(
+        frequency, np.linspace(0.0, fluorescence_scale, frequency.size)
+    )
+    centers = span * (2.0 + 4.0 * np.arange(8)) / 32.0
+    configuration = FitConfiguration(
+        model_kind="pseudo_voigt",
+        baseline_degree=2,
+        min_fwhm_hz=span / 1024.0,
+        max_fwhm_hz=span / 8.0,
+        max_amplitude=fluorescence_scale / 32.0,
+        min_resolved_amplitude=fluorescence_scale / 4096.0,
+        min_center_separation_hz=span / 32.0,
+        min_baseline_sse_improvement=0.0,
+    )
+    guess = FitInitialGuess(
+        tuple(
+            Resonance(
+                f"r{i}",
+                center,
+                span / 128.0,
+                fluorescence_scale / 1024.0,
+                0.5,
+            )
+            for i, center in enumerate(centers)
+        ),
+        Baseline(fluorescence_scale / 2.0, span / 2.0),
+    )
+
+    def successful_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        jacobian = np.zeros((frequency.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="identified",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(frequency.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    svd_calls = 0
+    original_svd = np.linalg.svd
+
+    def counting_svd(*args: object, **kwargs: object) -> object:
+        nonlocal svd_calls
+        svd_calls += 1
+        return original_svd(*args, **kwargs)
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", successful_least_squares
+    )
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting._baseline_only_sse", lambda *args: 1.0
+    )
+    monkeypatch.setattr(np.linalg, "svd", counting_svd)
+
+    result = fit_spectrum(sweep, configuration, guess)
+
+    assert result.success
+    assert result.jacobian_rank == 35
+    assert result.uncertainty is None
+    assert result.uncertainty_reason == (
+        "public parameter transform unavailable: "
+        "quadratic public transform is not representable"
+    )
+    assert svd_calls == 1
 
 
 @pytest.mark.parametrize(
