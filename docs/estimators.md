@@ -160,14 +160,18 @@ Stale age is recorded independently as
 timestamp bases are never substituted for or mixed with one another. A
 successful current fit has zero age on every available basis.
 
-Resource fields copy the submitted sweep exactly: `observation_count`,
-`cumulative_observation_count`, optional sequence/timestamp endpoints,
-`total_integration_time_s`, and `total_nominal_exposure_photons`. Retries add
-CPU and `nfev` but no acquisition resources. `total_nfev` sums retained
-attempts. `cpu_time_s` is the measured update-core process CPU interval through
-the instant before record construction/state append, is at least the attempt
-sum, and is machine-dependent diagnostic data rather than an acquisition-time
-or performance guarantee.
+Each record's `update_index` is its zero-based accepted-update position.
+Resource fields copy or derive from the submitted sweep exactly:
+`observation_count`, `cumulative_observation_count`, `first_sequence_index`,
+`last_sequence_index`, `last_timestamp_s`, `total_integration_time_s`, and
+`total_nominal_exposure_photons`. `first_sequence_index` is derived from the
+submitted observation count and inclusive last sequence index when that basis
+is available. Retries add CPU and `nfev` but no acquisition resources.
+`total_nfev` sums retained attempts. `cpu_time_s` is the
+measured update-core process CPU interval through the instant before record
+construction/state append, is at least the attempt sum, and is
+machine-dependent diagnostic data rather than an acquisition-time or
+performance guarantee.
 
 The estimator exposes immutable `configuration`, `latest`, `history`, and
 `latest_success` properties, plus `update_sweep()` and `reset()`. Sequence and

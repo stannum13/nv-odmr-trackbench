@@ -138,18 +138,14 @@ def _assert_fit_matches_frozen_truth(
         np.abs(fitted_centers_hz - truth_centers_hz)
         < CENTER_REGRESSION_TOLERANCE_FWHM * truth_fwhm_hz
     )
-    np.testing.assert_allclose(
-        fitted_fwhm_hz,
-        truth_fwhm_hz,
-        rtol=FWHM_REGRESSION_RELATIVE_TOLERANCE,
-        atol=0.0,
+    fwhm_relative_error = np.abs(fitted_fwhm_hz - truth_fwhm_hz) / truth_fwhm_hz
+    q_relative_error = np.abs(fitted_q - truth_q) / truth_q
+    assert np.all(np.isfinite(fwhm_relative_error))
+    assert np.all(np.isfinite(q_relative_error))
+    assert np.all(
+        fwhm_relative_error < FWHM_REGRESSION_RELATIVE_TOLERANCE
     )
-    np.testing.assert_allclose(
-        fitted_q,
-        truth_q,
-        rtol=Q_REGRESSION_RELATIVE_TOLERANCE,
-        atol=0.0,
-    )
+    assert np.all(q_relative_error < Q_REGRESSION_RELATIVE_TOLERANCE)
     assert isinstance(fit.nfev, int)
     assert fit.nfev >= 0
 
@@ -453,6 +449,9 @@ def test_optimizer_failure_recovers_cold_without_duplicate_acquisition(
     assert recovered.active_source_update_index == 1
     assert recovered.observation_count == sweeps[2].frequency_hz.size
     assert recovered.cumulative_observation_count == 8962
+    assert recovered.first_sequence_index == 8962
+    assert recovered.last_sequence_index == sweeps[2].last_sequence_index
+    assert recovered.last_timestamp_s == sweeps[2].last_timestamp_s
     assert recovered.total_integration_time_s == sweeps[2].total_integration_time_s
     assert recovered.total_nominal_exposure_photons == (
         sweeps[2].total_nominal_exposure_photons
@@ -492,6 +491,11 @@ def test_warm_started_example_runs_from_an_unrelated_working_directory(
     assert len(rows[2:]) == 3
     parsed = [dict(zip(field_names, row.split(), strict=True)) for row in rows[2:]]
     assert [row["update"] for row in parsed] == ["0", "1", "2"]
+    assert [row["disposition"] for row in parsed] == [
+        "no_successful_prior",
+        "used",
+        "used",
+    ]
     assert [row["attempts"] for row in parsed] == ["cold", "warm", "warm"]
     assert [row["warm_source"] for row in parsed] == ["none", "0", "1"]
     assert [row["active_source"] for row in parsed] == ["0", "1", "2"]
