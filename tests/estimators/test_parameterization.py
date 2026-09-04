@@ -211,6 +211,19 @@ def test_linear_public_transform_does_not_evaluate_quadratic_factor() -> None:
     assert transform[1, 1] == np.ldexp(1.0, 600)
 
 
+def test_linear_public_transform_rejects_unrepresentable_positive_slope() -> None:
+    configuration = FitConfiguration(model_kind="lorentzian", baseline_degree=1)
+
+    with pytest.raises(
+        ValueError, match="slope public transform is not representable"
+    ):
+        public_parameter_transform(
+            configuration,
+            frequency_half_span_hz=2.0,
+            fluorescence_scale=np.nextafter(0.0, 1.0),
+        )
+
+
 def test_center_boxes_enforce_minimum_separation_including_exact_gaps() -> None:
     centers = np.array([10.0, 20.0, 35.0, 50.0, 65.0, 80.0, 95.0, 110.0])
     lower, upper = center_bounds_hz(centers, 0.0, 120.0, 10.0)

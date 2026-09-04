@@ -194,8 +194,9 @@ def public_parameter_transform(
     _, half_span, scale = _normalization_values(
         0.0, frequency_half_span_hz, fluorescence_scale
     )
-    with np.errstate(over="ignore", under="ignore", invalid="ignore"):
-        slope_factor = scale / half_span
+    slope_factor = _finite_product_ratio(
+        (scale,), (half_span,), "slope public transform"
+    )
     factors = [scale, slope_factor]
     if configuration.baseline_degree == 2:
         factors.append(

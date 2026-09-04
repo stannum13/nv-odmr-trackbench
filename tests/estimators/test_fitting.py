@@ -668,9 +668,70 @@ def test_nonfinite_covariance_transform_keeps_identified_fit_without_uncertainty
     assert result.uncertainty is None
     assert result.uncertainty_reason == (
         "public parameter transform unavailable: "
-        "quadratic public transform is not representable"
+        "slope public transform is not representable"
     )
     assert svd_calls == 1
+
+
+def test_underflowing_slope_transform_keeps_identified_fit_without_uncertainty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fluorescence_scale = np.nextafter(0.0, 1.0)
+    frequency = np.linspace(0.0, 4.0, 101)
+    sweep = CompleteSweep(
+        frequency, np.linspace(0.0, fluorescence_scale, frequency.size)
+    )
+    configuration = FitConfiguration(
+        model_kind="lorentzian",
+        baseline_degree=1,
+        min_fwhm_hz=0.0625,
+        max_fwhm_hz=0.25,
+        max_amplitude=fluorescence_scale,
+        min_resolved_amplitude=fluorescence_scale,
+        min_center_separation_hz=0.25,
+        min_baseline_sse_improvement=0.0,
+    )
+    guess = FitInitialGuess(
+        tuple(
+            Resonance(f"r{i}", 0.5 + 0.4 * i, 0.125, fluorescence_scale, 1.0)
+            for i in range(8)
+        ),
+        Baseline(0.0, 2.0),
+    )
+
+    def successful_least_squares(
+        fun: object, x0: np.ndarray, **kwargs: object
+    ) -> SimpleNamespace:
+        del fun, kwargs
+        jacobian = np.zeros((frequency.size, x0.size))
+        jacobian[: x0.size] = np.eye(x0.size)
+        return SimpleNamespace(
+            success=True,
+            status=1,
+            message="identified",
+            nfev=1,
+            x=x0,
+            fun=np.zeros(frequency.size),
+            cost=0.0,
+            jac=jacobian,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting.least_squares", successful_least_squares
+    )
+    monkeypatch.setattr(
+        "odmr_bench.estimators.fitting._baseline_only_sse", lambda *args: 1.0
+    )
+
+    result = fit_spectrum(sweep, configuration, guess)
+
+    assert result.success
+    assert result.jacobian_rank == 26
+    assert result.uncertainty is None
+    assert result.uncertainty_reason == (
+        "public parameter transform unavailable: "
+        "slope public transform is not representable"
+    )
 
 
 @pytest.mark.parametrize(

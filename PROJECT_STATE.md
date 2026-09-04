@@ -167,7 +167,7 @@ sweep wrapper are next.
 
 ## Tests currently passing
 
-- `pytest`: 410 passed.
+- `pytest`: 412 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations
