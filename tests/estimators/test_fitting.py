@@ -19,6 +19,7 @@ from odmr_bench.estimators import (
     linearized_standard_errors,
 )
 from odmr_bench.estimators.fitting import (
+    _baseline_only_sse,
     _scaled_residual_function,
     _uncertainty_from_errors,
 )
@@ -48,7 +49,7 @@ def _configuration(
         "max_fwhm_hz": 8.0e6,
         "max_amplitude": 0.08,
         "min_resolved_amplitude": 1.0e-4,
-        "min_amplitude_significance": 3.0,
+        "min_amplitude_significance": 5.0,
         "min_center_separation_hz": 1.0e6,
         "relative_prominence": 0.01,
         "max_nfev": 4000,
@@ -1286,7 +1287,7 @@ def test_fallback_does_not_turn_seven_dips_into_success() -> None:
     assert result.diagnostics.source == "fallback"
 
 
-@pytest.mark.parametrize("seed", [1, 2])
+@pytest.mark.parametrize("seed", [1, 2, 23])
 def test_noisy_seven_line_false_component_fails_local_significance(seed: int) -> None:
     resonances, baseline = _truth()
     noise = np.random.default_rng(seed).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
@@ -1297,15 +1298,26 @@ def test_noisy_seven_line_false_component_fails_local_significance(seed: int) ->
         ),
     )
 
-    result = fit_spectrum(sweep, _configuration())
+    shifted_sweep = CompleteSweep(FREQUENCY_HZ, sweep.fluorescence + 1.0e6)
 
-    assert not result.success
-    assert result.failure_code == "quality_failed"
-    assert result.diagnostics.source == "detected"
-    assert result.uncertainty_reason == (
-        "one or more fitted amplitudes fail the model-conditioned local "
-        "min_amplitude_significance threshold"
-    )
+    base = fit_spectrum(sweep, _configuration())
+    shifted = fit_spectrum(shifted_sweep, _configuration())
+
+    for result in (base, shifted):
+        assert not result.success
+        assert result.failure_code == "quality_failed"
+        assert result.diagnostics.source == "detected"
+        assert result.uncertainty_reason == (
+            "one or more fitted amplitudes fail the model-conditioned local "
+            "min_amplitude_significance threshold"
+        )
+        assert result.initial_guess is not None
+        assert_array_equal(
+            [item.resonance_id for item in result.initial_guess.resonances],
+            [f"r{index}" for index in range(8)],
+        )
+    assert shifted.diagnostics.candidate_count == base.diagnostics.candidate_count
+    assert shifted.jacobian_rank == base.jacobian_rank == 35
 
 
 def test_seed_one_false_candidate_is_between_true_lines_with_permissive_gate() -> None:
@@ -1531,13 +1543,32 @@ def test_multiplicative_fluorescence_units_preserve_scientific_fit(
     assert inverse_baseline.quadratic_per_hz2 == pytest.approx(-5e-20, abs=5e-21)
 
 
-def test_additive_fluorescence_offset_preserves_scientific_fit() -> None:
-    base = fit_spectrum(_sweep(), _configuration(), _guess())
-    shifted = fit_spectrum(_sweep(offset=1.0e6), _configuration(), _guess(offset=1.0e6))
+def test_noisy_direct_additive_offset_preserves_fit_and_public_uncertainty() -> None:
+    noise = np.random.default_rng(6104).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
+    base_sweep = _sweep(noise=noise)
+    shifted_sweep = CompleteSweep(
+        FREQUENCY_HZ, base_sweep.fluorescence + 1.0e6
+    )
+    base_guess = _guess()
+    shifted_guess = replace(
+        base_guess,
+        baseline=replace(
+            base_guess.baseline, intercept=base_guess.baseline.intercept + 1.0e6
+        ),
+    )
 
-    assert shifted.success == base.success
+    base = fit_spectrum(base_sweep, _configuration(), base_guess)
+    shifted = fit_spectrum(shifted_sweep, _configuration(), shifted_guess)
+
+    assert shifted.success == base.success is True
     assert shifted.failure_code == base.failure_code
-    assert shifted.jacobian_rank == base.jacobian_rank
+    assert shifted.jacobian_rank == base.jacobian_rank == 35
+    assert shifted.cost == pytest.approx(base.cost, rel=1.0e-6)
+    assert shifted.residual_rmse == pytest.approx(base.residual_rmse, rel=1.0e-6)
+    assert_array_equal(
+        [item.resonance_id for item in shifted.resonance_estimates],
+        [item.resonance_id for item in base.resonance_estimates],
+    )
     assert (
         np.max(
             np.abs(
@@ -1545,7 +1576,7 @@ def test_additive_fluorescence_offset_preserves_scientific_fit() -> None:
                 - np.array([x.center_hz for x in base.resonance_estimates])
             )
         )
-        < 10.0
+        < 0.05
     )
     assert (
         np.max(
@@ -1554,7 +1585,7 @@ def test_additive_fluorescence_offset_preserves_scientific_fit() -> None:
                 - np.array([x.fwhm_hz for x in base.resonance_estimates])
             )
         )
-        < 1.0e3
+        < 0.5
     )
     assert (
         np.max(
@@ -1563,13 +1594,35 @@ def test_additive_fluorescence_offset_preserves_scientific_fit() -> None:
                 - np.array([x.eta for x in base.resonance_estimates])
             )
         )
-        < 1.0e-4
+        < 1.0e-6
     )
     assert_allclose(
         [x.amplitude for x in shifted.resonance_estimates],
         [x.amplitude for x in base.resonance_estimates],
-        rtol=5e-6,
+        rtol=1.0e-6,
     )
+    assert base.uncertainty is not None
+    assert shifted.uncertainty is not None
+    for field in (
+        "baseline_standard_errors",
+        "amplitude",
+        "center_hz",
+        "fwhm_hz",
+        "eta",
+    ):
+        base_errors = getattr(base.uncertainty, field)
+        shifted_errors = getattr(shifted.uncertainty, field)
+        assert base_errors is not None
+        assert shifted_errors is not None
+        assert_allclose(shifted_errors, base_errors, rtol=1.0e-6, atol=0.0)
+    base_significance = np.asarray(
+        [item.amplitude for item in base.resonance_estimates]
+    ) / np.asarray(base.uncertainty.amplitude)
+    shifted_significance = np.asarray(
+        [item.amplitude for item in shifted.resonance_estimates]
+    ) / np.asarray(shifted.uncertainty.amplitude)
+    assert_allclose(shifted_significance, base_significance, rtol=1.0e-6, atol=0.0)
+    assert np.min(base_significance) > 250.0
     assert shifted.baseline_estimate.intercept - 1.0e6 == pytest.approx(
         base.baseline_estimate.intercept, abs=2e-4
     )
@@ -1579,6 +1632,46 @@ def test_additive_fluorescence_offset_preserves_scientific_fit() -> None:
     assert shifted.baseline_estimate.quadratic_per_hz2 == pytest.approx(
         base.baseline_estimate.quadratic_per_hz2, abs=5e-21
     )
+
+
+def test_direct_additive_offset_cannot_change_amplitude_gate_decision() -> None:
+    noise = np.random.default_rng(6104).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
+    base_sweep = _sweep(noise=noise)
+    shifted_sweep = CompleteSweep(
+        FREQUENCY_HZ, base_sweep.fluorescence + 1.0e6
+    )
+    base_guess = _guess()
+    shifted_guess = replace(
+        base_guess,
+        baseline=replace(
+            base_guess.baseline, intercept=base_guess.baseline.intercept + 1.0e6
+        ),
+    )
+    configuration = _configuration(min_amplitude_significance=290.0)
+
+    base = fit_spectrum(base_sweep, configuration, base_guess)
+    shifted = fit_spectrum(shifted_sweep, configuration, shifted_guess)
+
+    for result in (base, shifted):
+        assert not result.success
+        assert result.failure_code == "quality_failed"
+        assert result.jacobian_rank == 35
+        assert result.uncertainty_reason == (
+            "one or more fitted amplitudes fail the model-conditioned local "
+            "min_amplitude_significance threshold"
+        )
+
+
+def test_baseline_only_sse_is_stable_under_direct_additive_offset() -> None:
+    noise = np.random.default_rng(6104).normal(0.0, 2.0e-4, FREQUENCY_HZ.size)
+    base = _sweep(noise=noise)
+    shifted = CompleteSweep(FREQUENCY_HZ, base.fluorescence + 1.0e6)
+    half_span_hz = (FREQUENCY_HZ[-1] - FREQUENCY_HZ[0]) / 2.0
+
+    base_sse = _baseline_only_sse(base, REFERENCE_HZ, half_span_hz, 2)
+    shifted_sse = _baseline_only_sse(shifted, REFERENCE_HZ, half_span_hz, 2)
+
+    assert shifted_sse == pytest.approx(base_sse, rel=5.0e-11)
 
 
 def test_affine_packing_and_scaled_residual_algebra() -> None:
@@ -1635,11 +1728,14 @@ def test_baseline_improvement_gate_includes_exact_threshold(
     monkeypatch: pytest.MonkeyPatch, improvement: float, expected_success: bool
 ) -> None:
     sweep = _sweep("lorentzian", 1)
-    configuration = _configuration("lorentzian", 1, min_baseline_sse_improvement=0.5)
-    z = (FREQUENCY_HZ - REFERENCE_HZ) / ((FREQUENCY_HZ[-1] - FREQUENCY_HZ[0]) / 2)
-    design = np.column_stack([np.ones(z.size), z])
-    coefficients, _, _, _ = np.linalg.lstsq(design, sweep.fluorescence, rcond=None)
-    baseline_sse = float(np.sum((design @ coefficients - sweep.fluorescence) ** 2))
+    configuration = _configuration(
+        "lorentzian",
+        1,
+        min_baseline_sse_improvement=0.5,
+        min_amplitude_significance=1.0,
+    )
+    half_span_hz = (FREQUENCY_HZ[-1] - FREQUENCY_HZ[0]) / 2
+    baseline_sse = _baseline_only_sse(sweep, REFERENCE_HZ, half_span_hz, 1)
     scale = float(np.ptp(sweep.fluorescence))
 
     def controlled_least_squares(

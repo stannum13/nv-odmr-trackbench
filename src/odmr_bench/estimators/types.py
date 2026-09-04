@@ -268,7 +268,7 @@ class FitConfiguration:
     max_nfev: int = 4000
     rank_rtol: float = 1.0e-10
     min_baseline_sse_improvement: float = 1.0e-4
-    min_amplitude_significance: float = 3.0
+    min_amplitude_significance: float = 5.0
 
     def __post_init__(self) -> None:
         if self.model_kind not in {"lorentzian", "pseudo_voigt"}:
@@ -452,7 +452,12 @@ class FitUncertainty:
                 "eta",
                 _immutable_float_array_with_length(self.eta, "eta", 8),
             )
-        object.__setattr__(self, "method", _required_string(self.method, "method"))
+        method = _required_string(self.method, "method")
+        if method != "local_linearized_jacobian_covariance":
+            raise ValueError(
+                "method must equal 'local_linearized_jacobian_covariance'"
+            )
+        object.__setattr__(self, "method", method)
 
 
 _FAILURE_CODES = frozenset(
@@ -647,6 +652,29 @@ class SpectrumFitResult:
         if jacobian_rank is not None and jacobian_rank > free_parameters:
             raise ValueError("jacobian_rank cannot exceed the free parameter count")
 
+        if optimizer_attempted:
+            if (
+                scipy_status is None
+                or scipy_message is None
+                or not scipy_message
+                or nfev <= 0
+            ):
+                raise ValueError(
+                    "optimizer attempts require non-None scipy_status, nonempty "
+                    "scipy_message, and positive nfev"
+                )
+            if failure_code == "optimization_failed":
+                if scipy_status > 0:
+                    raise ValueError(
+                        "optimization_failed requires non-positive scipy_status"
+                    )
+            elif scipy_status <= 0:
+                raise ValueError(
+                    "success and quality_failed require positive scipy_status"
+                )
+        elif scipy_status is not None or scipy_message is not None or nfev != 0:
+            raise ValueError("pre-optimization failures cannot have SciPy fields")
+
         if not success:
             assert failure_code is not None
             if failure_code == "insufficient_samples":
@@ -658,12 +686,6 @@ class SpectrumFitResult:
                 raise ValueError(
                     "non-scarcity failures require positive degrees_of_freedom"
                 )
-            if failure_code in {
-                "initialization_failed",
-                "insufficient_samples",
-                "uninformative_sweep",
-            } and (scipy_status is not None or scipy_message is not None or nfev != 0):
-                raise ValueError("pre-optimization failures cannot have SciPy fields")
             if failure_code == "initialization_failed":
                 if (
                     residual_scale is None

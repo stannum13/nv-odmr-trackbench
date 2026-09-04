@@ -12,17 +12,20 @@ once a package version is introduced.
 
 - Closed the integrated Stage 6.1 oracle findings. Fit success now requires
   every component to meet a configurable model-conditioned local amplitude
-  significance threshold (`3.0` by default) derived from the same packed
+  significance threshold (`5.0` by default) derived from the same packed
   covariance as public uncertainty; unavailable/non-finite evidence fails
   conservatively, while unrelated public-transform unavailability does not
-  erase usable amplitude evidence. Fixed noisy seven-line seeds no longer pass
-  by inserting a noise-supported eighth component. Initializer baseline
-  conversion now rejects both overflow and nonzero-to-zero underflow. Result
-  cross-field provenance, finite-Q derivation, and public linearized-error
-  input validation are guarded at their numerical/type boundaries, and the
-  covariance is formed from square-root SVD factors so representable errors are
-  not lost to premature singular-value squaring. Documentation now states
-  explicitly that an oracle success is
+  erase usable amplitude evidence. Noisy seven-line seeds 1, 2, and 23 fail
+  before and after a direct `+1e6` fluorescence shift rather than promoting a
+  noise-supported eighth component. Centered model/data residuals and centered
+  baseline-only least squares eliminate avoidable additive-origin cancellation
+  while preserving public cost/RMSE units. Initializer baseline conversion now
+  rejects both overflow and nonzero-to-zero underflow. Result cross-field and
+  optimizer-status provenance, the exact local-Jacobian uncertainty method,
+  finite-Q derivation, and public linearized-error input validation are guarded
+  at their numerical/type boundaries. The covariance is formed from square-root
+  SVD factors so representable errors are not lost to premature singular-value
+  squaring. Documentation now states explicitly that an oracle success is
   model/initializer/threshold-conditioned, not proof of eight physical lines.
 - Hardened constrained oracle fitting against empty initialization reasons,
   rounded public-bound violations, unrepresentable center separations,

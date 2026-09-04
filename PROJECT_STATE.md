@@ -5,9 +5,10 @@ Last updated: 2026-09-04
 ## Current stage
 
 Stage 6.1 is locally complete — the constrained offline oracle, repeated
-cold-start full-sweep estimator, and integrated-review fix set passed final
-verification and independent re-review. The reviewed commit is ready for
-authorized synchronization before Stage 6.2 design.
+cold-start full-sweep estimator, and integrated-review fix set, including the
+final fluorescence-origin/provenance follow-up, passed prescribed verification
+and independent re-review. The reviewed fix is ready for authorized
+synchronization before Stage 6.2 design.
 
 ## Completed work
 
@@ -97,10 +98,12 @@ authorized synchronization before Stage 6.2 design.
 - Corrected the plan after adversarial review by defining the fit-failure state
   machine, full-rank quality gate, scaled-to-public covariance transform, exact
   center bounds, public schemas, initializer formulas, and fixed regressions.
-- Corrected the second review findings with additive-offset-invariant
-  fluorescence scaling, one-cutoff SVD covariance, an exact baseline-only SSE
+- Corrected the second review findings with fluorescence origin/scale
+  parameterization, one-cutoff SVD covariance, an exact baseline-only SSE
   reference, feasible fallback geometry/fixture, a denser scan grid, immutable
-  initial-guess provenance, and a typed failure-field matrix.
+  initial-guess provenance, and a typed failure-field matrix. The final review
+  closes the remaining numerical gap by evaluating both spectral residuals and
+  the baseline-only target in centered fluorescence coordinates.
 - Defined pre-initialization `uninformative_sweep` handling for zero-variation
   data and corrected the final smoke-test paths and affine-scaling fixture rules.
 - Separated exact identical-input repeatability from physically negligible
@@ -144,23 +147,28 @@ authorized synchronization before Stage 6.2 design.
   failures, local-linearized uncertainty, ordered-center scope, and recording
   interpretation, plus a download-free synthetic fitting example.
 - Addressed the integrated Stage 6.1 findings with a positive finite
-  `min_amplitude_significance` configuration (default `3.0`) and an all-line
+  `min_amplitude_significance` configuration (default `5.0`) and an all-line
   model-conditioned local amplitude/standard-error gate derived from the same
-  packed covariance as public uncertainty. Fixed noisy seven-line seeds 1 and
-  2 now fail quality instead of promoting a noise-supported eighth component;
-  normal clean/noisy eight-component fixtures retain their declared recovery.
+  packed covariance as public uncertainty. Fixed noisy seven-line seeds 1, 2,
+  and 23 now fail quality before and after direct `+1e6` fluorescence shifts
+  instead of promoting a noise-supported eighth component; normal clean/noisy
+  eight-component fixtures retain their declared recovery.
 - Guarded unrepresentable initializer baseline conversion, strengthened result
   provenance across baseline degree/reference, IDs, diagnostic source, and
-  optimizer-attempt state, and rejected non-finite Q without leaking numerical
-  warnings. The public linearized-error helper now rejects complex arrays,
-  bool/non-integral degrees of freedom, and invalid scalar inputs without lossy
-  coercion. Its covariance uses square-root SVD factors to avoid premature
-  overflow/underflow, and finite scaled baseline coefficients that would
-  overflow or underflow in public units fail initialization explicitly.
+  optimizer-attempt state/status/message/evaluation count, restricted the
+  uncertainty method to its exact local-Jacobian label, and rejected non-finite
+  Q without leaking numerical warnings. The public linearized-error helper now
+  rejects complex arrays, bool/non-integral degrees of freedom, and invalid
+  scalar inputs without lossy coercion. Its covariance uses square-root SVD
+  factors to avoid premature overflow/underflow, and finite scaled baseline
+  coefficients that would overflow or underflow in public units fail
+  initialization explicitly.
 - Added fit-level regressions for zero baseline-only SSE, rank deficiency,
   affine raw diagnostics and public errors, nonuniform grids, covariance
   unavailability, exact-zero amplitude errors, and weak false components near
-  the configured significance threshold.
+  the configured significance threshold. A noisy direct-addition regression
+  pins classification, IDs, rank, cost, RMSE, every public SE field, and local
+  significance behavior under a `+1e6` fluorescence origin shift.
 
 ## Important scientific and design decisions
 
@@ -197,8 +205,8 @@ authorized synchronization before Stage 6.2 design.
 
 ## Tests currently passing
 
-- `pytest tests/estimators`: 269 passed.
-- `pytest`: 469 passed.
+- `pytest tests/estimators`: 289 passed.
+- `pytest`: 489 passed.
 - `ruff check .`: All checks passed.
 
 ## Known scientific limitations

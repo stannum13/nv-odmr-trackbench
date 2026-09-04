@@ -139,7 +139,7 @@ def _configuration(**overrides: object) -> FitConfiguration:
         "max_fwhm_hz": 8.0e6,
         "max_amplitude": 0.25,
         "min_resolved_amplitude": 1.0e-4,
-        "min_amplitude_significance": 3.0,
+        "min_amplitude_significance": 5.0,
         "min_center_separation_hz": 1.0e6,
         "savgol_window": 11,
         "savgol_polyorder": 2,
@@ -170,7 +170,7 @@ def test_fit_configuration_canonicalizes_the_oracle_constraints() -> None:
 
 
 def test_fit_configuration_pins_default_amplitude_significance() -> None:
-    assert FitConfiguration().min_amplitude_significance == 3.0
+    assert FitConfiguration().min_amplitude_significance == 5.0
 
 
 def test_fit_configuration_rejects_unrepresentable_amplitude_significance() -> None:
@@ -364,6 +364,22 @@ def test_fit_uncertainty_rejects_complex_arrays_without_silent_projection(
             FitUncertainty(**values)
 
 
+@pytest.mark.parametrize(
+    "method",
+    ["bootstrap", "local_linearized_jacobian_covariance_v2"],
+)
+def test_fit_uncertainty_rejects_any_undeclared_method(method: str) -> None:
+    with pytest.raises(ValueError, match="method"):
+        FitUncertainty(
+            baseline_standard_errors=np.ones(2),
+            center_hz=np.ones(8),
+            fwhm_hz=np.ones(8),
+            amplitude=np.ones(8),
+            eta=None,
+            method=method,
+        )
+
+
 def _success_result(**overrides: object) -> SpectrumFitResult:
     values: dict[str, object] = {
         "success": True,
@@ -387,6 +403,62 @@ def _success_result(**overrides: object) -> SpectrumFitResult:
     }
     values.update(overrides)
     return SpectrumFitResult(**values)  # type: ignore[arg-type]
+
+
+def _attempt_result_overrides(outcome: str) -> dict[str, object]:
+    if outcome == "success":
+        return {}
+    common: dict[str, object] = {
+        "success": False,
+        "failure_code": outcome,
+        "resonance_estimates": (),
+        "baseline_estimate": None,
+        "uncertainty": None,
+        "uncertainty_reason": "attempt did not produce an accepted fit",
+        "scipy_status": 0 if outcome == "optimization_failed" else 1,
+        "scipy_message": "stopped",
+        "nfev": 1,
+        "jacobian_rank": 10 if outcome == "quality_failed" else None,
+    }
+    return common
+
+
+@pytest.mark.parametrize(
+    "invalid_override",
+    [
+        {"scipy_status": None},
+        {"scipy_message": None},
+        {"scipy_message": ""},
+        {"nfev": 0},
+    ],
+    ids=["missing-status", "missing-message", "empty-message", "zero-evaluations"],
+)
+@pytest.mark.parametrize(
+    "outcome", ["success", "quality_failed", "optimization_failed"]
+)
+def test_optimizer_attempts_require_complete_nonempty_provenance(
+    outcome: str,
+    invalid_override: dict[str, object],
+) -> None:
+    overrides = _attempt_result_overrides(outcome)
+    overrides.update(invalid_override)
+
+    with pytest.raises(ValueError, match="optimizer attempts"):
+        _success_result(**overrides)
+
+
+@pytest.mark.parametrize(
+    ("outcome", "scipy_status"),
+    [("success", 0), ("quality_failed", 0), ("optimization_failed", 1)],
+)
+def test_optimizer_attempt_status_sign_matches_outcome(
+    outcome: str, scipy_status: int
+) -> None:
+    overrides = _attempt_result_overrides(outcome)
+    overrides["scipy_status"] = scipy_status
+
+    with pytest.raises(ValueError, match="scipy_status"):
+        _success_result(**overrides)
 
 
 def test_successful_fit_derives_read_only_signed_q_and_snapshots_guess() -> None:
@@ -525,7 +597,9 @@ def test_result_rejects_incompatible_diagnostic_source_and_attempt_state(
                 _uncertainty(eta=np.full(8, 1.0e-3)) if success else None
             ),
             uncertainty_reason=None if success else "not available",
-            scipy_status=1 if attempted else None,
+            scipy_status=(
+                0 if failure_code == "optimization_failed" else 1 if attempted else None
+            ),
             scipy_message="stopped" if attempted else None,
             nfev=1 if attempted else 0,
             cost=0.01 if attempted else None,
@@ -596,7 +670,13 @@ def test_failure_result_has_no_final_estimates_or_uncertainty(
         initial_guess=_initial_guess() if optimizer_attempted else None,
         uncertainty=None,
         uncertainty_reason="fit did not produce a covariance estimate",
-        scipy_status=1 if optimizer_attempted else None,
+        scipy_status=(
+            0
+            if failure_code == "optimization_failed"
+            else 1
+            if optimizer_attempted
+            else None
+        ),
         scipy_message="stopped" if optimizer_attempted else None,
         nfev=1 if optimizer_attempted else 0,
         cost=0.01
@@ -665,7 +745,13 @@ def test_failure_result_rejects_the_failure_state_matrix(
         "initial_guess": _initial_guess() if optimizer_attempted else None,
         "uncertainty": None,
         "uncertainty_reason": "not available",
-        "scipy_status": 1 if optimizer_attempted else None,
+        "scipy_status": (
+            0
+            if failure_code == "optimization_failed"
+            else 1
+            if optimizer_attempted
+            else None
+        ),
         "scipy_message": "stopped" if optimizer_attempted else None,
         "nfev": 1 if optimizer_attempted else 0,
         "cost": 0.01 if optimizer_attempted else None,
@@ -704,7 +790,13 @@ def test_failure_result_enforces_degrees_of_freedom_state_semantics(
             initial_guess=_initial_guess() if optimizer_attempted else None,
             uncertainty=None,
             uncertainty_reason="not available",
-            scipy_status=1 if optimizer_attempted else None,
+            scipy_status=(
+                0
+                if failure_code == "optimization_failed"
+                else 1
+                if optimizer_attempted
+                else None
+            ),
             scipy_message="stopped" if optimizer_attempted else None,
             nfev=1 if optimizer_attempted else 0,
             cost=0.01 if optimizer_attempted else None,

@@ -10,10 +10,10 @@ pseudo-Voigt offline fitter plus a cold-start repeated full-sweep estimator.
 Its success label is conditional on the model, initializer, and configured
 quality thresholds, not proof of eight physical resonances.
 
-**Implementation status (2026-09-04):** Tasks 1–4 and the integrated-review
-fix set are implemented locally. Final tests, lint, build, isolated-wheel
-smoke, example execution, and independent re-review are clean; only authorized
-synchronization remains.
+**Implementation status (2026-09-04):** Tasks 1–4, the integrated-review fix
+set, and the final fluorescence-origin/provenance follow-up are implemented
+locally. Tests, lint, build, isolated-wheel smoke, example execution, and
+independent re-review are clean; only authorized synchronization remains.
 
 **Architecture:** Validated immutable sweep/config/result contracts isolate raw
 observations from truth. A deterministic initializer produces an explicit guess
@@ -151,9 +151,9 @@ supplied guess used for an optimizer attempt, never synthetic truth.
 | `initialization_failed` | status/message `None`, `nfev=0` | positive scale; cost/RMSE `None` | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `insufficient_samples` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because sample-count preflight runs first | rank `None`; uncertainty `None` with required reason; initial guess `None` |
 | `uninformative_sweep` | status/message `None`, `nfev=0` | scale/cost/RMSE `None` because `ptp(y)` is zero or non-finite | rank `None`; uncertainty `None` with required reason; initial guess `None` |
-| `optimization_failed` | status/message retained, `nfev>=0` | positive scale; finite cost/RMSE retained when available, otherwise `None` | rank `None`; uncertainty `None` with required reason; initial guess present |
-| `quality_failed` | status/message retained, `nfev>=0` | positive scale and normally finite cost/RMSE; both are `None` only when a nominally successful optimizer returns non-finite parameters, residuals, or cost, and that special reason is invalid when finite metrics are present | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
-| success | status/message retained, `nfev>=0` | positive scale and finite cost/RMSE | full rank; uncertainty present or `None` only with a required covariance reason; initial guess present |
+| `optimization_failed` | integral status `<=0`, nonempty message, `nfev>0` | positive scale; finite cost/RMSE retained when available, otherwise `None` | rank `None`; uncertainty `None` with required reason; initial guess present |
+| `quality_failed` | integral status `>0`, nonempty message, `nfev>0` | positive scale and normally finite cost/RMSE; both are `None` only when a nominally successful optimizer returns non-finite parameters, residuals, or cost, and that special reason is invalid when finite metrics are present | computed rank retained when available; uncertainty `None` with required reason; initial guess present |
+| success | integral status `>0`, nonempty message, `nfev>0` | positive scale and finite cost/RMSE | full rank; uncertainty present or `None` only with a required covariance reason; initial guess present |
 
 All unsuccessful results have empty final resonance/Q arrays and no final
 baseline. Constructors reject field combinations that contradict this table;
@@ -170,7 +170,7 @@ Jacobian define rank as `count(s > max(s) * rank_rtol)`. Success requires full
 column rank, positive degrees of freedom, every fitted amplitude at least
 `min_resolved_amplitude`, every fitted amplitude divided by its local
 linearized public amplitude standard error to be at least
-`min_amplitude_significance` (positive finite, default `3.0`), and
+`min_amplitude_significance` (positive finite, default `5.0`), and
 
 ```text
 (baseline_only_sse - fitted_sse) / baseline_only_sse
@@ -191,13 +191,14 @@ non-finite evidence uses `model-conditioned local amplitude significance is
 unavailable or non-finite`.
 
 `baseline_only_sse` is the minimum unweighted SSE from
-`numpy.linalg.lstsq` applied to all raw finite samples using columns `[1, z]`
-or `[1, z, z**2]`, where `z` uses the same sweep midpoint and half-span as the
-fitter. `fitted_sse = 2 * cost` in raw squared-fluorescence units. The quality
-gate tests a zero-SSE polynomial, noisy seven-line spectra with seeds 1 and 2
+`numpy.linalg.lstsq` applied to the centered target `y-y_ref` for all finite
+samples using columns `[1, z]` or `[1, z, z**2]`, where `z` uses the same sweep
+midpoint and half-span as the fitter. `fitted_sse = 2 * cost` in raw
+squared-fluorescence units. The quality gate tests a zero-SSE polynomial, noisy
+seven-line spectra with seeds 1, 2, and 23
 at noise sigma `2e-4` (including a false component inserted between true
-lines), and improvement values immediately below, exactly at, and immediately
-above the configured threshold.
+lines and direct `+1e6` fluorescence shifts), and improvement values immediately
+below, exactly at, and immediately above the configured threshold.
 
 `RepeatedFullSweepEstimator.latest` is `None` before the first attempted fit and
 otherwise refers to the most recently completed attempt, including a structured
@@ -302,7 +303,7 @@ results.
       max_fwhm_hz=8.0e6,
       max_amplitude=0.25,
       min_resolved_amplitude=1.0e-4,
-      min_amplitude_significance=3.0,
+      min_amplitude_significance=5.0,
       min_center_separation_hz=1.0e6,
       savgol_window=11,
       savgol_polyorder=2,
@@ -339,8 +340,13 @@ results.
   in retained initial and final baselines. Successful fitted IDs/order and the
   final baseline reference must exactly match the retained initial guess.
   Diagnostic sources must be compatible with whether optimization was
-  attempted. Derive Q under a guarded numerical context and reject a successful
-  result whose Q is non-finite or unrepresentable.
+  attempted. Every optimizer attempt requires an integral status, nonempty
+  message, and positive `nfev`; success/quality failure require status `>0`,
+  optimizer failure status `<=0`, and pre-optimizer failures retain
+  `None`/`None`/`0`. Reject every `FitUncertainty.method` except
+  `local_linearized_jacobian_covariance`. Derive Q under a guarded numerical
+  context and reject a successful result whose Q is non-finite or
+  unrepresentable.
 
 - [ ] **Step 5: Implement contracts and verify Task 1**
 
@@ -501,9 +507,12 @@ results.
   multiplication association that may overflow when the mathematical result
   is finite and representable.
 
-  Unpack the public intercept as `y_ref + S*b0_scaled`. Evaluate with the
-  existing FWHM-native `multi_resonance_spectrum` and use
-  scaled residual `(model-y)/S`. Pass deterministic `x_scale=1.0` because every
+  Unpack the final public intercept as `y_ref + S*b0_scaled`. For optimizer
+  evaluation, form `y_centered=y-y_ref` once and evaluate the existing
+  FWHM-native `multi_resonance_spectrum` with centered baseline intercept
+  `S*b0_scaled`; use residual `(model_centered-y_centered)/S` so the residual and
+  finite-difference Jacobian never reconstruct and subtract two large absolute
+  fluorescence origins. Pass deterministic `x_scale=1.0` because every
   packed coordinate is dimensionless. Baseline coordinates use intentional
   `(-inf, +inf)` SciPy bounds because their public coefficients are constrained
   only to be finite; resonance bounds must remain finite, strictly ordered, and
@@ -530,9 +539,14 @@ results.
   baseline coefficients/amplitudes, `max_amplitude`, and
   `min_resolved_amplitude`; do not scale eta, relative prominence, rank
   tolerance, or the SSE-improvement fraction. Divide fitted fluorescence-valued
-  results by that factor before comparison. For the additive case add the same
-  offset to generated and explicit-guess intercepts, subtract it only from the
-  fitted intercept for comparison, and leave other fields unchanged.
+  results by that factor before comparison. For the additive case add `1e6`
+  directly to one realized noisy observation array and to the explicit-guess
+  intercept, subtract it only from the fitted intercept for comparison, and
+  leave other fields unchanged. Require identical success/failure code, ordered
+  IDs, and full-rank decision plus `rtol=1e-6` agreement for raw cost, RMSE,
+  every public standard-error field, and derived amplitude significance. A
+  deliberately high local threshold must make both origins take the same
+  significance-gate branch.
   At one fixed public parameter vector, compare the base and inverse-transformed
   affine packed parameters exactly where binary-representable and their scaled
   residual vectors with `rtol=0, atol=5e-8`; this directly tests the scaling
@@ -566,7 +580,7 @@ results.
   results retain diagnostics but no baseline/resonance estimate, and NaN is
   never used as a missing-value sentinel.
   Compute the degree-matched baseline-only reference using the exact all-sample
-  least-squares definition above.
+  least-squares definition above on `y-y_ref`, never the large absolute target.
 
 - [ ] **Step 5: Write failing uncertainty tests**
 
@@ -616,9 +630,10 @@ results.
   enabled fallback, or a valid user guess must always return
   `uninformative_sweep` with the exact preflight fields above. With fallback
   enabled, a seven-dip input must return `quality_failed`. Noisy seven-line
-  fixtures at sigma `2e-4` with fixed seeds 1 and 2 must also return
-  `quality_failed`, including when noise initialization inserts a false
-  component between true lines. An identifiable eight-dip fixture
+  fixtures at sigma `2e-4` with fixed seeds 1, 2, and 23 must also return
+  `quality_failed`, including after a direct `+1e6` shift and when noise
+  initialization inserts a false component between true lines. An identifiable
+  eight-dip fixture
   whose deliberately high discovery prominence forces fallback must succeed and
   retain `source="fallback"`. Invalid user guesses raise for ID order, eta,
   baseline reference, interval, separation, or configured bounds and record

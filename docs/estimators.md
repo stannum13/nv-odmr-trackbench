@@ -46,6 +46,18 @@ configured minimum and maximum, amplitudes are non-negative and bounded, and
 pseudo-Voigt mixing values remain in `[0, 1]`. The linear and quadratic
 baseline coefficients are finite but otherwise unconstrained.
 
+The fitter derives one fixed fluorescence origin `y_ref` from the observations.
+Its optimizer compares `y - y_ref` with a model whose baseline intercept is
+`b0 - y_ref`; it never reconstructs and subtracts two large absolute model/data
+origins inside the residual. The degree-matched baseline-only quality reference
+uses the same centered target. Reported intercepts remain in public fluorescence
+units, and cost and RMSE remain in raw squared-fluorescence and fluorescence
+units respectively. Directly adding a representable constant may still quantize
+the input samples, so exact equality or threshold decisions arbitrarily close
+to a boundary are not universally guaranteed. Fixed noisy direct-addition
+regressions pin the scientific classification, ordered IDs, and rank decision
+away from such a boundary.
+
 Strict center ordering is suitable for the initial resolved, non-crossing
 scope. It does not establish physical identity through crossings or collisions,
 and it must not be used to hide an identity swap in a later scenario.
@@ -61,9 +73,15 @@ diagnostics but do not expose plausible-looking resonance or baseline
 estimates. Malformed arrays or configurations raise validation errors before
 optimization.
 
+Every optimizer attempt retains a nonempty SciPy message, an integral status,
+and a positive evaluation count. Success and `quality_failed` represent a
+nominally successful optimizer termination and therefore require a positive
+status; `optimization_failed` requires a non-positive status. Pre-optimizer
+failures retain status/message as `None` and `nfev=0`.
+
 Success also requires every amplitude to meet both the absolute
 `min_resolved_amplitude` gate and the configured
-positive finite `min_amplitude_significance` gate, whose default is 3.0. For
+positive finite `min_amplitude_significance` gate, whose default is 5.0. For
 each component, the latter is fitted amplitude divided by its public-unit
 amplitude standard error from the same local packed covariance used for
 uncertainty. A positive
@@ -72,7 +90,9 @@ unavailable or non-finite evidence fails conservatively.
 
 When the final scaled residual Jacobian has full numerical column rank and
 positive degrees of freedom, standard errors are transformed back to public
-units. These are local linearized Jacobian uncertainties. They are not
+units. `FitUncertainty.method` is exactly
+`local_linearized_jacobian_covariance`; other method labels are rejected.
+These are local linearized Jacobian uncertainties. They are not
 experimental coverage guarantees. In particular, amplitude significance is a
 model-conditioned local diagnostic, not a calibrated line-detection statistic
 or false-discovery guarantee. An unavailable or numerically unrepresentable

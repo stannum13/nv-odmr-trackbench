@@ -344,20 +344,27 @@ def _scaled_residual_function(
     fluorescence_reference: float,
     fluorescence_scale: float,
 ) -> Callable[[NDArray[np.float64]], NDArray[np.float64]]:
+    centered_fluorescence = np.asarray(
+        sweep.fluorescence - fluorescence_reference, dtype=np.float64
+    )
+
     def residual(packed: NDArray[np.float64]) -> NDArray[np.float64]:
-        public = unpack_parameters(
+        centered_parameters = unpack_parameters(
             packed,
             configuration,
             frequency_reference_hz=frequency_reference_hz,
             frequency_half_span_hz=frequency_half_span_hz,
-            fluorescence_reference=fluorescence_reference,
+            fluorescence_reference=0.0,
             fluorescence_scale=fluorescence_scale,
         )
-        model = multi_resonance_spectrum(
-            sweep.frequency_hz, public.resonances, public.baseline
+        centered_model = multi_resonance_spectrum(
+            sweep.frequency_hz,
+            centered_parameters.resonances,
+            centered_parameters.baseline,
         )
         return np.asarray(
-            (model - sweep.fluorescence) / fluorescence_scale, dtype=np.float64
+            (centered_model - centered_fluorescence) / fluorescence_scale,
+            dtype=np.float64,
         )
 
     return residual
@@ -388,13 +395,23 @@ def _raw_fit_metrics(
     return raw_cost, rmse
 
 
+def _stable_fluorescence_reference(fluorescence: NDArray[np.float64]) -> float:
+    """Return the median origin without summing large same-sign endpoints."""
+    anchor = float(fluorescence[0])
+    return float(anchor + np.median(fluorescence - anchor))
+
+
 def _baseline_only_sse(
     sweep: CompleteSweep, reference_hz: float, half_span_hz: float, degree: int
 ) -> float:
     z = (sweep.frequency_hz - reference_hz) / half_span_hz
     design = np.column_stack([z**power for power in range(degree + 1)])
-    coefficients, _, _, _ = np.linalg.lstsq(design, sweep.fluorescence, rcond=None)
-    residual = design @ coefficients - sweep.fluorescence
+    fluorescence_reference = _stable_fluorescence_reference(sweep.fluorescence)
+    centered_fluorescence = sweep.fluorescence - fluorescence_reference
+    coefficients, _, _, _ = np.linalg.lstsq(
+        design, centered_fluorescence, rcond=None
+    )
+    residual = design @ coefficients - centered_fluorescence
     return float(residual @ residual)
 
 
@@ -500,12 +517,8 @@ def fit_spectrum(
             _empty_diagnostics("fluorescence variation is zero or non-finite"),
             degrees_of_freedom,
         )
-    fluorescence_anchor = float(sweep.fluorescence[0])
     with np.errstate(over="ignore", invalid="ignore"):
-        shifted_fluorescence = sweep.fluorescence - fluorescence_anchor
-        fluorescence_reference = float(
-            fluorescence_anchor + np.median(shifted_fluorescence)
-        )
+        fluorescence_reference = _stable_fluorescence_reference(sweep.fluorescence)
     if not np.isfinite(fluorescence_reference):
         return _preoptimization_failure(
             configuration,

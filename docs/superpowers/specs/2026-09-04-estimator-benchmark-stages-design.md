@@ -174,9 +174,16 @@ initialization and optimization as a structured `uninformative_sweep` failure.
 That preflight does not retain an unused auto, fallback, or user guess.
 Consequently, in exact arithmetic adding a constant fluorescence offset does
 not change the spectral residual Jacobian. Finite-precision offset
-representations may change SciPy's discrete termination status or evaluation
-count without changing the public scientific success/rank decision. A finite
-packed initial point is required before SciPy. Baseline coordinates use
+representations may change SciPy's discrete termination status, evaluation
+count, or a decision arbitrarily close to a configured threshold. Fixed noisy
+direct-addition regressions therefore pin the declared public success/rank
+decision away from such a boundary rather than promise universal bitwise
+invariance. The optimizer realizes this contract by comparing `y-y_ref`
+against a model whose baseline intercept is `b0-y_ref`; it never reconstructs
+and subtracts two large absolute origins inside the residual or
+finite-difference Jacobian. The
+degree-matched baseline-only least-squares target is centered by the same rule.
+A finite packed initial point is required before SciPy. Baseline coordinates use
 intentional infinite optimizer bounds because their public coefficients are
 otherwise unconstrained finite values; all configured resonance bounds must be
 finite, strictly ordered, and numerically feasible. A
@@ -199,6 +206,10 @@ fitted IDs and order equal the retained initial IDs and order; initial and final
 baseline references match exactly; and diagnostic sources agree with whether
 optimization was attempted. Successful Q derivation runs under guarded
 floating-point handling and rejects non-finite or unrepresentable ratios.
+Every optimizer-attempted result requires an integral SciPy status, nonempty
+message, and positive `nfev`. Success and `quality_failed` require status `>0`;
+`optimization_failed` requires status `<=0`; pre-optimizer failures retain
+status/message `None` and `nfev=0`.
 
 Jacobian uncertainties are reported only when the Jacobian has full numerical
 column rank under the configured deterministic relative singular-value
@@ -234,7 +245,7 @@ The same packed covariance supplies truth-independent evidence for every fitted
 component. Before attempting the unrelated full public transform, the fitter
 multiplies each packed amplitude standard error by the fluorescence scale and
 requires `amplitude / amplitude_se >= min_amplitude_significance`, whose
-positive finite default is `3.0`. A positive amplitude with exactly zero
+positive finite default is `5.0`. A positive amplitude with exactly zero
 standard error has positive-infinite significance. Unavailable or non-finite
 evidence fails conservatively. This ratio is a model-conditioned local
 diagnostic, not a calibrated detection statistic or false-discovery guarantee.
@@ -243,6 +254,9 @@ freedom, invalid scalar cost/tolerance values, and complex Jacobian or transform
 arrays with structured reasons instead of silently coercing them. Integral
 scalar values too large for floating-point covariance arithmetic also produce
 structured unavailability rather than an exception.
+`FitUncertainty.method` is closed to the exact value
+`local_linearized_jacobian_covariance`; labels for bootstrap or other methods
+cannot be attached to these local Jacobian errors.
 
 An optimizer termination flag alone is insufficient for scientific success.
 The result is unsuccessful when parameters are non-finite, bounds are violated,
@@ -320,13 +334,17 @@ Stage 6.1 tests must establish:
 - deterministic initialization and repeated fits;
 - ordered centers and positive bounded widths/amplitudes;
 - no use of hidden truth or future sweeps;
-- honest failure for fewer than eight detectable dips, including the fixed
-  noisy seven-line seeds whose initializer inserts a false component;
+- honest failure for fewer than eight detectable dips, including fixed noisy
+  seven-line seeds 1, 2, and 23 before and after a direct `+1e6` fluorescence
+  shift, with a false component inserted by initialization where applicable;
 - fallback diagnostics when fallback is explicitly enabled;
 - uncertainty availability for a well-conditioned fit and unavailability for a
   rank-deficient case;
 - conservative model-conditioned local amplitude-significance gating using the
   same packed covariance even when another public transform is unavailable;
+- additive-origin stability of scientific classification, ordered IDs, rank,
+  raw cost/RMSE, every public standard-error field, and the local-significance
+  branch on a fixed noisy direct-addition regression;
 - independent repeated-sweep fits do not reuse earlier fit parameters; and
 - generated noisy regression cases remain within declared accuracy bounds for
   fixed seeds without turning those fixtures into headline benchmark results.
