@@ -66,6 +66,25 @@ once a package version is introduced.
 
 ### Added
 
+- Drafted and revised the twenty-task Stage 6.3 test-driven implementation
+  plan for the approved calibrated two-point tracker. Its independently reviewable gates
+  cover truth-excluding public contracts, exact safe/full resource arithmetic,
+  caller-asserted and opaque-token verified calibration, analytic discriminator
+  geometry and fixed identity cells, deterministic pair scheduling and atomic
+  policy updates, lossless calibration outcomes, runner retry/stop/ordinary-
+  exception abort semantics, typed resource-unavailable joins, exact public
+  versus actual midpoint handling, closed static/Poisson/drift/contrast-loss
+  regressions, documentation/example/package smoke, and final independent
+  scientific/software review. The revision closes all eight Important and
+  three Minor findings from its first adversarial review by making each
+  dependency and RED/GREEN boundary explicit. A second bounded correction
+  fixes exact estimator resource signatures/field names/addition association,
+  moves evaluator resource primitives before record validators, places reset
+  and first-/second-side rollback REDs before transactional implementations,
+  and separates the example and documentation TDD cycles. Its final bounded
+  adversarial review reported zero Critical, Important, or Minor findings.
+  The plan changes no production code and preserves the Stage 6.5 matched-
+  budget-superiority boundary.
 - Specified the Stage 6.3 calibrated two-point center tracker without starting
   implementation: one immutable calibration source binds its public fit,
   exact-ID check or explicit fit-ID adoption, normalized safe trace, sweep

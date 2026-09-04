@@ -8,8 +8,10 @@ Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated
 re-review are on `origin/main`; synchronized CI passed all 797 tests. The Stage
 6.3 calibrated two-point tracker design passed its final adversarial re-review
-with zero Critical, Important, or Minor findings. Its separate test-driven
-implementation plan is next; no Stage 6.3 implementation code has started.
+with zero Critical, Important, or Minor findings. Its separate twenty-task,
+86-test implementation plan also passed final adversarial re-review with zero
+Critical, Important, or Minor findings. Stage 6.3 implementation is beginning
+at Task 1.
 
 ## Completed work
 
@@ -239,6 +241,23 @@ implementation plan is next; no Stage 6.3 implementation code has started.
   an optional abort atom. The final bounded adversarial re-review reported zero
   Critical, Important, or Minor findings. This remains design, not
   implementation.
+- Drafted and revised the twenty-task Stage 6.3 implementation plan with
+  separately reviewable gates for estimator contracts and atomic resources, caller-
+  asserted and verified calibration provenance, analytic calibration and fixed
+  cells, pair scheduling and transactional updates, opaque same-run binding,
+  typed calibration/runner outcomes, authenticated evaluator joins, closed
+  static/Poisson/drift/contrast-loss regressions, public guidance and isolated-
+  wheel smoke, and independent scientific/software closeout. Every production
+  surface is introduced behind a focused RED, and Stage 6.5 matched-budget
+  comparison remains explicitly out of scope. The revision resolves the first
+  review's eight Important and three Minor findings by separating every
+  dependency, identity owner, and RED/GREEN boundary. A second review's three
+  Important findings were then corrected by fixing safe-resource field and
+  arithmetic contracts, moving evaluator resource primitives before record
+  consumers, and ordering reset/update/example/documentation REDs before their
+  owning implementations. The plan is final-re-review-pending; no Stage 6.3
+  production implementation has begun. The final bounded plan re-review
+  reported zero Critical, Important, or Minor findings.
 
 ## Important scientific and design decisions
 
@@ -319,6 +338,6 @@ implementation plan is next; no Stage 6.3 implementation code has started.
 
 ## Next actions
 
-1. Write the separate Stage 6.3 test-driven implementation plan from the
-   approved calibrated two-point tracker design.
-2. Adversarially review the plan before beginning implementation.
+1. Execute Stage 6.3 Task 1: estimator-facing records, errors, and
+   truth-excluding public shape, using strict RED/GREEN cycles.
+2. Run a fresh per-task review before advancing to Task 2.
