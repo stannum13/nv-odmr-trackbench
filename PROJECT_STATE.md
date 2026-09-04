@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-09-04
+Last updated: 2026-09-05
 
 ## Current stage
 
@@ -14,7 +14,14 @@ Critical, Important, or Minor findings. Stage 6.3 implementation is active.
 Task 1 passed its per-task spec and quality re-review and supplies the
 frozen/slotted public resource, budget,
 identity, fluorescence-provenance, clock, configuration, metadata, and typed
-error primitives; Task 2 remains next.
+error primitives. Task 2 adds frozen/slotted calibration-source,
+per-identity-calibration, and aggregate-calibration contracts. Caller-asserted
+sources defensively snapshot declared value data while direct verified
+provenance construction is rejected; aggregate calibrations preserve the exact
+source object and snapshot tracker configuration and identity records. Task 2
+passed per-task spec and quality re-review after adding explicit nested-fit
+reconstruction for diagnostics, optional uncertainty, initial guesses, fitted
+parameters, and Q values. Task 3 is next.
 
 ## Completed work
 
@@ -341,6 +348,6 @@ error primitives; Task 2 remains next.
 
 ## Next actions
 
-1. Execute Stage 6.3 Task 2: calibration-source and calibration-record
-   contracts, using strict RED/GREEN cycles.
-2. Run a fresh per-task spec and quality review before advancing to Task 3.
+1. Execute Stage 6.3 Task 3: query, pair, identity-estimate,
+   aggregate-estimate, and update contracts using strict RED/GREEN cycles.
+2. Run a fresh per-task spec and quality review before advancing to Task 4.

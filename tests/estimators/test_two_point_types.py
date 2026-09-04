@@ -5,6 +5,15 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from tests.two_point_helpers import (
+    make_legal_caller_asserted_source,
+    make_legal_fit_configuration,
+    make_legal_identity_calibrations,
+    make_legal_source_fit,
+    make_legal_source_observations,
+    make_legal_tracker_configuration,
+)
+
 
 def test_two_point_primitive_names_are_public() -> None:
     from odmr_bench.estimators import (
@@ -52,6 +61,162 @@ def test_two_point_primitive_names_are_public() -> None:
     assert TwoPointStopReason
     assert TwoPointUpdateConstructionCode
     assert TwoPointUpdateConstructionError
+
+
+def test_calibration_record_names_are_public() -> None:
+    from odmr_bench.estimators import (
+        TwoPointCalibration,
+        TwoPointCalibrationSource,
+        TwoPointIdentityCalibration,
+    )
+
+    assert TwoPointCalibrationSource
+    assert TwoPointIdentityCalibration
+    assert TwoPointCalibration
+
+
+def test_caller_asserted_source_snapshots_values_and_rejects_verified_direct_construction(  # noqa: E501
+) -> None:
+    mutable_observation_list = list(make_legal_source_observations())
+    mutable_resonance_ids = [f"r{index}" for index in range(8)]
+    fit_configuration = make_legal_fit_configuration(mutable_resonance_ids)
+    source_fit = make_legal_source_fit(fit_configuration)
+    source = make_legal_caller_asserted_source(
+        source_observations=mutable_observation_list,
+        source_fit=source_fit,
+        fit_configuration=fit_configuration,
+    )
+
+    assert source.provenance == "caller_asserted"
+    assert source.source_observations is not mutable_observation_list
+    assert source.source_observations == tuple(mutable_observation_list)
+    assert source.source_observations[0] is not mutable_observation_list[0]
+    assert source.source_fit is not source_fit
+    assert source.fit_configuration is not fit_configuration
+    with pytest.raises(ValueError, match="verified"):
+        replace(source, provenance="verified_factory_acquisition")
+
+    original_frequency_hz = source.source_observations[0].frequency_hz
+    original_q_value = source.source_fit.q_values[0]
+    mutable_observation_list.clear()
+    mutable_resonance_ids[-1] = "mutated"
+    object.__setattr__(fit_configuration, "resonance_ids", ("mutated",) * 8)
+    source_fit.q_values.setflags(write=True)
+    source_fit.q_values[0] = 0.0
+    assert source.source_observations[0].frequency_hz == original_frequency_hz
+    assert source.fit_configuration.resonance_ids[-1] == "r7"
+    assert source.source_fit.q_values[0] == original_q_value
+
+
+def test_caller_asserted_source_deeply_snapshots_nested_fit_values() -> None:
+    from odmr_bench.estimators import FitUncertainty
+
+    uncertainty = FitUncertainty(
+        baseline_standard_errors=np.array([0.01, 0.02]),
+        center_hz=np.full(8, 10.0),
+        fwhm_hz=np.full(8, 20.0),
+        amplitude=np.full(8, 0.03),
+        eta=np.full(8, 0.04),
+    )
+    source_fit = replace(
+        make_legal_source_fit(),
+        uncertainty=uncertainty,
+        uncertainty_reason=None,
+    )
+    source = make_legal_caller_asserted_source(source_fit=source_fit)
+    stored_fit = source.source_fit
+    stored_diagnostics = stored_fit.diagnostics
+    stored_uncertainty = stored_fit.uncertainty
+    assert stored_diagnostics is not source_fit.diagnostics
+    assert stored_uncertainty is not uncertainty
+    assert stored_uncertainty is not None
+    expected_arrays = {
+        name: np.array(getattr(stored_uncertainty, name), copy=True)
+        for name in (
+            "baseline_standard_errors",
+            "center_hz",
+            "fwhm_hz",
+            "amplitude",
+            "eta",
+        )
+    }
+    expected_q_values = np.array(stored_fit.q_values, copy=True)
+
+    object.__setattr__(source_fit.diagnostics, "messages", ("mutated",))
+    object.__setattr__(source_fit.diagnostics, "source", "none")
+    object.__setattr__(source_fit, "resonance_estimates", ())
+    object.__setattr__(source_fit, "baseline_estimate", None)
+    object.__setattr__(source_fit, "initial_guess", None)
+    object.__setattr__(source_fit, "nfev", 0)
+    source_fit.q_values.setflags(write=True)
+    source_fit.q_values[0] = 0.0
+    object.__setattr__(uncertainty, "method", "mutated")
+    for name in expected_arrays:
+        original = getattr(uncertainty, name)
+        assert original is not None
+        original.setflags(write=True)
+        original[...] = 0.0
+
+    assert stored_diagnostics.source == "user"
+    assert stored_diagnostics.messages == ()
+    assert len(stored_fit.resonance_estimates) == 8
+    assert stored_fit.baseline_estimate is not None
+    assert stored_fit.initial_guess is not None
+    assert stored_fit.nfev == 1
+    assert np.array_equal(stored_fit.q_values, expected_q_values)
+    assert not stored_fit.q_values.flags.writeable
+    assert stored_uncertainty.method == "local_linearized_jacobian_covariance"
+    for name, expected in expected_arrays.items():
+        stored = getattr(stored_uncertainty, name)
+        assert stored is not None
+        assert np.array_equal(stored, expected)
+        assert not stored.flags.writeable
+
+
+def test_calibration_records_preserve_source_identity_and_snapshot_configuration(
+) -> None:
+    from odmr_bench.estimators import TwoPointCalibration
+
+    source = make_legal_caller_asserted_source()
+    mutable_configuration = make_legal_tracker_configuration()
+    identities = make_legal_identity_calibrations(source)
+    treatment = "conditional_free_precalibration"
+    calibration = TwoPointCalibration(
+        source, mutable_configuration, treatment, identities
+    )
+
+    assert calibration.source is source
+    assert calibration.configuration == mutable_configuration
+    assert calibration.configuration is not mutable_configuration
+    assert calibration.identities == tuple(identities)
+    assert calibration.identities is not identities
+
+    object.__setattr__(
+        mutable_configuration.identity_binding,
+        "expected_resonance_ids",
+        ("mutated",) * 8,
+    )
+    assert calibration.configuration.identity_binding.expected_resonance_ids == tuple(
+        f"r{index}" for index in range(8)
+    )
+    with pytest.raises(ValueError, match="conditional_free"):
+        TwoPointCalibration(
+            source, make_legal_tracker_configuration(), "included_same_run", identities
+        )
+    with pytest.raises(ValueError, match="unique"):
+        TwoPointCalibration(
+            source,
+            make_legal_tracker_configuration(),
+            treatment,
+            (*identities[:-1], replace(identities[-1], resonance_id="r0")),
+        )
+    with pytest.raises(ValueError, match="positive"):
+        replace(identities[0], calibration_fwhm_hz=0.0)
+    with pytest.raises(ValueError, match="nonempty"):
+        replace(
+            identities[0],
+            allowed_center_min_hz=identities[0].allowed_center_max_hz + 1.0,
+        )
 
 
 def test_public_resources_and_budget_validate_intrinsic_domains() -> None:

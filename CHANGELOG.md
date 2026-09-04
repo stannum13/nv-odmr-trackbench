@@ -66,6 +66,15 @@ once a package version is introduced.
 
 ### Added
 
+- Added frozen/slotted Stage 6.3 calibration-source, per-identity-calibration,
+  and aggregate-calibration contracts. Caller-asserted sources snapshot their
+  declared fit, configuration, identity, observation, provenance, resource,
+  and clock values while direct verified provenance construction is rejected.
+  Aggregate calibrations retain their exact authenticated source object and
+  independently snapshot configuration and identity-calibration value records.
+  Task review added explicit nested reconstruction for fit diagnostics,
+  optional uncertainty arrays, initial guesses, fitted parameters, and Q
+  values; the amended task passed spec and quality re-review with no findings.
 - Added the Stage 6.3 calibrated two-point tracker's initial public contracts:
   immutable/slotted resource, budget, identity, normalized-fluorescence,
   clock, configuration, and run-metadata records; closed typed construction
