@@ -70,6 +70,22 @@ once a package version is introduced.
 
 ### Added
 
+- Added the evaluator runner's exact `start_tracking` join and zero-trace
+  tracking transition. Clean ready runners accept only an authentic verified
+  success from another runner under conditional-free-precalibration treatment;
+  calibration-succeeded issuing runners accept that exact success under either
+  conditional or included treatment. Included starts authenticate the original
+  outcome, source, token, runner, instrument, shared clock, source boundary,
+  three-way rate/overhead equality, and full-resource continuity before the
+  tracker is touched. Conditional starts continue to report calibration
+  resources while charging from zero. Successful starts reset and retain the
+  exact tracker once, snapshot the full tracking boundary, store its
+  zero-observation estimate, and issue no query. All eight start errors preserve
+  their specified precedence and state atomicity; commit-then-raise reset faults
+  restore the exact pre-entry tracker configuration and state slot identities
+  and chain as `tracker_reset_failed`, while process-control interrupts receive
+  the same cleanup and re-raise unchanged. Tracking steps, stop/abort execution,
+  and public evaluator resource assembly remain deferred.
 - Added the public instrument-owning `TwoPointEvaluatorRunner`, intentionally
   ending Task 9's temporary no-runner package surface. Clean exact-instrument
   binding now derives immutable rate/overhead configuration, captures the zero

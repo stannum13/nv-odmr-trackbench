@@ -242,8 +242,32 @@ unavailable join retains the authoritative boundary index.
 After two RED/GREEN review-fix waves, the final bounded independent re-review
 reported zero Critical, Important, or Minor findings; the independent full
 repository gate passed all 1,109 tests and Ruff.
+The synchronized Task 13 commit also passed the remote GitHub CI matrix on
+Python 3.11 and 3.12.
 Task 13 intentionally adds no tracking start, tracking step, public aggregate
 resource builder, or abort execution, which remain assigned to later tasks.
+Task 14 adds the exact `start_tracking` transition and zero-trace tracking
+state. A clean ready runner can consume only an exact registry-authenticated
+success from another runner under conditional-free-precalibration treatment;
+the issuing calibration-succeeded runner can start with either conditional or
+included treatment. Included mode additionally joins the original
+runner/source/outcome/token/instrument identities, shared clock, source
+availability, three-way rate/overhead equality, and exact full-resource
+continuity. Every successful start resets the exact tracker once, retains it
+for later runner steps, snapshots the tracking boundary, stores the returned
+zero-observation estimate, and performs no query. The eight start errors retain
+their fixed phase/type/authentication/calibration/provenance/metadata/resource/
+reset precedence. Preflight failures are nonmutating; an ordinary reset failure
+is chained under `tracker_reset_failed`, including commit-then-raise faults,
+while process-control interrupts re-raise unchanged. A fresh review found one
+Important rollback gap when a failing reset mutated the tracker's otherwise
+immutable configuration slot. The correction now restores both exact tracker
+configuration and state slot identities for every failure covered by the
+reset/estimate/prospective-state transaction.
+The final bounded independent re-review reported zero Critical, Important, or
+Minor findings; the independent full repository gate passed all 1,121 tests
+and Ruff.
+Tracking steps, queries, resource building, stops, and aborts remain deferred.
 
 ## Completed work
 
@@ -537,7 +561,9 @@ resource builder, or abort execution, which remain assigned to later tasks.
 
 ## Tests currently passing
 
-- `pytest`: 1109 passed.
+- `pytest`: 1121 passed.
+- Focused `tests/estimators tests/evaluation tests/emulator`: 1023 passed.
+- Task 14 runner file: 12 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -591,5 +617,6 @@ resource builder, or abort execution, which remain assigned to later tasks.
 
 ## Next actions
 
-1. Implement Task 14 runner start and zero-trace tracking state.
-2. Run the Task 14 per-task specification and quality review.
+1. Implement Task 15 accepted tracking steps, pair timing, and retriable
+   instrument failure.
+2. Run the Task 15 per-task specification and quality review.
