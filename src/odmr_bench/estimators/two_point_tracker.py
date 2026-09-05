@@ -9,17 +9,23 @@ from typing import final
 
 import numpy as np
 
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators.two_point_resources import _zero_public_resources
 from odmr_bench.estimators.two_point_types import (
+    PairSide,
     PublicAcquisitionResources,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
     TwoPointEstimate,
     TwoPointIdentityEstimate,
+    TwoPointObservationValidationError,
     TwoPointPairResult,
+    TwoPointPartialPair,
     TwoPointQuery,
     TwoPointRunMetadata,
     TwoPointTrackerConfiguration,
+    TwoPointUpdate,
+    TwoPointUpdateConstructionError,
 )
 
 
@@ -77,6 +83,79 @@ def _within_ceiling(
     )
 
 
+def _advance_observation_resources(
+    resources: PublicAcquisitionResources,
+    observation: EstimatorObservation,
+    metadata: TwoPointRunMetadata,
+) -> PublicAcquisitionResources:
+    return PublicAcquisitionResources(
+        observations=resources.observations + 1,
+        integration_time_s=(
+            resources.integration_time_s + observation.integration_time_s
+        ),
+        nominal_exposure_photons=(
+            resources.nominal_exposure_photons
+            + observation.nominal_exposure_photons
+        ),
+        realized_photons=(
+            resources.realized_photons + (observation.realized_photons or 0)
+        ),
+        observations_without_realized_counts=(
+            resources.observations_without_realized_counts
+            + int(observation.realized_photons is None)
+        ),
+        virtual_elapsed_time_s=(
+            resources.virtual_elapsed_time_s
+            + (metadata.frequency_overhead_s + observation.integration_time_s)
+        ),
+    )
+
+
+def _build_pending_query(
+    *,
+    query_index: int,
+    pair_index: int,
+    identity_pair_index: int,
+    resonance_id: str,
+    side: PairSide,
+    interrogation_center_hz: float,
+    offset_hz: float,
+    metadata: TwoPointRunMetadata,
+    configuration: TwoPointTrackerConfiguration,
+    estimate: TwoPointEstimate,
+) -> TwoPointQuery:
+    integration_time_s = configuration.integration_time_s
+    expected_sequence_index = (
+        0
+        if estimate.current_sequence_index is None
+        else estimate.current_sequence_index + 1
+    )
+    expected_end_timestamp_s = (
+        estimate.current_timestamp_s + metadata.frequency_overhead_s
+    ) + integration_time_s
+    expected_nominal_exposure_photons = (
+        metadata.nominal_photon_rate_hz * integration_time_s
+    )
+    frequency_hz = (
+        interrogation_center_hz - offset_hz
+        if side == "minus"
+        else interrogation_center_hz + offset_hz
+    )
+    return TwoPointQuery(
+        query_index=query_index,
+        pair_index=pair_index,
+        identity_pair_index=identity_pair_index,
+        resonance_id=resonance_id,
+        side=side,
+        interrogation_center_hz=interrogation_center_hz,
+        frequency_hz=frequency_hz,
+        integration_time_s=integration_time_s,
+        expected_sequence_index=expected_sequence_index,
+        expected_end_timestamp_s=expected_end_timestamp_s,
+        expected_nominal_exposure_photons=expected_nominal_exposure_photons,
+    )
+
+
 def _prospective_first_pair(
     calibration: TwoPointCalibration,
     metadata: TwoPointRunMetadata,
@@ -97,25 +176,29 @@ def _prospective_first_pair(
     ) + integration_time_s
     if not math.isfinite(expected_end_timestamp_s):
         raise ValueError("first-query endpoint must remain finite")
+    if expected_end_timestamp_s <= estimate.current_timestamp_s:
+        raise ValueError("first-query endpoint must strictly advance")
+    second_end_timestamp_s = (
+        expected_end_timestamp_s + metadata.frequency_overhead_s
+    ) + integration_time_s
+    if not math.isfinite(second_end_timestamp_s):
+        raise ValueError("second-query endpoint must remain finite")
+    if second_end_timestamp_s <= expected_end_timestamp_s:
+        raise ValueError("second-query endpoint must strictly advance")
 
     target = estimate.identities[0]
     cell = calibration.identities[0]
-    query = TwoPointQuery(
+    query = _build_pending_query(
         query_index=0,
         pair_index=0,
         identity_pair_index=0,
         resonance_id=target.resonance_id,
         side="minus",
         interrogation_center_hz=target.center_hz,
-        frequency_hz=target.center_hz - cell.offset_hz,
-        integration_time_s=integration_time_s,
-        expected_sequence_index=(
-            0
-            if estimate.current_sequence_index is None
-            else estimate.current_sequence_index + 1
-        ),
-        expected_end_timestamp_s=expected_end_timestamp_s,
-        expected_nominal_exposure_photons=nominal_exposure_photons,
+        offset_hz=cell.offset_hz,
+        metadata=metadata,
+        configuration=configuration,
+        estimate=estimate,
     )
     try:
         after_first = _advance_query_charge(
@@ -352,6 +435,27 @@ class CalibratedTwoPointTracker:
         if state.pending_query is not None:
             return state.pending_query
 
+        partial_pair = state.estimate.incomplete_pair
+        if partial_pair is not None:
+            cell = state.calibration.identities[
+                state.estimate.completed_pairs % len(state.calibration.identities)
+            ]
+            query = _build_pending_query(
+                query_index=state.estimate.accepted_observations,
+                pair_index=partial_pair.pair_index,
+                identity_pair_index=partial_pair.identity_pair_index,
+                resonance_id=partial_pair.resonance_id,
+                side="plus",
+                interrogation_center_hz=partial_pair.interrogation_center_hz,
+                offset_hz=cell.offset_hz,
+                metadata=state.metadata,
+                configuration=self._configuration,
+                estimate=state.estimate,
+            )
+            estimate = replace(state.estimate, pending_query=query)
+            self._state = replace(state, pending_query=query, estimate=estimate)
+            return query
+
         query, after_second = _prospective_first_pair(
             state.calibration,
             state.metadata,
@@ -366,6 +470,153 @@ class CalibratedTwoPointTracker:
         estimate = replace(state.estimate, pending_query=query)
         self._state = replace(state, pending_query=query, estimate=estimate)
         return query
+
+    def update(self, observation: EstimatorObservation) -> TwoPointUpdate:
+        """Accept one estimator-safe observation for the pending query."""
+        if type(observation) is not EstimatorObservation:
+            raise TwoPointObservationValidationError(
+                "invalid_observation_type",
+                "observation must be an exact EstimatorObservation",
+            )
+        if self._state is None or self._state.pending_query is None:
+            raise TwoPointObservationValidationError(
+                "no_pending_query", "tracker has no pending query"
+            )
+        state = self._state
+        query = state.pending_query
+        if observation.sequence_index != query.expected_sequence_index:
+            raise TwoPointObservationValidationError(
+                "sequence_mismatch",
+                "observation sequence index must equal the pending query",
+            )
+        if observation.frequency_hz != query.frequency_hz:
+            raise TwoPointObservationValidationError(
+                "frequency_mismatch",
+                "observation frequency must equal the pending query",
+            )
+        if observation.integration_time_s != self._configuration.integration_time_s:
+            raise TwoPointObservationValidationError(
+                "integration_time_mismatch",
+                "observation integration time must equal the tracker configuration",
+            )
+        expected_endpoint_s = (
+            state.estimate.current_timestamp_s + state.metadata.frequency_overhead_s
+        ) + self._configuration.integration_time_s
+        if observation.timestamp_s != expected_endpoint_s:
+            raise TwoPointObservationValidationError(
+                "endpoint_mismatch",
+                "observation endpoint must equal the expected causal endpoint",
+            )
+        expected_nominal_exposure_photons = (
+            state.metadata.nominal_photon_rate_hz
+            * self._configuration.integration_time_s
+        )
+        if (
+            observation.nominal_exposure_photons
+            != expected_nominal_exposure_photons
+        ):
+            raise TwoPointObservationValidationError(
+                "nominal_exposure_mismatch",
+                "observation nominal exposure must equal rate times integration",
+            )
+        if (
+            type(observation.fluorescence) is not float
+            or not math.isfinite(observation.fluorescence)
+            or (
+                observation.realized_photons is not None
+                and (
+                    type(observation.realized_photons) is not int
+                    or observation.realized_photons < 0
+                )
+            )
+        ):
+            raise TwoPointObservationValidationError(
+                "invalid_observation_value",
+                "observation values must preserve their constructor invariants",
+            )
+
+        try:
+            partial_pair = TwoPointPartialPair(
+                pair_index=query.pair_index,
+                identity_pair_index=query.identity_pair_index,
+                resonance_id=query.resonance_id,
+                interrogation_center_hz=query.interrogation_center_hz,
+                first_side=query.side,
+                first_query=query,
+                first_observation=observation,
+            )
+            tracking_resources = _advance_observation_resources(
+                state.estimate.tracking_resources,
+                observation,
+                state.metadata,
+            )
+            charged_resources = _advance_observation_resources(
+                state.estimate.charged_resources,
+                observation,
+                state.metadata,
+            )
+            identities = tuple(
+                replace(
+                    identity,
+                    estimate_age_sequence_indices=(
+                        None
+                        if identity.active_release_sequence_index is None
+                        else observation.sequence_index
+                        - identity.active_release_sequence_index
+                    ),
+                    estimate_age_s=(
+                        observation.timestamp_s
+                        - identity.active_reference_timestamp_s
+                    ),
+                    release_age_s=(
+                        observation.timestamp_s
+                        - identity.active_release_timestamp_s
+                    ),
+                )
+                for identity in state.estimate.identities
+            )
+            estimate = TwoPointEstimate(
+                identities=identities,
+                calibration_source_id=state.estimate.calibration_source_id,
+                calibration_source_provenance=(
+                    state.estimate.calibration_source_provenance
+                ),
+                calibration_budget_treatment=(
+                    state.estimate.calibration_budget_treatment
+                ),
+                current_sequence_index=observation.sequence_index,
+                current_timestamp_s=observation.timestamp_s,
+                accepted_observations=state.estimate.accepted_observations + 1,
+                completed_pairs=state.estimate.completed_pairs,
+                incomplete_pair=partial_pair,
+                pending_query=None,
+                pair_history=state.estimate.pair_history,
+                tracking_resources=tracking_resources,
+                calibration_resources=state.estimate.calibration_resources,
+                charged_resources=charged_resources,
+                budget_ceiling=state.estimate.budget_ceiling,
+                stopped_reason=state.estimate.stopped_reason,
+                seed=state.estimate.seed,
+            )
+            metadata = replace(
+                state.metadata,
+                current_sequence_index=observation.sequence_index,
+                current_timestamp_s=observation.timestamp_s,
+            )
+            prospective_state = replace(
+                state,
+                metadata=metadata,
+                pending_query=None,
+                estimate=estimate,
+            )
+            update = TwoPointUpdate(query, observation, None, estimate)
+        except Exception as error:
+            raise TwoPointUpdateConstructionError(
+                "partial_pair_construction_failed",
+                f"first-side construction failed: {error}",
+            ) from error
+        self._state = prospective_state
+        return update
 
     def estimate(self) -> TwoPointEstimate:
         """Return the current immutable aggregate estimate."""

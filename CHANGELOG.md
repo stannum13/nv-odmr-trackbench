@@ -70,6 +70,24 @@ once a package version is introduced.
 
 ### Added
 
+- Added first-flank acceptance and the reserved plus-side transition to the
+  calibrated two-point tracker. `update` now rejects non-exact or mismatched
+  estimator observations with the closed eight-code precedence before any
+  mutation, commits one arrival-ordered tracking and charged resource atom with
+  the exact immutable partial pair, and keeps centers, pair history, pair
+  counts, and lock policy unchanged. Prospective partial/resource/aggregate
+  construction is committed last and chains failures through
+  `partial_pair_construction_failed` without changing tracker state. Once the
+  first flank is accepted, query selection issues the already-affordable plus
+  flank from the frozen pair center without rechecking the reset-bound ceiling.
+  Completed-pair policy, identity advancement, odd-pair alternation, and the
+  evaluator API remain assigned to later tasks. Review hardening validates both
+  exact endpoint recurrences during reset, rejecting legal-input rounding
+  stalls and overflow atomically before the first query is exposed.
+  Combined-defect tests close exact-type/no-pending validation precedence, and
+  call-counted failure injection covers rollback at both sequential public-
+  resource construction boundaries. The final task re-review reported zero
+  Critical, Important, or Minor findings.
 - Added the public final/slotted `CalibratedTwoPointTracker` construction,
   reset, pair-boundary affordability, first-minus query, and budget-stop
   surface. Reset transactionally binds exact configuration, clock,

@@ -70,7 +70,30 @@ first query and both sequential charged-resource transitions before its atomic
 state commit, so accepted reset state cannot fail later selection for nominal,
 elapsed, endpoint, or charged-total overflow. The fix is locally verified and
 the final independent re-review approved Task 6 with zero Critical, Important,
-or Minor findings.
+or Minor findings. Task 7 adds the exact typed observation-acceptance boundary,
+including fixed validation-code precedence and value-atomic rejection. A valid
+first flank now clears its pending query, commits exactly one arrival-ordered
+tracking/charged resource atom and endpoint, retains unchanged centers and pair
+counters, and exposes the exact immutable partial pair in its returned update.
+All prospective first-side records are constructed before one state replacement;
+partial-pair, resource, or aggregate-estimate construction failures chain to
+`partial_pair_construction_failed` and preserve every public tracker field. The
+already-reserved second query is then issued on the plus side from the frozen
+pair center without another affordability check. Completed-pair calculation,
+identity advancement, odd-pair alternation, and evaluator APIs remain deferred.
+Task 7's first combined review found two Important reservation/precedence
+coverage gaps and two Minor test-coverage issues. Reset now evaluates both exact
+endpoint recurrences prospectively and rejects a non-finite or non-advancing
+first or reserved-second endpoint before replacing any prior run. Exact legal
+rounding and overflow witnesses pin that rollback while the ordinary reserved
+query still performs no post-acceptance budget check. Combined first/second
+validation defects now prove exact-type precedence over no-pending and
+no-pending precedence over sequence mismatch. A call-counted fault on the
+second public-resource construction proves typed chaining and rollback after
+the first resource construction succeeds, and the update-surface test now
+checks the typed exception message contract instead of a vacuous class-truth
+assertion. The final independent re-review approved Task 7 with zero Critical,
+Important, or Minor findings after these locally verified corrections.
 
 ## Completed work
 
@@ -364,7 +387,7 @@ or Minor findings.
 
 ## Tests currently passing
 
-- `pytest`: 911 passed.
+- `pytest`: 935 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -407,6 +430,6 @@ or Minor findings.
 
 ## Next actions
 
-1. Implement Stage 6.3 Task 7 observation acceptance and reserved second-query
-   scheduling.
-2. Run the Task 7 per-task spec and quality review before advancing.
+1. Implement Task 8 completed-pair policy, schedule advancement, ages, and
+   update atomicity.
+2. Run the Task 8 per-task spec and quality review before advancing.

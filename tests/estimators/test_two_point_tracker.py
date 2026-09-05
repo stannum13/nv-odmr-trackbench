@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import inspect
+import math
 from copy import copy
 from dataclasses import replace
 
@@ -16,11 +18,14 @@ from odmr_bench.estimators import (
     TwoPointBudgetCeiling,
     TwoPointClockMapping,
     TwoPointIdentityBinding,
+    TwoPointObservationValidationError,
     TwoPointRunMetadata,
     TwoPointTrackerConfiguration,
+    TwoPointUpdate,
     bind_caller_asserted_two_point_calibration_source,
     calibrate_two_point,
 )
+from odmr_bench.estimators import two_point_tracker as tracker_module
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_fit_configuration,
@@ -44,6 +49,23 @@ def test_tracker_constructor_and_pre_reset_surface() -> None:
         tracker.choose_next_query()
     with pytest.raises(RuntimeError, match="reset"):
         tracker.estimate()
+
+
+def test_update_surface_and_pre_reset_guard() -> None:
+    tracker = CalibratedTwoPointTracker(make_legal_tracker_configuration())
+
+    signature = inspect.signature(CalibratedTwoPointTracker.update)
+    assert tuple(signature.parameters) == ("self", "observation")
+    assert signature.parameters["observation"].annotation == "EstimatorObservation"
+    assert signature.return_annotation == "TwoPointUpdate"
+
+    observation = EstimatorObservation(0, 0.1, 2.8e9, 1.0, 0.1, 1.0)
+    with pytest.raises(TwoPointObservationValidationError) as caught:
+        tracker.update(observation)
+    assert caught.value.code == "no_pending_query"
+    assert caught.value.message
+    assert str(caught.value) == caught.value.message
+    assert caught.value.args == (caught.value.message,)
 
 
 def _make_calibration(*, included: bool, offset_s: float = 0.0):
@@ -407,6 +429,227 @@ def _reset_rounding_witness(ceiling: TwoPointBudgetCeiling):
     return tracker, calibration, metadata
 
 
+class _EstimatorObservationSubclass(EstimatorObservation):
+    pass
+
+
+def _clear_pending_query(
+    tracker: CalibratedTwoPointTracker, observation: EstimatorObservation
+) -> EstimatorObservation:
+    state = tracker._state
+    assert state is not None
+    estimate = replace(state.estimate, pending_query=None)
+    object.__setattr__(
+        tracker,
+        "_state",
+        replace(state, pending_query=None, estimate=estimate),
+    )
+    return observation
+
+
+def _inexact_observation_without_pending(
+    tracker: CalibratedTwoPointTracker, observation: EstimatorObservation
+) -> EstimatorObservation:
+    observation = _clear_pending_query(tracker, observation)
+    return _EstimatorObservationSubclass(
+        observation.sequence_index,
+        observation.timestamp_s,
+        observation.frequency_hz,
+        observation.fluorescence,
+        observation.integration_time_s,
+        observation.nominal_exposure_photons,
+        observation.realized_photons,
+    )
+
+
+def _no_pending_and_sequence_mismatch(
+    tracker: CalibratedTwoPointTracker, observation: EstimatorObservation
+) -> EstimatorObservation:
+    observation = _clear_pending_query(tracker, observation)
+    return replace(
+        observation,
+        sequence_index=observation.sequence_index + 1,
+    )
+
+
+def _invalid_observation_value(
+    tracker: CalibratedTwoPointTracker, observation: EstimatorObservation
+) -> EstimatorObservation:
+    del tracker
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    object.__setattr__(observation, "realized_photons", -1)
+    return observation
+
+
+def _nominal_and_value_mismatch(
+    tracker: CalibratedTwoPointTracker, observation: EstimatorObservation
+) -> EstimatorObservation:
+    del tracker
+    changed = replace(
+        observation,
+        nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
+    )
+    object.__setattr__(changed, "fluorescence", float("nan"))
+    return changed
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        (_inexact_observation_without_pending, "invalid_observation_type"),
+        (_no_pending_and_sequence_mismatch, "no_pending_query"),
+        (
+            lambda tracker, observation: replace(
+                observation,
+                sequence_index=observation.sequence_index + 1,
+                frequency_hz=observation.frequency_hz + 1.0,
+            ),
+            "sequence_mismatch",
+        ),
+        (
+            lambda tracker, observation: replace(
+                observation,
+                frequency_hz=observation.frequency_hz + 1.0,
+                integration_time_s=observation.integration_time_s * 2.0,
+            ),
+            "frequency_mismatch",
+        ),
+        (
+            lambda tracker, observation: replace(
+                observation,
+                integration_time_s=observation.integration_time_s * 2.0,
+                timestamp_s=observation.timestamp_s + 1.0,
+            ),
+            "integration_time_mismatch",
+        ),
+        (
+            lambda tracker, observation: replace(
+                observation,
+                timestamp_s=observation.timestamp_s + 1.0,
+                nominal_exposure_photons=(
+                    observation.nominal_exposure_photons + 1.0
+                ),
+            ),
+            "endpoint_mismatch",
+        ),
+        (_nominal_and_value_mismatch, "nominal_exposure_mismatch"),
+        (_invalid_observation_value, "invalid_observation_value"),
+    ),
+)
+def test_update_validation_code_precedence_is_exact_and_atomic(
+    mutation, expected_code: str
+) -> None:
+    tracker, calibration, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    query = tracker.choose_next_query()
+    assert query is not None
+    observation = EstimatorObservation(
+        sequence_index=query.expected_sequence_index,
+        timestamp_s=query.expected_end_timestamp_s,
+        frequency_hz=query.frequency_hz,
+        fluorescence=0.9,
+        integration_time_s=query.integration_time_s,
+        nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        realized_photons=7,
+    )
+    observation = mutation(tracker, observation)
+    before = tracker.estimate()
+    with pytest.raises(TwoPointObservationValidationError) as caught:
+        tracker.update(observation)
+    assert caught.value.code == expected_code
+    assert caught.value.message
+    assert tracker.estimate() == before
+    assert tracker.calibration is calibration
+
+
+def test_first_side_commits_one_atom_and_exact_partial_pair() -> None:
+    tracker, _, metadata = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    query = tracker.choose_next_query()
+    assert query is not None
+    before = tracker.estimate()
+    observation = EstimatorObservation(
+        query.expected_sequence_index,
+        query.expected_end_timestamp_s,
+        query.frequency_hz,
+        0.9,
+        query.integration_time_s,
+        query.expected_nominal_exposure_photons,
+        7,
+    )
+
+    update = tracker.update(observation)
+
+    assert type(update) is TwoPointUpdate
+    assert update.query is query
+    assert update.observation is observation
+    assert update.completed_pair is None
+    after = update.estimate
+    assert tracker.estimate() is after
+    assert tracker.pending_query is None
+    assert after.pending_query is None
+    partial = after.incomplete_pair
+    assert partial is not None
+    assert partial.pair_index == query.pair_index
+    assert partial.identity_pair_index == query.identity_pair_index
+    assert partial.resonance_id == query.resonance_id
+    assert partial.interrogation_center_hz == query.interrogation_center_hz
+    assert partial.first_side == query.side
+    assert partial.first_query is query
+    assert partial.first_observation is observation
+    assert after.accepted_observations == before.accepted_observations + 1
+    assert after.current_sequence_index == observation.sequence_index
+    assert after.current_timestamp_s == observation.timestamp_s
+    assert after.tracking_resources == PublicAcquisitionResources(
+        1,
+        observation.integration_time_s,
+        observation.nominal_exposure_photons,
+        7,
+        0,
+        metadata.frequency_overhead_s + observation.integration_time_s,
+    )
+    charged_before = before.charged_resources
+    assert after.charged_resources == PublicAcquisitionResources(
+        charged_before.observations + 1,
+        charged_before.integration_time_s + observation.integration_time_s,
+        charged_before.nominal_exposure_photons
+        + observation.nominal_exposure_photons,
+        charged_before.realized_photons + 7,
+        charged_before.observations_without_realized_counts,
+        charged_before.virtual_elapsed_time_s
+        + (metadata.frequency_overhead_s + observation.integration_time_s),
+    )
+    for identity_after, identity_before in zip(
+        after.identities, before.identities, strict=True
+    ):
+        assert identity_after.center_hz == identity_before.center_hz
+        assert identity_after.completed_pairs == identity_before.completed_pairs == 0
+        assert identity_after.lock_state == identity_before.lock_state == "calibrated"
+        assert identity_after.active_source_kind == identity_before.active_source_kind
+        assert (
+            identity_after.active_reference_timestamp_s
+            == identity_before.active_reference_timestamp_s
+        )
+        assert (
+            identity_after.active_release_sequence_index
+            == identity_before.active_release_sequence_index
+        )
+        assert identity_after.estimate_age_s == (
+            observation.timestamp_s - identity_after.active_reference_timestamp_s
+        )
+        assert identity_after.release_age_s == (
+            observation.timestamp_s - identity_after.active_release_timestamp_s
+        )
+        assert identity_after.estimate_age_sequence_indices == (
+            observation.sequence_index
+            - identity_after.active_release_sequence_index
+        )
+    assert after.completed_pairs == before.completed_pairs == 0
+    assert after.pair_history == before.pair_history == ()
+
+
 def test_invalid_reset_rejects_nonrepresentable_first_pair_atomically() -> None:
     source = make_legal_caller_asserted_source()
     rows = (
@@ -490,6 +733,123 @@ def test_invalid_reset_rejects_nonrepresentable_first_pair_atomically() -> None:
                 seed=23,
             )
         assert _tracker_snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("configuration", "metadata", "failure_kind"),
+    (
+        (
+            TwoPointTrackerConfiguration(integration_time_s=2.0**-53),
+            TwoPointRunMetadata(
+                "clock",
+                None,
+                np.nextafter(1.0, -np.inf),
+                1.0,
+                0.0,
+                "normalized_fluorescence",
+            ),
+            "nonadvancing",
+        ),
+        (
+            TwoPointTrackerConfiguration(integration_time_s=1.0e307),
+            TwoPointRunMetadata(
+                "clock",
+                None,
+                1.0e308,
+                1.0e-308,
+                3.0e307,
+                "normalized_fluorescence",
+            ),
+            "overflowing",
+        ),
+    ),
+)
+def test_invalid_reset_rejects_nonadvancing_or_overflowing_second_endpoint_atomically(
+    configuration: TwoPointTrackerConfiguration,
+    metadata: TwoPointRunMetadata,
+    failure_kind: str,
+) -> None:
+    source = make_legal_caller_asserted_source()
+    calibration = calibrate_two_point(
+        source,
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        TwoPointRunMetadata(
+            "clock",
+            None,
+            0.010,
+            metadata.nominal_photon_rate_hz,
+            0.0,
+            "normalized_fluorescence",
+        ),
+        calibration,
+        TwoPointBudgetCeiling(2, None, None, None),
+        seed=29,
+    )
+    assert tracker.choose_next_query() is not None
+    before = _tracker_snapshot(tracker)
+
+    first_endpoint_s = (
+        metadata.current_timestamp_s + metadata.frequency_overhead_s
+    ) + configuration.integration_time_s
+    second_endpoint_s = (
+        first_endpoint_s + metadata.frequency_overhead_s
+    ) + configuration.integration_time_s
+    assert math.isfinite(first_endpoint_s)
+    if failure_kind == "nonadvancing":
+        assert first_endpoint_s == 1.0
+        assert second_endpoint_s == first_endpoint_s
+    else:
+        assert first_endpoint_s == 1.4e308
+        assert not math.isfinite(second_endpoint_s)
+
+    with pytest.raises(ValueError, match="second-query endpoint"):
+        tracker.reset(
+            metadata,
+            calibration,
+            TwoPointBudgetCeiling(2, None, None, None),
+            seed=31,
+        )
+    assert _tracker_snapshot(tracker) == before
+
+
+def test_invalid_reset_rejects_nonadvancing_first_endpoint_atomically() -> None:
+    configuration = TwoPointTrackerConfiguration(integration_time_s=2.0**-54)
+    calibration = calibrate_two_point(
+        make_legal_caller_asserted_source(),
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        TwoPointRunMetadata(
+            "clock", None, 0.010, 1.0, 0.0, "normalized_fluorescence"
+        ),
+        calibration,
+        TwoPointBudgetCeiling(2, None, None, None),
+        seed=37,
+    )
+    assert tracker.choose_next_query() is not None
+    before = _tracker_snapshot(tracker)
+    metadata = TwoPointRunMetadata(
+        "clock", None, 1.0, 1.0, 0.0, "normalized_fluorescence"
+    )
+    first_endpoint_s = (
+        metadata.current_timestamp_s + metadata.frequency_overhead_s
+    ) + configuration.integration_time_s
+    assert first_endpoint_s == metadata.current_timestamp_s
+
+    with pytest.raises(ValueError, match="first-query endpoint"):
+        tracker.reset(
+            metadata,
+            calibration,
+            TwoPointBudgetCeiling(2, None, None, None),
+            seed=41,
+        )
+    assert _tracker_snapshot(tracker) == before
 
 
 def test_choose_first_query_reserves_two_atomic_charges_and_is_idempotent() -> None:
@@ -590,6 +950,66 @@ def test_choose_first_query_reserves_two_atomic_charges_and_is_idempotent() -> N
     repeated = tracker.choose_next_query()
     assert repeated is query
     assert tracker.estimate() is after
+
+
+def test_choose_reserved_second_query_without_budget_recheck_or_center_change(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    configuration, calibration, metadata = _make_rounding_witness_calibration()
+    exact_cap = calibration.source.safe_resources.observations + 2
+    tracker, _, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(exact_cap, None, None, None)
+    )
+    first_query = tracker.choose_next_query()
+    assert first_query is not None
+    frozen_center_hz = first_query.interrogation_center_hz
+    first_observation = EstimatorObservation(
+        first_query.expected_sequence_index,
+        first_query.expected_end_timestamp_s,
+        first_query.frequency_hz,
+        0.9,
+        first_query.integration_time_s,
+        first_query.expected_nominal_exposure_photons,
+        7,
+    )
+    tracker.update(first_observation)
+    after_first = tracker.estimate()
+    assert after_first.charged_resources.observations == exact_cap - 1
+    assert after_first.identities[0].center_hz == frozen_center_hz
+
+    def reject_affordability_recheck(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("reserved second query must not recheck affordability")
+
+    monkeypatch.setattr(
+        tracker_module, "_within_ceiling", reject_affordability_recheck
+    )
+    second_query = tracker.choose_next_query()
+
+    assert second_query is not None
+    assert second_query.query_index == 1
+    assert second_query.pair_index == 0
+    assert second_query.identity_pair_index == 0
+    assert second_query.resonance_id == first_query.resonance_id == "r0"
+    assert second_query.side == "plus"
+    assert second_query.interrogation_center_hz == frozen_center_hz
+    assert second_query.frequency_hz == (
+        frozen_center_hz + calibration.identities[0].offset_hz
+    )
+    assert second_query.integration_time_s == configuration.integration_time_s
+    assert second_query.expected_sequence_index == first_observation.sequence_index + 1
+    assert second_query.expected_end_timestamp_s == (
+        first_observation.timestamp_s + metadata.frequency_overhead_s
+    ) + configuration.integration_time_s
+    assert (
+        second_query.expected_nominal_exposure_photons
+        == metadata.nominal_photon_rate_hz * configuration.integration_time_s
+    )
+    after_second = tracker.estimate()
+    assert after_second.incomplete_pair is after_first.incomplete_pair
+    assert replace(after_second, pending_query=None) == after_first
+    assert tracker.choose_next_query() is second_query
+    assert tracker.estimate() is after_second
 
 
 def test_unaffordable_boundary_stops_atomically_without_partial_pair() -> None:
