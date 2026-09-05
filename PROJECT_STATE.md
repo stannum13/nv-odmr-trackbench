@@ -139,9 +139,9 @@ configuration and calibration-query request, and an opaque in-process run token.
 Ordinary token construction and all subclassing are blocked, as are value
 equality, copy, deepcopy, pickle, and JSON serialization. Pure Python still
 permits `object.__new__` to allocate an exact base-class object, but it has no
-issuer/value binding and is powerless unless its exact identity is registered.
-All later consumers must authenticate exact registry identity and never accept
-exact class or `isinstance` membership alone. Evaluator scalars accept supported
+runner-minted identity and Task 13's registry rejects it. All consumers
+authenticate exact registry identity and never accept exact class or
+`isinstance` membership alone. Evaluator scalars accept supported
 NumPy values only by canonicalizing them to built-in `int`/`float`, reject
 boolean, complex, array, invalid-domain, and non-finite inputs, and enforce only
 their local timing/exposure invariants. Binding, verified acquisition, outcome,
@@ -200,6 +200,50 @@ authentication, registry membership, transition execution, and resource-builder
 joins remain assigned to later tasks. The final independent review approved
 Task 12 with zero Critical or Important findings and retained five test-only
 mutation-strength notes for final branch-review triage.
+Task 13 introduces the public instrument-owning `TwoPointEvaluatorRunner`,
+superseding Task 9's deliberate temporary package-surface absence assertion.
+`bind` accepts only an exact clean instrument, snapshots its derived immutable
+rate/overhead configuration and zero resource/time boundary, mints a keyed
+one-use token, and registers the exact runner/token/instrument/configuration
+identities. Verified calibration preflight is complete before the first query
+and preserves phase, exact-type, value, frequency-grid, fit/identity, clock,
+then clean-boundary precedence without calling the instrument query or fitter.
+The acquisition loop retains every exact full observation and safe projection,
+computes the actual instrument midpoint before each query with the normative
+binary64 association, authenticates both local resource atoms and continuity
+between authoritative boundaries, and applies resource-unavailable
+classification before frequency, sequence, timing, or nominal-exposure
+defects. Only safe values enter the exact `CompleteSweep`; fitting uses a
+defensive configuration snapshot and `initial_guess=None`. The keyed verified
+source seam checks normalized-instrument provenance, the safe trace, successful
+fit and ordered identities, exact evaluator-association physical epoch,
+availability, and clock mapping. One-use exact source identity plus the token
+registry prevents direct allocations, copied sources, copied outcomes, or
+class membership alone from acquiring authority. A complete recursive
+structural fingerprint binds all 21 source fields and their nested fit,
+configuration, identity, trace, provenance, resource, and clock values to the
+one-use construction identity. Attempt-scoped source minting, prospective state
+construction, a cloned trusted pre-success registry binding, and unconditional
+fresh-token rollback prevent commit-then-raise or post-construction mutation
+from leaking authority. Narrow transaction guards also clean up on
+`BaseException` and immediately re-raise the identical object without typed
+conversion. Post-start resource/time boundaries are captured as indivisible
+pairs with two bounded attempts, so transient ordinary faults are safely
+rendered and returned observations are retained. Persistent getter failure
+terminates as resource-join unavailable with the complete mismatch-field set;
+because the closed outcome requires a concrete after-snapshot, it explicitly
+retains the last authenticated boundary rather than claiming an unobserved one.
+Every ordinary causal query, fit, source,
+boundary-snapshot, or final-registry failure after acquisition starts returns
+its closed typed outcome with the accepted prefix and moves the runner to
+terminal `calibration_failed`; a resource join failure alone omits aggregate
+replay. Resource mismatches are deduplicated in declared order, and every
+unavailable join retains the authoritative boundary index.
+After two RED/GREEN review-fix waves, the final bounded independent re-review
+reported zero Critical, Important, or Minor findings; the independent full
+repository gate passed all 1,109 tests and Ruff.
+Task 13 intentionally adds no tracking start, tracking step, public aggregate
+resource builder, or abort execution, which remain assigned to later tasks.
 
 ## Completed work
 
@@ -493,7 +537,7 @@ mutation-strength notes for final branch-review triage.
 
 ## Tests currently passing
 
-- `pytest`: 1050 passed.
+- `pytest`: 1109 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -547,5 +591,5 @@ mutation-strength notes for final branch-review triage.
 
 ## Next actions
 
-1. Implement Task 13 runner binding and verified calibration acquisition.
-2. Run the Task 13 per-task spec and quality review before advancing.
+1. Implement Task 14 runner start and zero-trace tracking state.
+2. Run the Task 14 per-task specification and quality review.

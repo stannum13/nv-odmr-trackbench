@@ -60,6 +60,7 @@ def test_evaluator_primitive_names_are_public() -> None:
         "TwoPointEvaluatorInstrumentConfiguration",
         "TwoPointEvaluatorPairTiming",
         "TwoPointEvaluatorResources",
+        "TwoPointEvaluatorRunner",
         "TwoPointEvaluatorRunnerState",
         "TwoPointInstrumentQueryFailure",
         "TwoPointResourceJoinUnavailableAcquisition",
@@ -88,10 +89,7 @@ def test_evaluator_primitive_names_are_public() -> None:
         "observations_without_realized_counts",
         "virtual_elapsed_time_s",
     )
-    forbidden_later_names = (
-        "TwoPointEvaluatorRunner",
-        "build_two_point_evaluator_resources",
-    )
+    forbidden_later_names = ("build_two_point_evaluator_resources",)
     assert not any(hasattr(two_point, name) for name in forbidden_later_names)
 
     assert TwoPointCalibrationPreflightError

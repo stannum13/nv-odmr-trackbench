@@ -70,6 +70,33 @@ once a package version is introduced.
 
 ### Added
 
+- Added the public instrument-owning `TwoPointEvaluatorRunner`, intentionally
+  ending Task 9's temporary no-runner package surface. Clean exact-instrument
+  binding now derives immutable rate/overhead configuration, captures the zero
+  resource/time boundary, and registers a keyed one-use token against the exact
+  runner, instrument, and configuration identities. Verified-calibration
+  preflight completes its phase/type/value/grid/fit-identity/clock/boundary
+  precedence without querying or fitting. Acquisition retains aligned full,
+  safe, and actual-midpoint traces; authenticates each Task 10 full-resource
+  atom plus boundary continuity before any observation-contract classification;
+  fits one safe-only `CompleteSweep` with no supplied initial guess; and binds
+  normalized, identity-resolved, exact-epoch source provenance through a keyed
+  private seam. Direct token allocations, public verified minting, copied
+  sources/outcomes, and class membership alone confer no registry authority.
+  A complete structural fingerprint binds every nested verified-source value
+  to its one-use construction identity. Attempt-scoped source construction,
+  prospective state creation, a cloned trusted pre-success binding, and
+  unconditional fresh-token rollback revoke exact provisional authority even
+  when a collaborator commits, mutates a frozen registry record, then raises.
+  Transaction-local `BaseException` cleanup immediately re-raises the identical
+  interrupt. Post-start resource/time boundaries are captured as fresh
+  indivisible pairs with two bounded attempts; returned observations remain in
+  the accepted prefix. Persistent getter failure terminates as resource-join
+  unavailable, publishing only the last authenticated boundary and the complete
+  ordered mismatch-field set because the closed schema cannot carry an absent
+  authoritative boundary. Success stores the exact outcome/source identities;
+  every declared ordinary post-start failure moves the runner to the terminal
+  calibration-failed state.
 - Added frozen/slotted evaluator resource, abort, runner-state, and typed
   step/run outcome contracts for calibrated two-point runs. Resource records
   retain separate accepted-charged-prefix and final-charged snapshots while
@@ -125,9 +152,9 @@ once a package version is introduced.
   opaque identity-only run token. Ordinary construction and all subclassing are
   blocked, as are copy, deepcopy, pickle, and JSON serialization. Pure Python
   can still allocate an exact base-class object through `object.__new__`; that
-  object carries no issuer/value binding and is powerless unless its exact
-  identity is registered. Later consumers must authenticate exact registry
-  identity and never accept exact class or `isinstance` membership alone. Local
+  object carries no runner-minted identity and Task 13's registry rejects it.
+  Consumers authenticate exact registry identity and never accept exact class
+  or `isinstance` membership alone. Local
   intrinsic validation
   canonicalizes supported NumPy scalar integers/reals, rejects boolean,
   complex, array, non-finite, and invalid-domain values, closes both evaluator

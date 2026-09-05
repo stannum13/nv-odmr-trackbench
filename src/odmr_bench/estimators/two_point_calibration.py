@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import replace
+from contextvars import ContextVar, Token
+from dataclasses import fields, is_dataclass, replace
 from itertools import pairwise
+
+import numpy as np
 
 from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators.two_point_resources import _replay_public_resources
@@ -29,6 +32,107 @@ from odmr_bench.estimators.types import (
     SpectrumFitResult,
 )
 from odmr_bench.models import Resonance
+
+_VERIFIED_SOURCE_CONSTRUCTION_KEY: object = object()
+_VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES: dict[int, TwoPointCalibrationSource] = {}
+_VERIFIED_SOURCE_CONSTRUCTION_OWNERS: dict[int, object | None] = {}
+_VERIFIED_SOURCE_CONSTRUCTION_FINGERPRINTS: dict[int, object] = {}
+_VERIFIED_SOURCE_CONSTRUCTION_OWNER: ContextVar[object | None] = ContextVar(
+    "verified_source_construction_owner",
+    default=None,
+)
+
+
+def _begin_verified_source_construction_transaction(
+) -> tuple[object, Token[object | None]]:
+    """Scope identities created by one evaluator binder call."""
+    owner = object()
+    return owner, _VERIFIED_SOURCE_CONSTRUCTION_OWNER.set(owner)
+
+
+def _finish_verified_source_construction_transaction(
+    owner: object,
+    context_token: Token[object | None],
+    returned_source: object | None,
+) -> None:
+    """Retain only the exact source returned normally by this binder call."""
+    current_owner = _VERIFIED_SOURCE_CONSTRUCTION_OWNER.get()
+    _VERIFIED_SOURCE_CONSTRUCTION_OWNER.reset(context_token)
+    if current_owner is not owner:
+        raise RuntimeError("verified source construction transaction mismatch")
+    for source_identity, registered_owner in tuple(
+        _VERIFIED_SOURCE_CONSTRUCTION_OWNERS.items()
+    ):
+        if registered_owner is not owner:
+            continue
+        registered_source = _VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES.get(
+            source_identity
+        )
+        if registered_source is returned_source:
+            continue
+        _VERIFIED_SOURCE_CONSTRUCTION_OWNERS.pop(source_identity, None)
+        _VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES.pop(source_identity, None)
+        _VERIFIED_SOURCE_CONSTRUCTION_FINGERPRINTS.pop(source_identity, None)
+
+
+def _trusted_value_fingerprint(value: object) -> object:
+    """Freeze exact nested record values without trusting later equality hooks."""
+    if value is None:
+        return (type(None),)
+    if type(value) is bool:
+        return (bool, value)
+    if type(value) is int:
+        return (int, value)
+    if type(value) is float:
+        return (float, value.hex())
+    if type(value) is str:
+        return (str, str.__str__(value))
+    if type(value) is tuple:
+        return (tuple, tuple(_trusted_value_fingerprint(item) for item in value))
+    if type(value) is np.ndarray:
+        array = value
+        return (
+            np.ndarray,
+            array.dtype.str,
+            tuple(array.shape),
+            array.tobytes(order="C"),
+            array.flags.writeable,
+        )
+    if is_dataclass(value) and not isinstance(value, type):
+        return (
+            type(value),
+            tuple(
+                (
+                    field.name,
+                    _trusted_value_fingerprint(getattr(value, field.name)),
+                )
+                for field in fields(value)
+            ),
+        )
+    raise TypeError("verified source contains an unsupported trusted value")
+
+
+def _consume_verified_source_construction_identity(source: object) -> bool:
+    """Consume one exact keyed-factory source with its complete trusted value."""
+    source_identity = id(source)
+    registered = _VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES.pop(
+        source_identity, None
+    )
+    trusted_fingerprint = _VERIFIED_SOURCE_CONSTRUCTION_FINGERPRINTS.pop(
+        source_identity, None
+    )
+    _VERIFIED_SOURCE_CONSTRUCTION_OWNERS.pop(source_identity, None)
+    if type(source) is not TwoPointCalibrationSource:
+        return False
+    try:
+        current_fingerprint = _trusted_value_fingerprint(source)
+    except Exception:
+        return False
+    return (
+        registered is source
+        and trusted_fingerprint is not None
+        and current_fingerprint == trusted_fingerprint
+    )
 
 
 def _fail(code: TwoPointCalibrationConstructionCode, message: str) -> None:
@@ -602,6 +706,32 @@ def _validate_source_epoch(
         )
 
 
+def _validate_verified_source_epoch(
+    observations: tuple[EstimatorObservation, ...],
+    overhead_s: float,
+    start_timestamp_s: float,
+    physical_fit_epoch_s: float,
+) -> None:
+    if len(observations) < 2:
+        _fail("invalid_source_epoch", "verified source trace must be nonempty")
+    first_integration_start_s = start_timestamp_s + overhead_s
+    first_midpoint_s = (
+        first_integration_start_s + observations[0].integration_time_s / 2.0
+    )
+    last_integration_start_s = observations[-2].timestamp_s + overhead_s
+    last_midpoint_s = (
+        last_integration_start_s + observations[-1].integration_time_s / 2.0
+    )
+    expected_epoch_s = first_midpoint_s + (
+        last_midpoint_s - first_midpoint_s
+    ) / 2.0
+    if physical_fit_epoch_s != expected_epoch_s:
+        _fail(
+            "invalid_source_epoch",
+            "physical_fit_epoch_s must equal the exact instrument-midpoint mean",
+        )
+
+
 def _validate_availability_and_clock(
     observations: tuple[EstimatorObservation, ...],
     availability_sequence_index: int,
@@ -631,6 +761,144 @@ def _validate_availability_and_clock(
             "availability and clock mapping must match the completed source trace",
         )
     return clock_mapping
+
+
+def _bind_verified_two_point_calibration_source(
+    source_fit: SpectrumFitResult,
+    fit_configuration: FitConfiguration,
+    source_observations: Sequence[EstimatorObservation],
+    identity_binding: TwoPointIdentityBinding,
+    fluorescence_provenance: NormalizedFluorescenceProvenance,
+    *,
+    source_id: str,
+    source_frequency_overhead_s: float,
+    source_start_timestamp_s: float,
+    physical_fit_epoch_s: float,
+    availability_sequence_index: int,
+    availability_timestamp_s: float,
+    clock_mapping: TwoPointClockMapping,
+    construction_key: object,
+) -> TwoPointCalibrationSource:
+    """Bind an evaluator-authenticated source through the keyed private seam."""
+    if construction_key is not _VERIFIED_SOURCE_CONSTRUCTION_KEY:
+        raise TypeError("invalid verified calibration source construction key")
+    _validate_argument_types(
+        source_fit,
+        fit_configuration,
+        source_observations,
+        identity_binding,
+        fluorescence_provenance,
+        source_id,
+        source_frequency_overhead_s,
+        source_start_timestamp_s,
+        physical_fit_epoch_s,
+        availability_sequence_index,
+        availability_timestamp_s,
+        clock_mapping,
+    )
+    _validate_argument_values(
+        source_id=source_id,
+        source_frequency_overhead_s=source_frequency_overhead_s,
+        source_start_timestamp_s=source_start_timestamp_s,
+        physical_fit_epoch_s=physical_fit_epoch_s,
+        availability_sequence_index=availability_sequence_index,
+        availability_timestamp_s=availability_timestamp_s,
+    )
+    fluorescence_provenance = _validate_fluorescence_provenance(
+        fluorescence_provenance
+    )
+    if (
+        fluorescence_provenance.normalization_rule
+        != "odmr_instrument_normalized_fluorescence_v1"
+    ):
+        _fail(
+            "invalid_provenance_or_quantity",
+            "verified sources require the instrument normalization rule",
+        )
+    observations = _validate_source_trace(
+        tuple(source_observations),
+        source_frequency_overhead_s,
+        source_start_timestamp_s,
+    )
+    _validate_source_resources(observations, fluorescence_provenance)
+    resources = _replay_public_resources(
+        observations, source_frequency_overhead_s
+    )
+    _construct_fit_input(observations, resources)
+    fit_configuration = _validate_fit_input_provenance(
+        source_fit, fit_configuration
+    )
+    source_fit, resolved_resonance_ids = _validated_source_fit(source_fit)
+    if fit_configuration.resonance_ids != resolved_resonance_ids:
+        _fail(
+            "fit_input_mismatch",
+            "source fit identities must match the supplied fit configuration",
+        )
+    identity_binding = _validate_source_identity(
+        identity_binding, resolved_resonance_ids
+    )
+    _validate_verified_source_epoch(
+        observations,
+        source_frequency_overhead_s,
+        source_start_timestamp_s,
+        physical_fit_epoch_s,
+    )
+    clock_mapping = _validate_availability_and_clock(
+        observations,
+        availability_sequence_index,
+        availability_timestamp_s,
+        clock_mapping,
+    )
+    mapped_times = (
+        observations[0].timestamp_s + clock_mapping.offset_s,
+        observations[-1].timestamp_s + clock_mapping.offset_s,
+        physical_fit_epoch_s + clock_mapping.offset_s,
+        availability_timestamp_s + clock_mapping.offset_s,
+    )
+    if not all(math.isfinite(value) for value in mapped_times):
+        _fail(
+            "invalid_availability_or_clock",
+            "clock mapping must keep all verified source times finite",
+        )
+
+    first_observation = observations[0]
+    last_observation = observations[-1]
+    source = object.__new__(TwoPointCalibrationSource)
+    values = {
+        "source_id": source_id,
+        "provenance": "verified_factory_acquisition",
+        "source_fit": source_fit,
+        "fit_configuration": fit_configuration,
+        "identity_binding": identity_binding,
+        "resolved_resonance_ids": resolved_resonance_ids,
+        "source_observations": observations,
+        "fluorescence_provenance": fluorescence_provenance,
+        "source_frequency_overhead_s": source_frequency_overhead_s,
+        "source_frequency_min_hz": first_observation.frequency_hz,
+        "source_frequency_max_hz": last_observation.frequency_hz,
+        "source_first_sequence_index": first_observation.sequence_index,
+        "source_last_sequence_index": last_observation.sequence_index,
+        "source_start_timestamp_s": source_start_timestamp_s,
+        "source_first_timestamp_s": first_observation.timestamp_s,
+        "source_last_timestamp_s": last_observation.timestamp_s,
+        "physical_fit_epoch_s": physical_fit_epoch_s,
+        "availability_sequence_index": availability_sequence_index,
+        "availability_timestamp_s": availability_timestamp_s,
+        "safe_resources": resources,
+        "clock_mapping": clock_mapping,
+    }
+    for field_name, value in values.items():
+        object.__setattr__(source, field_name, value)
+    source_identity = id(source)
+    trusted_fingerprint = _trusted_value_fingerprint(source)
+    _VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES[source_identity] = source
+    _VERIFIED_SOURCE_CONSTRUCTION_FINGERPRINTS[source_identity] = (
+        trusted_fingerprint
+    )
+    _VERIFIED_SOURCE_CONSTRUCTION_OWNERS[source_identity] = (
+        _VERIFIED_SOURCE_CONSTRUCTION_OWNER.get()
+    )
+    return source
 
 
 def bind_caller_asserted_two_point_calibration_source(
