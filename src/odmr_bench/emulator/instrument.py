@@ -119,6 +119,16 @@ class ODMRInstrument:
         self._sequence_index = 0
 
     @property
+    def nominal_photon_rate_hz(self) -> float:
+        """Return the canonical configured nominal photon rate."""
+        return self._nominal_photon_rate_hz
+
+    @property
+    def frequency_overhead_s(self) -> float:
+        """Return the canonical configured per-frequency overhead."""
+        return self._frequency_overhead_s
+
+    @property
     def resources(self) -> ResourceSnapshot:
         """Return immutable acquisition totals for successful queries only."""
         return self._ledger.snapshot()

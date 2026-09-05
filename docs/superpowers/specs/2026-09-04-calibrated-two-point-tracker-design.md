@@ -395,10 +395,14 @@ TwoPointUpdate(
     estimate: TwoPointEstimate,
 )
 
-# Evaluator-only; none of these records is an estimator input. The token has
-# no public constructor, value representation, copy/deepcopy, serialization,
-# or user-defined equality. The evaluator module can validate its private
-# issuer/outcome/source binding; public code can only carry the same object.
+# Evaluator-only; none of these records is an estimator input. Ordinary token
+# construction and subclassing are blocked, as are copy/deepcopy,
+# serialization, and user-defined value equality. Pure Python cannot prevent
+# object.__new__(VerifiedInstrumentRunToken) from allocating an exact base-class
+# object; that unregistered object carries no issuer or value and confers no
+# authority. Every consumer authenticates exact identity in the private
+# issuer/outcome/source registry and never accepts exact class or isinstance
+# membership alone.
 VerifiedInstrumentRunToken()
 
 TwoPointEvaluatorInstrumentConfiguration(
@@ -762,9 +766,14 @@ separate calibration argument. The source binds all of them so consistency is
 validated once and cannot change between calibration and reset.
 
 `verified_factory_acquisition` has a narrow, checkable meaning. A
-`TwoPointEvaluatorRunner` mints one nonconstructible
+`TwoPointEvaluatorRunner` privately creates and registers one
 `VerifiedInstrumentRunToken` when it binds one concrete instrument object and
-retains both for its lifetime. At bind it derives the immutable
+retains both for its lifetime. Ordinary construction and all subclassing are
+blocked, but pure-Python callers can use `object.__new__` to allocate an exact
+base-class object. Such an unregistered object carries no issuer/value binding
+and is powerless: every later acceptance path must resolve the exact token
+identity in the private registry and must never treat exact class or
+`isinstance` membership as authority. At bind it derives the immutable
 `TwoPointEvaluatorInstrumentConfiguration` from the instrument's two read-only
 configuration properties; callers cannot independently declare these values.
 The evaluator module privately binds the token to its issuing runner,
@@ -957,6 +966,9 @@ subtraction is validated nonnegative rather than silently clamped.
   evaluator-runner context carrying the exact successful source outcome. The
   runner requires object identity of its retained opaque token, the original
   bound instrument, and the source object in the calibration. It also requires
+  the token to resolve as that exact registered identity; an unregistered
+  exact-class allocation and any type-membership check alone are insufficient.
+  The runner further requires
   `current_sequence_index == availability_sequence_index`,
   `current_timestamp_s == availability_timestamp_s`, an exact continuous
   boundary from calibration `instrument_resources_after` to tracking
@@ -1099,7 +1111,7 @@ context, before it constructs the returned record:
 
 | Owner | Contextual guarantees |
 | --- | --- |
-| `TwoPointEvaluatorRunner.bind` | concrete instrument identity, instrument-derived immutable runner configuration, clean initial resource/time boundary, and opaque run-token minting |
+| `TwoPointEvaluatorRunner.bind` | concrete instrument identity, instrument-derived immutable runner configuration, clean initial resource/time boundary, private run-token creation, and exact-identity registry binding; class membership alone is never authority |
 | `acquire_verified_calibration` | token/instrument continuity, actual instrument midpoints, query/observation recurrence, full-to-safe projections, exact replay when available or an explicit unavailable join with authoritative snapshots, fit-from-safe-trace linkage, and verified source provenance |
 | asserted-source factory | caller-asserted label plus internal trace/config/resource consistency; it does not authenticate origin or fit derivation |
 | `calibrate_two_point` | source/config identity, model derivative/monotonicity, fixed-cell geometry, and treatment compatibility |
@@ -1744,12 +1756,13 @@ are exact, and the returned estimate has no partial or pending value.
 protocol. It retains the bound instrument object privately; its frozen `state`
 is an immutable audit snapshot, not a replacement instrument handle. `bind`
 reads the instrument's immutable rate and overhead properties, mints the opaque
-token, and captures its current time/resource boundary. The official Stage 6.3
+token, registers its exact identity, and captures its current time/resource
+boundary. The official Stage 6.3
 runner accepts only a clean instrument (`virtual_time_s == 0.0` and an all-zero
 resource snapshot), so `instrument_current_sequence_index` begins as `None`.
 An unclean bind raises
 `TwoPointCalibrationPreflightError(code="unclean_instrument_boundary")` before
-minting a usable runner.
+registering a usable token.
 
 The callable state machine is exact:
 
@@ -1886,6 +1899,12 @@ causal boundaries:
   field; each raises the stable start error before reset or query. Conditional
   start on a clean second runner succeeds while preserving different source
   and tracking rate/overhead declarations.
+- Token tests block ordinary construction, subclass definition, copy,
+  deepcopy, pickle/reduce, JSON, and dataclass deep traversal. They also
+  characterize unavoidable `object.__new__` exact-base allocations as
+  issuer/value-free objects distinct from every registered token. Consumer
+  tests must reject such objects through exact registry lookup even though an
+  exact-class or `isinstance` check would accept them.
 - Each public record rejects violations of its intrinsic fields. Context-only
   counterexamples are then passed to the named owner: a locally valid update
   with the wrong prior pending query, estimate state inconsistent with reset,

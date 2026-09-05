@@ -35,6 +35,27 @@ def _snapshot(
     )
 
 
+def test_instrument_exposes_exact_read_only_acquisition_configuration() -> None:
+    from odmr_bench.emulator.instrument import ODMRInstrument
+
+    instrument = ODMRInstrument(
+        dynamics=StationaryDynamics(_snapshot()),
+        noise=PoissonNoise(),
+        nominal_photon_rate_hz=np.float64(123.5),
+        frequency_overhead_s=np.float64(0.25),
+        seed=3,
+    )
+
+    assert instrument.nominal_photon_rate_hz == 123.5
+    assert type(instrument.nominal_photon_rate_hz) is float
+    assert instrument.frequency_overhead_s == 0.25
+    assert type(instrument.frequency_overhead_s) is float
+    with pytest.raises(AttributeError):
+        instrument.nominal_photon_rate_hz = 1.0  # type: ignore[misc]
+    with pytest.raises(AttributeError):
+        instrument.frequency_overhead_s = 0.0  # type: ignore[misc]
+
+
 def test_query_uses_midpoint_truth_and_end_timestamp_without_wall_clock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

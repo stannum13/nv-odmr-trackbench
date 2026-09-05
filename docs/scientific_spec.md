@@ -333,9 +333,14 @@ may be a finite signed value and must not be clamped.
 Emulator-controlled acquisition-and-fit construction may be labeled verified
 only through an evaluator-owned opaque run token bound to the issuing runner,
 instrument identity, immutable nominal photon rate/overhead, exact success
-outcome, and source. A typed verified-acquisition success or failure must retain
-every committed full observation and exact safe view, aligned validated
-measurement-time-or-`None` slots, before/after resource boundaries, and
+outcome, and source. Ordinary token construction and subclassing are blocked,
+but pure Python permits an exact base-class object to be allocated through
+`object.__new__`; that unregistered object carries no provenance authority.
+Every evaluator acceptance path must authenticate the exact token identity in
+its private registry and must never infer authority from exact class or
+`isinstance` membership alone. A typed verified-acquisition success or failure
+must retain every committed full observation and exact safe view, aligned
+validated measurement-time-or-`None` slots, before/after resource boundaries, and
 canonical safe/full resource replays whenever the raw record joins the
 authoritative ledger. A `resource_join_unavailable` failure instead preserves
 the malformed raw record and authoritative cumulative snapshots but exposes no

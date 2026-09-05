@@ -70,6 +70,25 @@ once a package version is introduced.
 
 ### Added
 
+- Added the first evaluator-owned calibrated two-point primitives without
+  starting runner or acquisition behavior. `ODMRInstrument` exposes canonical
+  nominal-photon-rate and frequency-overhead configuration through read-only
+  properties. The new `odmr_bench.evaluation.two_point` surface exports only
+  the task-owned typed errors, closed resource-mismatch alias, frozen/slotted
+  instrument configuration and verified calibration-query request, and an
+  opaque identity-only run token. Ordinary construction and all subclassing are
+  blocked, as are copy, deepcopy, pickle, and JSON serialization. Pure Python
+  can still allocate an exact base-class object through `object.__new__`; that
+  object carries no issuer/value binding and is powerless unless its exact
+  identity is registered. Later consumers must authenticate exact registry
+  identity and never accept exact class or `isinstance` membership alone. Local
+  intrinsic validation
+  canonicalizes supported NumPy scalar integers/reals, rejects boolean,
+  complex, array, non-finite, and invalid-domain values, closes both evaluator
+  error-code sets, and checks only request-local timing and exposure facts.
+  Runner states, calibration outcomes, acquisition records, and full resource
+  joins remain assigned to later Stage 6.3 tasks. The final task re-review
+  reported zero Critical, Important, or Minor findings.
 - Completed estimator-side calibrated two-point pair updates. The tracker now
   computes the canonical public discriminator, common-mode diagnostic, signed
   hertz innovation, proportional request, strict capture/common-mode gates,

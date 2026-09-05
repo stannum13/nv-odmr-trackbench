@@ -130,7 +130,24 @@ The recursive truth audit also continues past declared dataclass fields through
 dynamic dictionaries and inherited slots with de-duplication and a dedicated
 dynamic-extra sentinel. The final independent re-review approved Task 8 and
 the documented contract correction with zero Critical, Important, or Minor
-findings.
+findings. Task 9 begins the evaluator-owned package without adding runner,
+outcome, or resource-record behavior. `ODMRInstrument` now exposes its canonical
+nominal photon rate and per-frequency overhead through exact read-only
+properties. The evaluator surface contains only the task-owned preflight/start/
+state errors, closed resource-mismatch alias, frozen/slotted instrument
+configuration and calibration-query request, and an opaque in-process run token.
+Ordinary token construction and all subclassing are blocked, as are value
+equality, copy, deepcopy, pickle, and JSON serialization. Pure Python still
+permits `object.__new__` to allocate an exact base-class object, but it has no
+issuer/value binding and is powerless unless its exact identity is registered.
+All later consumers must authenticate exact registry identity and never accept
+exact class or `isinstance` membership alone. Evaluator scalars accept supported
+NumPy values only by canonicalizing them to built-in `int`/`float`, reject
+boolean, complex, array, invalid-domain, and non-finite inputs, and enforce only
+their local timing/exposure invariants. Binding, verified acquisition, outcome,
+runner state, and full resource accounting remain assigned to later tasks.
+The final independent re-review approved Task 9 and its corrected in-process
+capability boundary with zero Critical, Important, or Minor findings.
 
 ## Completed work
 
@@ -424,7 +441,7 @@ findings.
 
 ## Tests currently passing
 
-- `pytest`: 980 passed.
+- `pytest`: 984 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -467,6 +484,5 @@ findings.
 
 ## Next actions
 
-1. Implement Task 9 instrument configuration and evaluator primitive
-   contracts.
-2. Run the Task 9 per-task spec and quality review before advancing.
+1. Implement Task 10 evaluator-private full-resource replay and mismatch joins.
+2. Run the Task 10 per-task spec and quality review before advancing.
