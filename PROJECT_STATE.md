@@ -41,7 +41,22 @@ stage so malformed nested values cannot leak bare construction exceptions.
 The final review also exposed a code-6 fitted-ID mismatch that could lose to a
 later code-7 malformed-fit failure. A focused combined witness now pins the
 first-applicable `fit_input_mismatch` result, and the final re-review approved
-Task 4 with zero Critical or Important findings.
+Task 4 with zero Critical or Important findings. Task 5 adds the canonical
+baseline-once, source-order target-only local model, its analytic target-center
+derivative, and the public calibration factory. The factory constructs fixed
+ordered-difference identity cells, capture-plus-probe insets, target-pair depth,
+and positive analytic discriminator slopes cross-checked numerically; it also
+enforces calibration-geometry-before-budget precedence and rejects same-run
+treatment for caller-asserted sources. Repository-local test directories now
+have explicit package markers so direct pytest collection resolves shared test
+helpers in a clean Linux checkout; the pushed fix passed the complete GitHub CI
+matrix on Python 3.11 and 3.12. Task 5's first review found two Important
+regression-coverage gaps:
+exact argument-type rejection and factory-owned analytic/numerical slope
+agreement. Focused adversarial tests now prove all three constructible
+subclasses fail before geometry or budget handling, and a sign-preserving
+derivative perturbation fails calibration. The final independent re-review
+approved Task 5 with zero Critical, Important, or Minor findings.
 
 ## Completed work
 
@@ -335,7 +350,7 @@ Task 4 with zero Critical or Important findings.
 
 ## Tests currently passing
 
-- `pytest`: 899 passed.
+- `pytest`: 911 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -378,7 +393,6 @@ Task 4 with zero Critical or Important findings.
 
 ## Next actions
 
-1. Implement Stage 6.3 Task 5: the canonical local target model, analytic
-   center derivative, and calibrated discriminator-cell factory.
-2. Run the Task 5 per-task spec and quality review before advancing to tracker
-   construction in Task 6.
+1. Implement Stage 6.3 Task 6: tracker construction, reset authentication,
+   pair-boundary budget enforcement, and the first query.
+2. Run the Task 6 per-task spec and quality review before advancing.

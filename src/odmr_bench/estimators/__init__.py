@@ -8,6 +8,7 @@ from odmr_bench.estimators.full_sweep import RepeatedFullSweepEstimator
 from odmr_bench.estimators.initialization import initialize_spectrum
 from odmr_bench.estimators.two_point_calibration import (
     bind_caller_asserted_two_point_calibration_source,
+    calibrate_two_point,
 )
 from odmr_bench.estimators.two_point_types import (
     CalibrationBudgetTreatment,
@@ -103,6 +104,7 @@ __all__ = [
     "WarmStartedFullSweepEstimator",
     "WarmSweepEstimate",
     "bind_caller_asserted_two_point_calibration_source",
+    "calibrate_two_point",
     "fit_spectrum",
     "initialize_spectrum",
     "linearized_standard_errors",

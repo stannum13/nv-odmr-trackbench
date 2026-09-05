@@ -10,6 +10,10 @@ once a package version is introduced.
 
 ### Changed
 
+- Made repository-local test support and estimator test directories explicit
+  packages so clean Linux direct-pytest collection resolves
+  `tests.two_point_helpers`; the repair passed the complete GitHub CI matrix on
+  Python 3.11 and 3.12.
 - Closed the integrated Stage 6.1 oracle findings. Fit success now requires
   every component to meet a configurable model-conditioned local amplitude
   significance threshold (`5.0` by default) derived from the same packed
@@ -66,6 +70,21 @@ once a package version is introduced.
 
 ### Added
 
+- Added the public calibrated two-point discriminator-cell factory and its
+  canonical scalar target-only model. The model evaluates the baseline once,
+  subtracts all eight dips in immutable source-fit order, and changes only the
+  selected target center; the analytic center derivative is checked against a
+  centered numerical discriminator derivative. Per-identity calibration fixes
+  ordered-difference Voronoi cells, capture-plus-probe allowed-center insets,
+  target-pair depth, and positive slope geometry, including exact endpoint,
+  one-ULP outward, empty-cell, unequal-width, and construction-precedence
+  coverage. Caller-asserted sources reject included-same-run treatment while
+  verified provenance supports both declared budget treatments. Review
+  hardening adds constructible-subclass witnesses for every exact public
+  argument boundary, pins type-error precedence over later geometry/treatment
+  defects, and proves a sign-preserving analytic derivative perturbation is
+  rejected when it disagrees with the independent numerical slope. The
+  zero-discriminator expectation now uses a separate explicit model expression.
 - Added estimator-safe, arrival-ordered public resource atoms and replay for
   calibrated two-point traces. The new caller-asserted calibration-source
   factory snapshots the exact public trace, binds derived sweep endpoints,
