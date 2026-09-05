@@ -56,7 +56,21 @@ exact argument-type rejection and factory-owned analytic/numerical slope
 agreement. Focused adversarial tests now prove all three constructible
 subclasses fail before geometry or budget handling, and a sign-preserving
 derivative perturbation fails calibration. The final independent re-review
-approved Task 5 with zero Critical, Important, or Minor findings.
+approved Task 5 with zero Critical, Important, or Minor findings. Task 6 adds
+the final slotted tracker shell, atomic reset-time configuration/clock/resource
+joins, calibration-seeded identity estimates, exact budget-treatment charging,
+sequential two-atom pair affordability, an idempotent first-minus query, and an
+atomic boundary-only budget stop. Observation acceptance, second-query
+scheduling, completed pairs, identity advancement, and evaluator APIs remain
+deferred to their owning tasks. Task 6's first combined review found one
+Important reset-boundary representability gap: individually valid metadata and
+configuration values could overflow only when the first pair was selected.
+Focused adversarial coverage now makes reset prospectively construct the exact
+first query and both sequential charged-resource transitions before its atomic
+state commit, so accepted reset state cannot fail later selection for nominal,
+elapsed, endpoint, or charged-total overflow. The fix is locally verified and
+the final independent re-review approved Task 6 with zero Critical, Important,
+or Minor findings.
 
 ## Completed work
 
@@ -393,6 +407,6 @@ approved Task 5 with zero Critical, Important, or Minor findings.
 
 ## Next actions
 
-1. Implement Stage 6.3 Task 6: tracker construction, reset authentication,
-   pair-boundary budget enforcement, and the first query.
-2. Run the Task 6 per-task spec and quality review before advancing.
+1. Implement Stage 6.3 Task 7 observation acceptance and reserved second-query
+   scheduling.
+2. Run the Task 7 per-task spec and quality review before advancing.

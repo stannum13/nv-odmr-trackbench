@@ -70,6 +70,23 @@ once a package version is introduced.
 
 ### Added
 
+- Added the public final/slotted `CalibratedTwoPointTracker` construction,
+  reset, pair-boundary affordability, first-minus query, and budget-stop
+  surface. Reset transactionally binds exact configuration, clock,
+  availability, metadata-resource, starting-boundary, charged-resource,
+  ceiling, and seed joins; seeds eight calibration-derived identity estimates
+  with signed mapped physical epochs and mode-specific sequence ages; and
+  reports source resources while charging them only for included same-run
+  calibration. First-query selection reserves two left-associated atomic
+  charges across all four capped dimensions, is idempotent while pending, and
+  stops an unaffordable boundary without creating a partial pair. Observation
+  acceptance, second queries, completed pairs, identity advancement, odd
+  alternation, and evaluator APIs remain intentionally unimplemented. Review
+  hardening moves first-query and both sequential-charge representability into
+  the atomic reset boundary, rejecting constructor-valid cross-record nominal,
+  elapsed, endpoint, and charged-total overflow before state commit so query
+  selection cannot raise from accepted reset state. The final task re-review
+  reported zero Critical, Important, or Minor findings.
 - Added the public calibrated two-point discriminator-cell factory and its
   canonical scalar target-only model. The model evaluates the baseline once,
   subtracts all eight dips in immutable source-fit order, and changes only the

@@ -10,6 +10,7 @@ from odmr_bench.estimators.two_point_calibration import (
     bind_caller_asserted_two_point_calibration_source,
     calibrate_two_point,
 )
+from odmr_bench.estimators.two_point_tracker import CalibratedTwoPointTracker
 from odmr_bench.estimators.two_point_types import (
     CalibrationBudgetTreatment,
     CalibrationIdentityMode,
@@ -59,6 +60,7 @@ from odmr_bench.estimators.types import (
 from odmr_bench.estimators.warm_sweep import WarmStartedFullSweepEstimator
 
 __all__ = [
+    "CalibratedTwoPointTracker",
     "CalibrationBudgetTreatment",
     "CalibrationIdentityMode",
     "CalibrationSourceProvenance",
