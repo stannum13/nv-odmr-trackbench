@@ -267,7 +267,28 @@ reset/estimate/prospective-state transaction.
 The final bounded independent re-review reported zero Critical, Important, or
 Minor findings; the independent full repository gate passed all 1,121 tests
 and Ruff.
-Tracking steps, queries, resource building, stops, and aborts remain deferred.
+The synchronized Task 14 commit also passed the remote GitHub CI matrix on
+Python 3.11 and 3.12.
+Task 15 adds the accepted-observation and retriable instrument-failure portions
+of `step`. Each accepted flank retains its exact full and estimator-safe views,
+pre-query physical midpoint, authoritative before/after resource boundaries,
+and one canonical resource atom before the tracker is updated exactly once.
+Normal trace snapshots append in arrival order; pair timing appends only after
+the second flank, with the evaluator truth reference formed from the two actual
+instrument midpoints and the distinct public reference retained from the
+tracker result. The pair-3 regression pins the required neighboring binary64
+witnesses. An ordinary nonmutating instrument exception preserves the issued
+pending query, unchanged trace and estimate, stores its typed diagnostic while
+remaining in `tracking`, and allows an explicit retry of that exact query;
+acceptance clears the diagnostic. Transaction guards restore both exact tracker
+slots when query issuance, update, or prospective runner publication commits
+then raises, including identity-preserving process-control rethrow. Public
+evaluator resource assembly, budget/external stops, update aborts, resource-
+unavailable classification, and run-loop behavior remain deferred to Tasks
+16-17.
+The final bounded independent review reported zero Critical, Important, or
+Minor findings; the independent full repository gate passed all 1,127 tests
+and Ruff.
 
 ## Completed work
 
@@ -561,9 +582,9 @@ Tracking steps, queries, resource building, stops, and aborts remain deferred.
 
 ## Tests currently passing
 
-- `pytest`: 1121 passed.
-- Focused `tests/estimators tests/evaluation tests/emulator`: 1023 passed.
-- Task 14 runner file: 12 passed.
+- `pytest`: 1127 passed.
+- Focused `tests/estimators tests/evaluation tests/emulator`: 1029 passed.
+- Task 15 runner file: 18 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -617,6 +638,5 @@ Tracking steps, queries, resource building, stops, and aborts remain deferred.
 
 ## Next actions
 
-1. Implement Task 15 accepted tracking steps, pair timing, and retriable
-   instrument failure.
-2. Run the Task 15 per-task specification and quality review.
+1. Implement Task 16 public evaluator resource assembly.
+2. Run the Task 16 per-task specification and quality review.

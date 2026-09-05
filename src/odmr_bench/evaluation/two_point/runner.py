@@ -11,6 +11,7 @@ from typing import Literal
 import numpy as np
 
 from odmr_bench.emulator.instrument import ODMRInstrument
+from odmr_bench.emulator.observations import InstrumentObservation
 from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators.two_point_tracker import CalibratedTwoPointTracker
 from odmr_bench.estimators.two_point_types import (
@@ -19,6 +20,7 @@ from odmr_bench.estimators.two_point_types import (
     TwoPointCalibrationSource,
     TwoPointClockMapping,
     TwoPointIdentityBinding,
+    TwoPointQuery,
     TwoPointRunMetadata,
     TwoPointTrackerConfiguration,
 )
@@ -32,13 +34,21 @@ from odmr_bench.evaluation.two_point.provenance import (
     _RunTokenBinding,
 )
 from odmr_bench.evaluation.two_point.resource_accounting import (
+    _advance_full_resources,
     _zero_full_resources,
 )
 from odmr_bench.evaluation.two_point.types import (
     TwoPointCalibrationPreflightError,
     TwoPointEvaluatorInstrumentConfiguration,
+    TwoPointEvaluatorPairTiming,
     TwoPointEvaluatorRunnerState,
+    TwoPointInstrumentQueryFailure,
+    TwoPointRunnerAccepted,
+    TwoPointRunnerInstrumentFailure,
     TwoPointRunnerStartError,
+    TwoPointRunnerStateError,
+    TwoPointRunnerStepOutcome,
+    TwoPointTrackingAcquisition,
     VerifiedTwoPointCalibrationOutcome,
     VerifiedTwoPointCalibrationSuccess,
 )
@@ -241,6 +251,203 @@ class TwoPointEvaluatorRunner:
         object.__setattr__(self, "_tracker", tracker)
         object.__setattr__(self, "_state", state_after)
         return state_after
+
+    def step(self) -> TwoPointRunnerStepOutcome:
+        """Acquire and accept one pending two-point observation."""
+        state_before = self._state
+        tracker = self._tracker
+        if state_before.phase != "tracking" or tracker is None:
+            raise TwoPointRunnerStateError(
+                "step requires a runner in the tracking phase"
+            )
+
+        tracker_configuration_before_query = tracker._configuration
+        tracker_state_before_query = tracker._state
+        try:
+            query = tracker.choose_next_query()
+            if query is None:
+                raise NotImplementedError("budget-stop transition is deferred")
+            tracker_estimate_before = tracker.estimate()
+            if tracker_estimate_before.pending_query != query:
+                raise RuntimeError("tracker estimate must retain the issued query")
+
+            resources_before = self._instrument.resources
+            virtual_time_before = self._instrument.virtual_time_s
+            expected_midpoint_s = (
+                virtual_time_before
+                + state_before.instrument_configuration.frequency_overhead_s
+            ) + query.integration_time_s / 2.0
+        except BaseException:
+            _restore_tracker_slots(
+                tracker,
+                tracker_configuration_before_query,
+                tracker_state_before_query,
+            )
+            raise
+
+        try:
+            full_observation = self._instrument.query(
+                query.frequency_hz,
+                query.integration_time_s,
+            )
+        except Exception as error:
+            try:
+                resources_after = self._instrument.resources
+                virtual_time_after = self._instrument.virtual_time_s
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                exception_type, exception_message = _safe_exception_strings(
+                    error
+                )
+                failure = TwoPointInstrumentQueryFailure(
+                    query=query,
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    instrument_resources_before=resources_before,
+                    instrument_resources_after=resources_after,
+                )
+                state_after = replace(
+                    state_before,
+                    tracker_estimate=tracker_estimate_before,
+                    instrument_resources_current=resources_after,
+                    current_virtual_time_s=virtual_time_after,
+                    last_instrument_failure=failure,
+                )
+                outcome = TwoPointRunnerInstrumentFailure(
+                    kind="instrument_failure",
+                    failure=failure,
+                    state=state_after,
+                )
+            except BaseException:
+                _restore_tracker_slots(
+                    tracker,
+                    tracker_configuration_before_query,
+                    tracker_state_before_query,
+                )
+                raise
+            object.__setattr__(self, "_state", state_after)
+            return outcome
+        except BaseException:
+            _restore_tracker_slots(
+                tracker,
+                tracker_configuration_before_query,
+                tracker_state_before_query,
+            )
+            raise
+
+        tracker_configuration_before_update = tracker._configuration
+        tracker_state_before_update = tracker._state
+        try:
+            resources_after = self._instrument.resources
+            virtual_time_after = self._instrument.virtual_time_s
+            acquisition = _build_authenticated_tracking_acquisition(
+                query=query,
+                expected_midpoint_s=expected_midpoint_s,
+                full_observation=full_observation,
+                resources_before=resources_before,
+                resources_after=resources_after,
+                overhead_s=(
+                    state_before.instrument_configuration.frequency_overhead_s
+                ),
+            )
+            update = tracker.update(acquisition.safe_observation)
+
+            pair_timings = state_before.pair_timings
+            if update.completed_pair is not None:
+                first_acquisition = state_before.normal_tracking_trace[-1]
+                first_midpoint_s = first_acquisition.measurement_midpoint_s
+                second_midpoint_s = acquisition.measurement_midpoint_s
+                if first_midpoint_s is None or second_midpoint_s is None:
+                    raise RuntimeError(
+                        "accepted pair must retain both midpoints"
+                    )
+                pair = update.completed_pair
+                truth_reference_s = first_midpoint_s + (
+                    second_midpoint_s - first_midpoint_s
+                ) / 2.0
+                pair_timing = TwoPointEvaluatorPairTiming(
+                    pair_index=pair.pair_index,
+                    resonance_id=pair.resonance_id,
+                    first_measurement_midpoint_s=first_midpoint_s,
+                    second_measurement_midpoint_s=second_midpoint_s,
+                    truth_reference_timestamp_s=truth_reference_s,
+                    public_reference_timestamp_s=(
+                        pair.pair_reference_timestamp_s
+                    ),
+                    release_sequence_index=pair.release_sequence_index,
+                    release_timestamp_s=pair.release_timestamp_s,
+                )
+                pair_timings = (*pair_timings, pair_timing)
+
+            state_after = replace(
+                state_before,
+                tracker_estimate=update.estimate,
+                normal_tracking_trace=(
+                    *state_before.normal_tracking_trace,
+                    acquisition,
+                ),
+                pair_timings=pair_timings,
+                instrument_resources_current=resources_after,
+                instrument_current_sequence_index=(
+                    full_observation.sequence_index
+                ),
+                current_virtual_time_s=virtual_time_after,
+                last_instrument_failure=None,
+            )
+            outcome = TwoPointRunnerAccepted(
+                kind="accepted",
+                acquisition=acquisition,
+                update=update,
+                state=state_after,
+            )
+        except BaseException:
+            _restore_tracker_slots(
+                tracker,
+                tracker_configuration_before_update,
+                tracker_state_before_update,
+            )
+            raise
+        object.__setattr__(self, "_state", state_after)
+        return outcome
+
+
+def _build_authenticated_tracking_acquisition(
+    *,
+    query: TwoPointQuery,
+    expected_midpoint_s: float,
+    full_observation: InstrumentObservation,
+    resources_before: ResourceSnapshot,
+    resources_after: ResourceSnapshot,
+    overhead_s: float,
+) -> TwoPointTrackingAcquisition:
+    safe_observation = full_observation.estimator_view()
+    resource_delta = _advance_full_resources(
+        _zero_full_resources(),
+        full_observation,
+        overhead_s,
+    )
+    return TwoPointTrackingAcquisition(
+        resource_join_status="authenticated",
+        query=query,
+        expected_measurement_midpoint_s=expected_midpoint_s,
+        measurement_midpoint_s=expected_midpoint_s,
+        full_observation=full_observation,
+        safe_observation=safe_observation,
+        instrument_resources_before=resources_before,
+        instrument_resources_after=resources_after,
+        instrument_resource_delta=resource_delta,
+    )
+
+
+def _restore_tracker_slots(
+    tracker: CalibratedTwoPointTracker,
+    configuration: object,
+    state: object,
+) -> None:
+    object.__setattr__(tracker, "_configuration", configuration)
+    object.__setattr__(tracker, "_state", state)
 
 
 def _preflight_start_tracking(

@@ -10,18 +10,26 @@ import pytest
 from odmr_bench.dynamics import SpectralSnapshot, StationaryDynamics
 from odmr_bench.emulator import GaussianNoise
 from odmr_bench.emulator.instrument import ODMRInstrument
+from odmr_bench.emulator.observations import (
+    EstimatorObservation,
+    InstrumentObservation,
+)
 from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators import (
     CalibratedTwoPointTracker,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
+    TwoPointEstimate,
     TwoPointIdentityBinding,
     TwoPointRunMetadata,
     TwoPointTrackerConfiguration,
+    TwoPointUpdate,
     calibrate_two_point,
 )
 from odmr_bench.evaluation.two_point import (
     TwoPointEvaluatorRunner,
+    TwoPointRunnerAccepted,
+    TwoPointRunnerInstrumentFailure,
     TwoPointRunnerStartError,
     VerifiedTwoPointCalibrationSuccess,
 )
@@ -140,6 +148,47 @@ def _included_inputs(
     )
     budget = TwoPointBudgetCeiling(4, 0.02, 50_000.0, 0.024)
     return runner, instrument, tracker, calibration, success, metadata, budget
+
+
+def _conditional_tracking_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[
+    TwoPointEvaluatorRunner,
+    ODMRInstrument,
+    CalibratedTwoPointTracker,
+]:
+    _, _, success = _verified_success(
+        monkeypatch,
+        source_clock_id="source-clock",
+        tracker_clock_id="tracking-clock",
+        source_to_tracker_offset_s=-0.012,
+    )
+    configuration = TwoPointTrackerConfiguration()
+    calibration = calibrate_two_point(
+        success.source,
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    instrument = _instrument()
+    runner = TwoPointEvaluatorRunner.bind(instrument)
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="tracking-clock",
+        current_sequence_index=None,
+        current_timestamp_s=0.0,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    runner.start_tracking(
+        tracker,
+        calibration,
+        success,
+        metadata,
+        TwoPointBudgetCeiling(8, 0.04, 100_000.0, 0.048),
+        seed=20260904,
+    )
+    return runner, instrument, tracker
 
 
 def test_conditional_start_on_clean_other_runner_preserves_identity_and_zero_trace(
@@ -766,3 +815,393 @@ def test_start_base_exception_restores_exact_tracker_slots_and_reraises(
     assert instrument.resources == resources_before
     assert instrument.virtual_time_s == time_before
     assert query_calls == 0
+
+
+def test_step_accepts_first_and_second_sides_and_records_pair_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, _ = _conditional_tracking_inputs(monkeypatch)
+    original_query = ODMRInstrument.query
+    original_update = CalibratedTwoPointTracker.update
+    query_entries: list[tuple[ResourceSnapshot, float, float, float]] = []
+    update_entries: list[tuple[TwoPointEstimate, EstimatorObservation]] = []
+
+    def query_spy(
+        self: ODMRInstrument,
+        frequency_hz: float,
+        integration_time_s: float,
+    ) -> InstrumentObservation:
+        query_entries.append(
+            (
+                self.resources,
+                self.virtual_time_s,
+                frequency_hz,
+                integration_time_s,
+            )
+        )
+        return original_query(self, frequency_hz, integration_time_s)
+
+    def update_spy(
+        self: CalibratedTwoPointTracker,
+        observation: EstimatorObservation,
+    ) -> TwoPointUpdate:
+        update_entries.append((self.estimate(), observation))
+        return original_update(self, observation)
+
+    monkeypatch.setattr(ODMRInstrument, "query", query_spy)
+    monkeypatch.setattr(CalibratedTwoPointTracker, "update", update_spy)
+
+    first = runner.step()
+
+    assert type(first) is TwoPointRunnerAccepted
+    first_query = first.acquisition.query
+    first_observation = first.acquisition.full_observation
+    first_safe = first.acquisition.safe_observation
+    first_delta = ResourceSnapshot(
+        observations=1,
+        integration_time_s=first_observation.integration_time_s,
+        nominal_exposure_photons=first_observation.nominal_exposure_photons,
+        expected_photons=first_observation.expected_photons,
+        realized_photons=0,
+        observations_without_realized_counts=1,
+        virtual_elapsed_time_s=(
+            instrument.frequency_overhead_s
+            + first_observation.integration_time_s
+        ),
+    )
+    assert first.kind == "accepted"
+    assert first_query.side == "minus"
+    assert first.acquisition.resource_join_status == "authenticated"
+    assert first.acquisition.expected_measurement_midpoint_s == 0.0035
+    assert first.acquisition.measurement_midpoint_s == 0.0035
+    assert first.acquisition.instrument_resources_before == ResourceSnapshot(
+        0, 0.0, 0.0, 0.0, 0, 0, 0.0
+    )
+    assert first.acquisition.instrument_resources_after == first_delta
+    assert first.acquisition.instrument_resource_delta == first_delta
+    assert first_observation.estimator_view() == first_safe
+    assert first_safe is first.update.observation
+    assert first_query is first.update.query
+    assert first.update.completed_pair is None
+    assert first.state is runner.state
+    assert first.state.tracker_estimate is first.update.estimate
+    assert first.state.normal_tracking_trace == (first.acquisition,)
+    assert first.state.normal_tracking_trace[0] is first.acquisition
+    assert first.state.pair_timings == ()
+    assert first.state.instrument_resources_current == first_delta
+    assert first.state.instrument_current_sequence_index == 0
+    assert first.state.current_virtual_time_s == 0.006
+    assert first.state.last_instrument_failure is None
+    assert update_entries[0][0].pending_query is first_query
+    assert update_entries[0][1] is first_safe
+
+    second = runner.step()
+
+    assert type(second) is TwoPointRunnerAccepted
+    second_query = second.acquisition.query
+    second_observation = second.acquisition.full_observation
+    second_safe = second.acquisition.safe_observation
+    timing = second.state.pair_timings[0]
+    pair = second.update.completed_pair
+    assert second.kind == "accepted"
+    assert second_query.side == "plus"
+    assert second.acquisition.resource_join_status == "authenticated"
+    assert second.acquisition.expected_measurement_midpoint_s == 0.0095
+    assert second.acquisition.measurement_midpoint_s == 0.0095
+    assert second.acquisition.instrument_resources_before == first_delta
+    assert second.acquisition.instrument_resources_after == instrument.resources
+    assert second.acquisition.instrument_resource_delta.observations == 1
+    assert second.acquisition.instrument_resource_delta.integration_time_s == 0.005
+    assert second.acquisition.instrument_resource_delta.virtual_elapsed_time_s == 0.006
+    assert second_observation.estimator_view() == second_safe
+    assert second_safe is second.update.observation
+    assert second_query is second.update.query
+    assert pair is not None
+    assert pair.pair_index == 0
+    assert pair.resonance_id == "r0"
+    assert second.state is runner.state
+    assert second.state.tracker_estimate is second.update.estimate
+    assert second.state.normal_tracking_trace == (
+        first.acquisition,
+        second.acquisition,
+    )
+    assert second.state.normal_tracking_trace[0] is first.acquisition
+    assert second.state.normal_tracking_trace[1] is second.acquisition
+    assert len(second.state.pair_timings) == 1
+    assert timing.pair_index == pair.pair_index
+    assert timing.resonance_id == pair.resonance_id
+    assert timing.first_measurement_midpoint_s == 0.0035
+    assert timing.second_measurement_midpoint_s == 0.0095
+    assert timing.truth_reference_timestamp_s == (
+        0.0035 + (0.0095 - 0.0035) / 2.0
+    )
+    assert timing.public_reference_timestamp_s == pair.pair_reference_timestamp_s
+    assert timing.release_sequence_index == second_observation.sequence_index == 1
+    assert timing.release_timestamp_s == second_observation.timestamp_s == 0.012
+    assert second.state.instrument_resources_current == instrument.resources
+    assert second.state.instrument_current_sequence_index == 1
+    assert second.state.current_virtual_time_s == 0.012
+    assert second.state.last_instrument_failure is None
+    assert first.state.normal_tracking_trace == (first.acquisition,)
+    assert first.state.pair_timings == ()
+    assert update_entries[1][0].pending_query is second_query
+    assert update_entries[1][0].accepted_observations == 1
+    assert update_entries[1][1] is second_safe
+    assert len(update_entries) == 2
+    assert query_entries == [
+        (
+            ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0),
+            0.0,
+            first_query.frequency_hz,
+            first_query.integration_time_s,
+        ),
+        (
+            first_delta,
+            0.006,
+            second_query.frequency_hz,
+            second_query.integration_time_s,
+        ),
+    ]
+
+
+def test_pair_three_truth_and_public_references_use_distinct_associations(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _conditional_tracking_inputs(monkeypatch)
+
+    outcomes = tuple(runner.step() for _ in range(8))
+
+    assert all(type(outcome) is TwoPointRunnerAccepted for outcome in outcomes)
+    pair_three = outcomes[-1]
+    timing = pair_three.state.pair_timings[3]
+    pair = pair_three.update.completed_pair
+    first_acquisition = pair_three.state.normal_tracking_trace[6]
+    second_acquisition = pair_three.state.normal_tracking_trace[7]
+    assert pair is not None
+    assert timing.pair_index == pair.pair_index == 3
+    assert timing.resonance_id == pair.resonance_id == "r3"
+    assert timing.first_measurement_midpoint_s == (
+        first_acquisition.measurement_midpoint_s
+    )
+    assert timing.second_measurement_midpoint_s == (
+        second_acquisition.measurement_midpoint_s
+    )
+    assert (
+        timing.truth_reference_timestamp_s.hex()
+        == "0x1.5c28f5c28f5c4p-5"
+    )
+    assert (
+        timing.public_reference_timestamp_s.hex()
+        == "0x1.5c28f5c28f5c2p-5"
+    )
+    assert (
+        timing.truth_reference_timestamp_s
+        != timing.public_reference_timestamp_s
+    )
+    assert timing.public_reference_timestamp_s == pair.pair_reference_timestamp_s
+    assert timing.release_sequence_index == pair.release_sequence_index == 7
+    assert (
+        timing.release_timestamp_s
+        == pair.release_timestamp_s
+        == second_acquisition.full_observation.timestamp_s
+        == 0.048
+    )
+    assert timing.release_timestamp_s.hex() == "0x1.89374bc6a7efap-5"
+
+
+def test_instrument_exception_preserves_identical_pending_query_and_can_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, tracker = _conditional_tracking_inputs(monkeypatch)
+    original_query = ODMRInstrument.query
+    original_update = CalibratedTwoPointTracker.update
+    runner_state_before = runner.state
+    resources_before = instrument.resources
+    time_before = instrument.virtual_time_s
+    query_entries: list[
+        tuple[TwoPointEstimate, ResourceSnapshot, float, float, float]
+    ] = []
+    update_calls: list[EstimatorObservation] = []
+    transient = RuntimeError("transient instrument fault")
+
+    def flaky_query(
+        self: ODMRInstrument,
+        frequency_hz: float,
+        integration_time_s: float,
+    ) -> InstrumentObservation:
+        query_entries.append(
+            (
+                tracker.estimate(),
+                self.resources,
+                self.virtual_time_s,
+                frequency_hz,
+                integration_time_s,
+            )
+        )
+        if len(query_entries) == 1:
+            raise transient
+        return original_query(self, frequency_hz, integration_time_s)
+
+    def update_spy(
+        self: CalibratedTwoPointTracker,
+        observation: EstimatorObservation,
+    ) -> TwoPointUpdate:
+        update_calls.append(observation)
+        return original_update(self, observation)
+
+    monkeypatch.setattr(ODMRInstrument, "query", flaky_query)
+    monkeypatch.setattr(CalibratedTwoPointTracker, "update", update_spy)
+
+    failed = runner.step()
+
+    assert type(failed) is TwoPointRunnerInstrumentFailure
+    pending_query = failed.failure.query
+    estimate_at_failure = query_entries[0][0]
+    assert failed.kind == "instrument_failure"
+    assert failed.failure.exception_type == "RuntimeError"
+    assert failed.failure.exception_message == "transient instrument fault"
+    assert failed.failure.instrument_resources_before == resources_before
+    assert failed.failure.instrument_resources_after == resources_before
+    assert failed.state is runner.state
+    assert failed.state.phase == "tracking"
+    assert failed.state.last_instrument_failure is failed.failure
+    assert failed.state.tracker_estimate is estimate_at_failure
+    assert failed.state.tracker_estimate is tracker.estimate()
+    assert failed.state.tracker_estimate.pending_query is pending_query
+    assert (
+        failed.state.normal_tracking_trace
+        is runner_state_before.normal_tracking_trace
+    )
+    assert failed.state.normal_tracking_trace == ()
+    assert failed.state.pair_timings is runner_state_before.pair_timings
+    assert failed.state.pair_timings == ()
+    assert failed.state.instrument_resources_current == resources_before
+    assert failed.state.instrument_current_sequence_index is None
+    assert failed.state.current_virtual_time_s == time_before
+    assert instrument.resources == resources_before
+    assert instrument.virtual_time_s == time_before
+    assert update_calls == []
+
+    accepted = runner.step()
+
+    assert type(accepted) is TwoPointRunnerAccepted
+    assert accepted.acquisition.query is pending_query
+    assert accepted.update.query is pending_query
+    assert query_entries[1][0] is estimate_at_failure
+    assert query_entries[1][3:] == query_entries[0][3:]
+    assert accepted.state is runner.state
+    assert accepted.state.phase == "tracking"
+    assert accepted.state.last_instrument_failure is None
+    assert accepted.state.normal_tracking_trace == (accepted.acquisition,)
+    assert accepted.state.pair_timings == ()
+    assert accepted.state.tracker_estimate is accepted.update.estimate
+    assert accepted.state.tracker_estimate.accepted_observations == 1
+    assert accepted.state.tracker_estimate.pending_query is None
+    assert update_calls == [accepted.acquisition.safe_observation]
+    assert failed.state.last_instrument_failure is failed.failure
+    assert failed.state.normal_tracking_trace == ()
+
+
+@pytest.mark.parametrize(
+    ("case", "failure"),
+    [
+        ("query_issuance", KeyboardInterrupt("query issuance interrupted")),
+        ("tracker_update", RuntimeError("update committed then failed")),
+        ("runner_state", SystemExit("state constructed then interrupted")),
+    ],
+)
+def test_step_transaction_restores_tracker_slots_and_reraises_identically(
+    case: str,
+    failure: BaseException,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import runner as runner_module
+
+    runner, instrument, tracker = _conditional_tracking_inputs(monkeypatch)
+    runner_state_before = runner.state
+    resources_before = instrument.resources
+    time_before = instrument.virtual_time_s
+    configuration_before = tracker._configuration
+    tracker_state_before = tracker._state
+    original_choose = CalibratedTwoPointTracker.choose_next_query
+    original_update = CalibratedTwoPointTracker.update
+    update_checkpoint: list[tuple[object, object]] = []
+
+    if case == "query_issuance":
+
+        def choose_then_interrupt(self: CalibratedTwoPointTracker) -> object:
+            original_choose(self)
+            object.__setattr__(
+                self,
+                "_configuration",
+                replace(self._configuration, proportional_gain=0.5),
+            )
+            raise failure
+
+        monkeypatch.setattr(
+            CalibratedTwoPointTracker,
+            "choose_next_query",
+            choose_then_interrupt,
+        )
+    else:
+
+        def update_spy(
+            self: CalibratedTwoPointTracker,
+            observation: EstimatorObservation,
+        ) -> TwoPointUpdate:
+            update_checkpoint.append((self._configuration, self._state))
+            update = original_update(self, observation)
+            if case == "tracker_update":
+                object.__setattr__(
+                    self,
+                    "_configuration",
+                    replace(self._configuration, proportional_gain=0.5),
+                )
+                raise failure
+            return update
+
+        monkeypatch.setattr(CalibratedTwoPointTracker, "update", update_spy)
+
+        if case == "runner_state":
+            original_replace = runner_module.replace
+
+            def replace_then_interrupt(
+                instance: object,
+                **changes: object,
+            ) -> object:
+                constructed = original_replace(instance, **changes)
+                if "normal_tracking_trace" in changes:
+                    object.__setattr__(
+                        tracker,
+                        "_configuration",
+                        replace(
+                            tracker._configuration,
+                            proportional_gain=0.5,
+                        ),
+                    )
+                    raise failure
+                return constructed
+
+            monkeypatch.setattr(runner_module, "replace", replace_then_interrupt)
+
+    with pytest.raises(type(failure)) as raised:
+        runner.step()
+
+    assert raised.value is failure
+    assert runner.state is runner_state_before
+    assert runner.state.normal_tracking_trace is (
+        runner_state_before.normal_tracking_trace
+    )
+    assert runner.state.pair_timings is runner_state_before.pair_timings
+    if case == "query_issuance":
+        assert tracker._configuration is configuration_before
+        assert tracker._state is tracker_state_before
+        assert instrument.resources == resources_before
+        assert instrument.virtual_time_s == time_before
+    else:
+        assert len(update_checkpoint) == 1
+        assert tracker._configuration is update_checkpoint[0][0]
+        assert tracker._state is update_checkpoint[0][1]
+        assert tracker.pending_query is not None
+        assert instrument.resources.observations == resources_before.observations + 1
+        assert instrument.virtual_time_s > time_before

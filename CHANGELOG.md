@@ -70,6 +70,21 @@ once a package version is introduced.
 
 ### Added
 
+- Added the accepted and retriable-failure portions of the evaluator runner's
+  `step` transition. Each accepted query is snapshotted after issuance, records
+  the actual instrument midpoint computed before acquisition, authenticates
+  one canonical full-resource atom, updates the tracker exactly once, and
+  appends an immutable normal trace entry. Completed pairs alone append timing:
+  evaluator truth uses the ordered mean of actual midpoints while the public
+  reference remains the tracker's separately reconstructed value, including
+  the exact pair-3 neighboring-ULP witnesses. An ordinary nonmutating query
+  exception retains the identical pending query and estimate, stores a typed
+  failure without changing the normal trace or physical boundary, and permits
+  explicit retry; later acceptance clears that diagnostic. Query-issuance,
+  update, and prospective-state transaction guards restore both exact tracker
+  slots on commit-then-raise faults and rethrow process-control exceptions
+  unchanged. Public resource building and all budget, external-stop, abort,
+  resource-unavailable, and run-loop behavior remain deferred.
 - Added the evaluator runner's exact `start_tracking` join and zero-trace
   tracking transition. Clean ready runners accept only an authentic verified
   success from another runner under conditional-free-precalibration treatment;
