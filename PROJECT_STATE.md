@@ -187,6 +187,19 @@ runner, acquisition-loop, fit, registry, or resource-builder behavior. The
 final independent review approved Task 11 with zero Critical or Important
 findings and retained one test-only AST-sentinel Minor for final branch-review
 triage.
+Task 12 adds the exact ten evaluator resource, abort, runner-state, and typed
+step/run outcome names. The eight new records are frozen/slotted and enforce
+only locally represented structure: full-observation tuple and snapshot types,
+independent zero-or-one incomplete/unaccepted counts, separate accepted charged
+prefix and final charged resources, closed abort reasons and exception/acquisition
+matrices, equal abort-time tracker estimates, all seven runner phases, exact
+successful-calibration identity where both calibration fields are populated,
+trace/timing cardinality, terminal abort and instrument-failure placement, and
+outcome kind/state compatibility. Resource replay, instrument/run-token
+authentication, registry membership, transition execution, and resource-builder
+joins remain assigned to later tasks. The final independent review approved
+Task 12 with zero Critical or Important findings and retained five test-only
+mutation-strength notes for final branch-review triage.
 
 ## Completed work
 
@@ -480,7 +493,7 @@ triage.
 
 ## Tests currently passing
 
-- `pytest`: 1041 passed.
+- `pytest`: 1050 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -527,9 +540,12 @@ triage.
 - The Task 11 test-only Task 10 delegation sentinel counts direct imported
   helper calls but does not yet detect a module-qualified helper call; current
   production uses only the reviewed direct method-local calls.
+- Task 12's committed tests do not mutation-pin every schema metadata field,
+  legal resource equality/treatment branch, isolated abort join, seven-phase
+  over/under-validation branch, or equal-but-distinct outcome identity join;
+  independent review found the production contracts conformant.
 
 ## Next actions
 
-1. Implement Task 12 evaluator resource, abort, runner-state, and outcome
-   contracts.
-2. Run the Task 12 per-task spec and quality review before advancing.
+1. Implement Task 13 runner binding and verified calibration acquisition.
+2. Run the Task 13 per-task spec and quality review before advancing.

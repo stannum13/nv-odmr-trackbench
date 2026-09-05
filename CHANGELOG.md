@@ -70,6 +70,19 @@ once a package version is introduced.
 
 ### Added
 
+- Added frozen/slotted evaluator resource, abort, runner-state, and typed
+  step/run outcome contracts for calibrated two-point runs. Resource records
+  retain separate accepted-charged-prefix and final-charged snapshots while
+  independently representing incomplete and unaccepted zero-or-one counts.
+  Abort records close the unavailable-versus-authenticated acquisition and
+  exception matrix and preserve equal tracker snapshots. Runner states close
+  all seven local phases, calibration-success identity, trace/timing
+  cardinality, diagnostic placement, and terminal abort structure; outcome
+  records enforce exact kind/state compatibility. These constructors add no
+  runner execution, instrument authentication, registry, or resource-builder
+  behavior. The final task review reported zero Critical or Important findings
+  and retained five test-only mutation-strength notes for final branch-review
+  triage.
 - Added frozen/slotted verified-calibration outcome, tracking-acquisition,
   evaluator-pair-timing, and instrument-query-failure contracts. Outcome
   constructors close their success/failure matrices, align full/safe/midpoint

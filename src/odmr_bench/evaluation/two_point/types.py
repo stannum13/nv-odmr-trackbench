@@ -15,9 +15,13 @@ from odmr_bench.emulator.observations import (
 )
 from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators.two_point_types import (
+    CalibrationBudgetTreatment,
     PublicAcquisitionResources,
+    TwoPointCalibration,
     TwoPointCalibrationSource,
+    TwoPointEstimate,
     TwoPointQuery,
+    TwoPointUpdate,
 )
 from odmr_bench.estimators.types import SpectrumFitResult
 
@@ -57,6 +61,21 @@ ResourceJoinMismatchField: TypeAlias = Literal[
     "realized_photons",
     "observations_without_realized_counts",
     "virtual_elapsed_time_s",
+]
+TwoPointAbortReason: TypeAlias = Literal[
+    "resource_join_unavailable",
+    "tracker_observation_validation_error",
+    "tracker_update_construction_error",
+    "tracker_update_unexpected_error",
+]
+TwoPointRunnerPhase: TypeAlias = Literal[
+    "ready",
+    "calibration_succeeded",
+    "calibration_failed",
+    "tracking",
+    "budget_stopped",
+    "externally_stopped",
+    "aborted",
 ]
 
 _VERIFIED_CALIBRATION_PREFLIGHT_CODES = frozenset(
@@ -100,6 +119,25 @@ _RESOURCE_JOIN_MISMATCH_FIELDS = (
     "realized_photons",
     "observations_without_realized_counts",
     "virtual_elapsed_time_s",
+)
+_TWO_POINT_ABORT_REASONS = frozenset(
+    {
+        "resource_join_unavailable",
+        "tracker_observation_validation_error",
+        "tracker_update_construction_error",
+        "tracker_update_unexpected_error",
+    }
+)
+_TWO_POINT_RUNNER_PHASES = frozenset(
+    {
+        "ready",
+        "calibration_succeeded",
+        "calibration_failed",
+        "tracking",
+        "budget_stopped",
+        "externally_stopped",
+        "aborted",
+    }
 )
 
 
@@ -336,6 +374,34 @@ def _nonempty_string(value: object, name: str) -> str:
     if not canonical:
         raise ValueError(f"{name} must be nonempty")
     return canonical
+
+
+def _exact_record_sequence(
+    values: object, name: str, record_type: type
+) -> tuple[object, ...]:
+    if not isinstance(values, (tuple, list)):
+        raise TypeError(f"{name} must be an ordered sequence")
+    canonical = tuple(values)
+    if not all(type(value) is record_type for value in canonical):
+        raise TypeError(f"{name} must contain exact {record_type.__name__} values")
+    return canonical
+
+
+def _binary_count(value: object, name: str) -> int:
+    canonical = _nonnegative_int(value, name)
+    if canonical not in {0, 1}:
+        raise ValueError(f"{name} must be zero or one")
+    return canonical
+
+
+def _outcome_state(
+    value: object, *, phase: TwoPointRunnerPhase
+) -> TwoPointEvaluatorRunnerState:
+    if type(value) is not TwoPointEvaluatorRunnerState:
+        raise TypeError("state must be a TwoPointEvaluatorRunnerState")
+    if value.phase != phase:
+        raise ValueError(f"outcome requires {phase} state")
+    return value
 
 
 class TwoPointCalibrationPreflightError(ValueError):
@@ -837,3 +903,457 @@ class TwoPointInstrumentQueryFailure:
             )
         object.__setattr__(self, "exception_type", exception_type)
         object.__setattr__(self, "exception_message", exception_message)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointEvaluatorResources:
+    """Lossless evaluator-owned resources for one tracking run."""
+
+    calibration_observations: tuple[InstrumentObservation, ...]
+    accepted_tracking_observations: tuple[InstrumentObservation, ...]
+    unaccepted_tracking_observations: tuple[InstrumentObservation, ...]
+    calibration_resources: ResourceSnapshot
+    accepted_tracking_resources: ResourceSnapshot
+    unaccepted_tracking_resources: ResourceSnapshot
+    tracking_resources: ResourceSnapshot
+    accepted_charged_resources: ResourceSnapshot
+    charged_resources: ResourceSnapshot
+    calibration_budget_treatment: CalibrationBudgetTreatment
+    incomplete_pair_observations: Literal[0, 1]
+    unaccepted_observations: Literal[0, 1]
+
+    def __post_init__(self) -> None:
+        observation_fields = (
+            "calibration_observations",
+            "accepted_tracking_observations",
+            "unaccepted_tracking_observations",
+        )
+        for name in observation_fields:
+            object.__setattr__(
+                self,
+                name,
+                _exact_record_sequence(
+                    getattr(self, name), name, InstrumentObservation
+                ),
+            )
+        resource_fields = (
+            "calibration_resources",
+            "accepted_tracking_resources",
+            "unaccepted_tracking_resources",
+            "tracking_resources",
+            "accepted_charged_resources",
+            "charged_resources",
+        )
+        for name in resource_fields:
+            if type(getattr(self, name)) is not ResourceSnapshot:
+                raise TypeError(f"{name} must be a ResourceSnapshot")
+        calibration_budget_treatment = _closed_literal(
+            self.calibration_budget_treatment,
+            "calibration_budget_treatment",
+            frozenset(
+                {"included_same_run", "conditional_free_precalibration"}
+            ),
+        )
+        incomplete_pair_observations = _binary_count(
+            self.incomplete_pair_observations, "incomplete_pair_observations"
+        )
+        unaccepted_observations = _binary_count(
+            self.unaccepted_observations, "unaccepted_observations"
+        )
+        object.__setattr__(
+            self, "calibration_budget_treatment", calibration_budget_treatment
+        )
+        object.__setattr__(
+            self, "incomplete_pair_observations", incomplete_pair_observations
+        )
+        object.__setattr__(self, "unaccepted_observations", unaccepted_observations)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointAbortedRun:
+    """Terminal evidence for one returned but unaccepted acquisition."""
+
+    reason: TwoPointAbortReason
+    exception_type: str | None
+    exception_message: str | None
+    unaccepted_acquisition: (
+        TwoPointTrackingAcquisition
+        | TwoPointResourceJoinUnavailableAcquisition
+    )
+    unaccepted_observation_count: Literal[1]
+    tracker_estimate_before: TwoPointEstimate
+    tracker_estimate_after: TwoPointEstimate
+
+    def __post_init__(self) -> None:
+        reason = _closed_literal(
+            self.reason, "reason", _TWO_POINT_ABORT_REASONS
+        )
+        unavailable = reason == "resource_join_unavailable"
+        expected_acquisition_type = (
+            TwoPointResourceJoinUnavailableAcquisition
+            if unavailable
+            else TwoPointTrackingAcquisition
+        )
+        if type(self.unaccepted_acquisition) is not expected_acquisition_type:
+            raise ValueError("unaccepted acquisition must match abort reason")
+        exception_type, exception_message = _optional_exception_strings(
+            self.exception_type,
+            self.exception_message,
+            required=not unavailable,
+        )
+        unaccepted_observation_count = _nonnegative_int(
+            self.unaccepted_observation_count, "unaccepted_observation_count"
+        )
+        if unaccepted_observation_count != 1:
+            raise ValueError("unaccepted_observation_count must be one")
+        if type(self.tracker_estimate_before) is not TwoPointEstimate:
+            raise TypeError("tracker_estimate_before must be a TwoPointEstimate")
+        if type(self.tracker_estimate_after) is not TwoPointEstimate:
+            raise TypeError("tracker_estimate_after must be a TwoPointEstimate")
+        if self.tracker_estimate_before != self.tracker_estimate_after:
+            raise ValueError("tracker estimates before and after abort must be equal")
+        if (
+            self.tracker_estimate_before.pending_query is None
+            or self.tracker_estimate_before.pending_query
+            != self.unaccepted_acquisition.query
+        ):
+            raise ValueError(
+                "abort tracker estimates must retain the unaccepted pending query"
+            )
+        object.__setattr__(self, "reason", reason)
+        object.__setattr__(self, "exception_type", exception_type)
+        object.__setattr__(self, "exception_message", exception_message)
+        object.__setattr__(
+            self, "unaccepted_observation_count", unaccepted_observation_count
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointEvaluatorRunnerState:
+    """Frozen audit snapshot of the evaluator runner state machine."""
+
+    phase: TwoPointRunnerPhase
+    run_token: VerifiedInstrumentRunToken
+    instrument_configuration: TwoPointEvaluatorInstrumentConfiguration
+    calibration_outcome: VerifiedTwoPointCalibrationOutcome | None
+    verified_calibration: VerifiedTwoPointCalibrationSuccess | None
+    calibration: TwoPointCalibration | None
+    tracker_estimate: TwoPointEstimate | None
+    normal_tracking_trace: tuple[TwoPointTrackingAcquisition, ...]
+    pair_timings: tuple[TwoPointEvaluatorPairTiming, ...]
+    instrument_resources_at_bind: ResourceSnapshot
+    tracking_resources_before: ResourceSnapshot | None
+    instrument_resources_current: ResourceSnapshot
+    instrument_current_sequence_index: int | None
+    current_virtual_time_s: float
+    last_instrument_failure: TwoPointInstrumentQueryFailure | None
+    terminal_abort: TwoPointAbortedRun | None
+
+    def __post_init__(self) -> None:
+        phase = _closed_literal(self.phase, "phase", _TWO_POINT_RUNNER_PHASES)
+        if type(self.run_token) is not VerifiedInstrumentRunToken:
+            raise TypeError("run_token must be a VerifiedInstrumentRunToken")
+        if type(
+            self.instrument_configuration
+        ) is not TwoPointEvaluatorInstrumentConfiguration:
+            raise TypeError(
+                "instrument_configuration must be a "
+                "TwoPointEvaluatorInstrumentConfiguration"
+            )
+        if self.calibration_outcome is not None and type(
+            self.calibration_outcome
+        ) not in {
+            VerifiedTwoPointCalibrationSuccess,
+            VerifiedTwoPointCalibrationFailure,
+        }:
+            raise TypeError("calibration_outcome has an invalid type")
+        if self.verified_calibration is not None and type(
+            self.verified_calibration
+        ) is not VerifiedTwoPointCalibrationSuccess:
+            raise TypeError(
+                "verified_calibration must be a VerifiedTwoPointCalibrationSuccess"
+            )
+        if self.calibration is not None and type(
+            self.calibration
+        ) is not TwoPointCalibration:
+            raise TypeError("calibration must be a TwoPointCalibration")
+        if self.tracker_estimate is not None and type(
+            self.tracker_estimate
+        ) is not TwoPointEstimate:
+            raise TypeError("tracker_estimate must be a TwoPointEstimate")
+        normal_tracking_trace = _exact_record_sequence(
+            self.normal_tracking_trace,
+            "normal_tracking_trace",
+            TwoPointTrackingAcquisition,
+        )
+        pair_timings = _exact_record_sequence(
+            self.pair_timings, "pair_timings", TwoPointEvaluatorPairTiming
+        )
+        if type(self.instrument_resources_at_bind) is not ResourceSnapshot:
+            raise TypeError("instrument_resources_at_bind must be a ResourceSnapshot")
+        if self.tracking_resources_before is not None and type(
+            self.tracking_resources_before
+        ) is not ResourceSnapshot:
+            raise TypeError("tracking_resources_before must be a ResourceSnapshot")
+        if type(self.instrument_resources_current) is not ResourceSnapshot:
+            raise TypeError("instrument_resources_current must be a ResourceSnapshot")
+        instrument_current_sequence_index = (
+            None
+            if self.instrument_current_sequence_index is None
+            else _nonnegative_int(
+                self.instrument_current_sequence_index,
+                "instrument_current_sequence_index",
+            )
+        )
+        current_virtual_time_s = _nonnegative_float(
+            self.current_virtual_time_s, "current_virtual_time_s"
+        )
+        if self.last_instrument_failure is not None and type(
+            self.last_instrument_failure
+        ) is not TwoPointInstrumentQueryFailure:
+            raise TypeError(
+                "last_instrument_failure must be a TwoPointInstrumentQueryFailure"
+            )
+        if self.terminal_abort is not None and type(
+            self.terminal_abort
+        ) is not TwoPointAbortedRun:
+            raise TypeError("terminal_abort must be a TwoPointAbortedRun")
+
+        active_phase = phase in {
+            "tracking",
+            "budget_stopped",
+            "externally_stopped",
+            "aborted",
+        }
+        if phase == "ready":
+            if any(
+                value is not None
+                for value in (
+                    self.calibration_outcome,
+                    self.verified_calibration,
+                    self.calibration,
+                    self.tracker_estimate,
+                    self.tracking_resources_before,
+                )
+            ):
+                raise ValueError("ready phase must not contain run state")
+        elif phase == "calibration_failed":
+            if type(
+                self.calibration_outcome
+            ) is not VerifiedTwoPointCalibrationFailure or any(
+                value is not None
+                for value in (
+                    self.verified_calibration,
+                    self.calibration,
+                    self.tracker_estimate,
+                    self.tracking_resources_before,
+                )
+            ):
+                raise ValueError(
+                    "calibration_failed phase requires only one failure outcome"
+                )
+        elif phase == "calibration_succeeded":
+            if (
+                type(self.calibration_outcome)
+                is not VerifiedTwoPointCalibrationSuccess
+                or self.verified_calibration is not self.calibration_outcome
+                or any(
+                    value is not None
+                    for value in (
+                        self.calibration,
+                        self.tracker_estimate,
+                        self.tracking_resources_before,
+                    )
+                )
+            ):
+                raise ValueError(
+                    "calibration_succeeded phase requires the exact success outcome"
+                )
+        elif active_phase:
+            if (
+                type(self.verified_calibration)
+                is not VerifiedTwoPointCalibrationSuccess
+                or type(self.calibration) is not TwoPointCalibration
+                or type(self.tracker_estimate) is not TwoPointEstimate
+                or type(self.tracking_resources_before) is not ResourceSnapshot
+            ):
+                raise ValueError("active runner phases require tracking state")
+            if self.calibration_outcome is not None and (
+                type(self.calibration_outcome)
+                is not VerifiedTwoPointCalibrationSuccess
+                or self.calibration_outcome is not self.verified_calibration
+            ):
+                raise ValueError(
+                    "stored calibration outcome must be the exact verified success"
+                )
+            if (
+                len(normal_tracking_trace)
+                != self.tracker_estimate.accepted_observations
+            ):
+                raise ValueError(
+                    "normal tracking trace must match accepted observation count"
+                )
+            if len(pair_timings) != self.tracker_estimate.completed_pairs:
+                raise ValueError("pair timings must match completed pair history")
+            stopped = self.tracker_estimate.stopped_reason is not None
+            if stopped != (phase == "budget_stopped"):
+                raise ValueError("budget-stopped phase must match tracker stop state")
+
+        if not active_phase and (normal_tracking_trace or pair_timings):
+            raise ValueError("pre-tracking phases must not contain tracking history")
+        if (self.terminal_abort is not None) != (phase == "aborted"):
+            raise ValueError("terminal_abort must be present exactly when aborted")
+        if self.last_instrument_failure is not None and phase not in {
+            "tracking",
+            "externally_stopped",
+        }:
+            raise ValueError(
+                "instrument failure may appear only while tracking or "
+                "externally stopped"
+            )
+        if self.last_instrument_failure is not None and (
+            self.tracker_estimate is None
+            or self.tracker_estimate.pending_query
+            != self.last_instrument_failure.query
+        ):
+            raise ValueError(
+                "instrument failure must match the retained pending query"
+            )
+        if phase == "aborted" and (
+            self.terminal_abort is None
+            or self.terminal_abort.tracker_estimate_after
+            != self.tracker_estimate
+        ):
+            raise ValueError("terminal abort must match the runner estimate")
+        object.__setattr__(self, "phase", phase)
+        object.__setattr__(self, "normal_tracking_trace", normal_tracking_trace)
+        object.__setattr__(self, "pair_timings", pair_timings)
+        object.__setattr__(
+            self,
+            "instrument_current_sequence_index",
+            instrument_current_sequence_index,
+        )
+        object.__setattr__(self, "current_virtual_time_s", current_virtual_time_s)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointRunnerAccepted:
+    """One acquisition accepted by the tracker."""
+
+    kind: Literal["accepted"]
+    acquisition: TwoPointTrackingAcquisition
+    update: TwoPointUpdate
+    state: TwoPointEvaluatorRunnerState
+
+    def __post_init__(self) -> None:
+        kind = _exact_discriminator(self.kind, "kind", "accepted")
+        if type(self.acquisition) is not TwoPointTrackingAcquisition:
+            raise TypeError("acquisition must be a TwoPointTrackingAcquisition")
+        if type(self.update) is not TwoPointUpdate:
+            raise TypeError("update must be a TwoPointUpdate")
+        state = _outcome_state(self.state, phase="tracking")
+        if (
+            self.acquisition.query != self.update.query
+            or self.acquisition.safe_observation != self.update.observation
+            or state.tracker_estimate is not self.update.estimate
+            or not state.normal_tracking_trace
+            or state.normal_tracking_trace[-1] is not self.acquisition
+        ):
+            raise ValueError("accepted outcome must match its tracking state")
+        object.__setattr__(self, "kind", kind)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointRunnerInstrumentFailure:
+    """One atomic instrument query failure."""
+
+    kind: Literal["instrument_failure"]
+    failure: TwoPointInstrumentQueryFailure
+    state: TwoPointEvaluatorRunnerState
+
+    def __post_init__(self) -> None:
+        kind = _exact_discriminator(
+            self.kind, "kind", "instrument_failure"
+        )
+        if type(self.failure) is not TwoPointInstrumentQueryFailure:
+            raise TypeError("failure must be a TwoPointInstrumentQueryFailure")
+        state = _outcome_state(self.state, phase="tracking")
+        if state.last_instrument_failure is not self.failure:
+            raise ValueError("instrument failure outcome must match tracking state")
+        object.__setattr__(self, "kind", kind)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointRunnerBudgetStopped:
+    """Terminal outcome at an unaffordable pair boundary."""
+
+    kind: Literal["budget_stopped"]
+    resources: TwoPointEvaluatorResources
+    state: TwoPointEvaluatorRunnerState
+
+    def __post_init__(self) -> None:
+        kind = _exact_discriminator(self.kind, "kind", "budget_stopped")
+        if type(self.resources) is not TwoPointEvaluatorResources:
+            raise TypeError("resources must be TwoPointEvaluatorResources")
+        _outcome_state(self.state, phase="budget_stopped")
+        object.__setattr__(self, "kind", kind)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointRunnerExternallyStopped:
+    """Terminal outcome requested by the caller."""
+
+    kind: Literal["externally_stopped"]
+    resources: TwoPointEvaluatorResources
+    state: TwoPointEvaluatorRunnerState
+
+    def __post_init__(self) -> None:
+        kind = _exact_discriminator(
+            self.kind, "kind", "externally_stopped"
+        )
+        if type(self.resources) is not TwoPointEvaluatorResources:
+            raise TypeError("resources must be TwoPointEvaluatorResources")
+        _outcome_state(self.state, phase="externally_stopped")
+        object.__setattr__(self, "kind", kind)
+
+
+@dataclass(frozen=True, slots=True)
+class TwoPointRunnerAborted:
+    """Terminal outcome after a returned acquisition cannot be accepted."""
+
+    kind: Literal["aborted"]
+    abort: TwoPointAbortedRun
+    resources: TwoPointEvaluatorResources | None
+    state: TwoPointEvaluatorRunnerState
+
+    def __post_init__(self) -> None:
+        kind = _exact_discriminator(self.kind, "kind", "aborted")
+        if type(self.abort) is not TwoPointAbortedRun:
+            raise TypeError("abort must be a TwoPointAbortedRun")
+        if self.resources is not None and type(
+            self.resources
+        ) is not TwoPointEvaluatorResources:
+            raise TypeError("resources must be TwoPointEvaluatorResources or None")
+        state = _outcome_state(self.state, phase="aborted")
+        unavailable = type(
+            self.abort.unaccepted_acquisition
+        ) is TwoPointResourceJoinUnavailableAcquisition
+        if (
+            state.terminal_abort is not self.abort
+            or unavailable != (self.resources is None)
+        ):
+            raise ValueError("aborted outcome must match its terminal state")
+        object.__setattr__(self, "kind", kind)
+
+
+TwoPointRunnerStepOutcome: TypeAlias = (
+    TwoPointRunnerAccepted
+    | TwoPointRunnerInstrumentFailure
+    | TwoPointRunnerBudgetStopped
+    | TwoPointRunnerAborted
+)
+TwoPointRunnerRunOutcome: TypeAlias = (
+    TwoPointRunnerInstrumentFailure
+    | TwoPointRunnerBudgetStopped
+    | TwoPointRunnerAborted
+)

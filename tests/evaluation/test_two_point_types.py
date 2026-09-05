@@ -55,13 +55,23 @@ def test_evaluator_primitive_names_are_public() -> None:
 
     assert tuple(two_point.__all__) == (
         "ResourceJoinMismatchField",
+        "TwoPointAbortedRun",
         "TwoPointCalibrationPreflightError",
         "TwoPointEvaluatorInstrumentConfiguration",
         "TwoPointEvaluatorPairTiming",
+        "TwoPointEvaluatorResources",
+        "TwoPointEvaluatorRunnerState",
         "TwoPointInstrumentQueryFailure",
         "TwoPointResourceJoinUnavailableAcquisition",
+        "TwoPointRunnerAborted",
+        "TwoPointRunnerAccepted",
+        "TwoPointRunnerBudgetStopped",
+        "TwoPointRunnerExternallyStopped",
+        "TwoPointRunnerInstrumentFailure",
+        "TwoPointRunnerRunOutcome",
         "TwoPointRunnerStartError",
         "TwoPointRunnerStateError",
+        "TwoPointRunnerStepOutcome",
         "TwoPointTrackingAcquisition",
         "VerifiedCalibrationQueryRequest",
         "VerifiedInstrumentRunToken",
@@ -79,17 +89,7 @@ def test_evaluator_primitive_names_are_public() -> None:
         "virtual_elapsed_time_s",
     )
     forbidden_later_names = (
-        "TwoPointAbortedRun",
-        "TwoPointEvaluatorResources",
         "TwoPointEvaluatorRunner",
-        "TwoPointEvaluatorRunnerState",
-        "TwoPointRunnerAborted",
-        "TwoPointRunnerAccepted",
-        "TwoPointRunnerBudgetStopped",
-        "TwoPointRunnerExternallyStopped",
-        "TwoPointRunnerInstrumentFailure",
-        "TwoPointRunnerRunOutcome",
-        "TwoPointRunnerStepOutcome",
         "build_two_point_evaluator_resources",
     )
     assert not any(hasattr(two_point, name) for name in forbidden_later_names)
@@ -218,6 +218,624 @@ def test_calibration_outcome_and_acquisition_names_are_public() -> None:
         assert record_class.__slots__ == tuple(
             field.name for field in fields(record_class)
         )
+
+
+def test_runner_state_and_outcome_names_are_public() -> None:
+    from odmr_bench.evaluation import two_point
+    from odmr_bench.evaluation.two_point import (
+        TwoPointAbortedRun,
+        TwoPointEvaluatorResources,
+        TwoPointEvaluatorRunnerState,
+        TwoPointRunnerAborted,
+        TwoPointRunnerAccepted,
+        TwoPointRunnerBudgetStopped,
+        TwoPointRunnerExternallyStopped,
+        TwoPointRunnerInstrumentFailure,
+        TwoPointRunnerRunOutcome,
+        TwoPointRunnerStepOutcome,
+    )
+
+    introduced_names = (
+        "TwoPointAbortedRun",
+        "TwoPointEvaluatorResources",
+        "TwoPointEvaluatorRunnerState",
+        "TwoPointRunnerAborted",
+        "TwoPointRunnerAccepted",
+        "TwoPointRunnerBudgetStopped",
+        "TwoPointRunnerExternallyStopped",
+        "TwoPointRunnerInstrumentFailure",
+        "TwoPointRunnerRunOutcome",
+        "TwoPointRunnerStepOutcome",
+    )
+    assert tuple(
+        name for name in two_point.__all__ if name in introduced_names
+    ) == introduced_names
+    assert get_args(TwoPointRunnerStepOutcome) == (
+        TwoPointRunnerAccepted,
+        TwoPointRunnerInstrumentFailure,
+        TwoPointRunnerBudgetStopped,
+        TwoPointRunnerAborted,
+    )
+    assert get_args(TwoPointRunnerRunOutcome) == (
+        TwoPointRunnerInstrumentFailure,
+        TwoPointRunnerBudgetStopped,
+        TwoPointRunnerAborted,
+    )
+    for record_class in (
+        TwoPointEvaluatorResources,
+        TwoPointAbortedRun,
+        TwoPointEvaluatorRunnerState,
+        TwoPointRunnerAccepted,
+        TwoPointRunnerInstrumentFailure,
+        TwoPointRunnerBudgetStopped,
+        TwoPointRunnerExternallyStopped,
+        TwoPointRunnerAborted,
+    ):
+        assert record_class.__slots__ == tuple(
+            field.name for field in fields(record_class)
+        )
+
+    assert tuple(field.name for field in fields(TwoPointEvaluatorResources)) == (
+        "calibration_observations",
+        "accepted_tracking_observations",
+        "unaccepted_tracking_observations",
+        "calibration_resources",
+        "accepted_tracking_resources",
+        "unaccepted_tracking_resources",
+        "tracking_resources",
+        "accepted_charged_resources",
+        "charged_resources",
+        "calibration_budget_treatment",
+        "incomplete_pair_observations",
+        "unaccepted_observations",
+    )
+    assert tuple(field.name for field in fields(TwoPointAbortedRun)) == (
+        "reason",
+        "exception_type",
+        "exception_message",
+        "unaccepted_acquisition",
+        "unaccepted_observation_count",
+        "tracker_estimate_before",
+        "tracker_estimate_after",
+    )
+    assert tuple(field.name for field in fields(TwoPointEvaluatorRunnerState)) == (
+        "phase",
+        "run_token",
+        "instrument_configuration",
+        "calibration_outcome",
+        "verified_calibration",
+        "calibration",
+        "tracker_estimate",
+        "normal_tracking_trace",
+        "pair_timings",
+        "instrument_resources_at_bind",
+        "tracking_resources_before",
+        "instrument_resources_current",
+        "instrument_current_sequence_index",
+        "current_virtual_time_s",
+        "last_instrument_failure",
+        "terminal_abort",
+    )
+    assert tuple(field.name for field in fields(TwoPointRunnerAccepted)) == (
+        "kind",
+        "acquisition",
+        "update",
+        "state",
+    )
+    assert tuple(field.name for field in fields(TwoPointRunnerInstrumentFailure)) == (
+        "kind",
+        "failure",
+        "state",
+    )
+    assert tuple(field.name for field in fields(TwoPointRunnerBudgetStopped)) == (
+        "kind",
+        "resources",
+        "state",
+    )
+    assert tuple(field.name for field in fields(TwoPointRunnerExternallyStopped)) == (
+        "kind",
+        "resources",
+        "state",
+    )
+    assert tuple(field.name for field in fields(TwoPointRunnerAborted)) == (
+        "kind",
+        "abort",
+        "resources",
+        "state",
+    )
+
+
+def _evaluator_resource_arguments(
+    *, incomplete_pair_observations: int = 0, unaccepted_observations: int = 0
+) -> dict[str, object]:
+    from odmr_bench.emulator import ResourceSnapshot
+
+    calibration = _calibration_outcome_arguments(None)
+    calibration_observation = calibration["full_observations"][0]  # type: ignore[index]
+    tracking = _tracking_acquisition_arguments(unavailable=False)
+    tracking_observation = tracking["full_observation"]
+    zero = ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0)
+    accepted = ResourceSnapshot(1, 0.005, 12_500.0, 12_000.0, 12_250, 0, 0.006)
+    charged = ResourceSnapshot(2, 0.01, 25_000.0, 24_000.0, 24_500, 0, 0.012)
+    return {
+        "calibration_observations": (calibration_observation,),
+        "accepted_tracking_observations": (tracking_observation,),
+        "unaccepted_tracking_observations": (),
+        "calibration_resources": accepted,
+        "accepted_tracking_resources": accepted,
+        "unaccepted_tracking_resources": zero,
+        "tracking_resources": accepted,
+        "accepted_charged_resources": accepted,
+        "charged_resources": charged,
+        "calibration_budget_treatment": "conditional_free_precalibration",
+        "incomplete_pair_observations": incomplete_pair_observations,
+        "unaccepted_observations": unaccepted_observations,
+    }
+
+
+def _pending_tracking_acquisition_arguments(
+    *, unavailable: bool
+) -> dict[str, object]:
+    from odmr_bench.emulator import InstrumentObservation, ResourceSnapshot
+    from odmr_bench.evaluation.two_point.resource_accounting import (
+        _advance_full_resources,
+    )
+    from tests.two_point_helpers import make_legal_estimate
+
+    estimate = make_legal_estimate("first")
+    query = estimate.pending_query
+    assert query is not None
+    full_observation = InstrumentObservation(
+        query.expected_sequence_index,
+        query.expected_end_timestamp_s,
+        query.frequency_hz,
+        0.98,
+        query.integration_time_s,
+        query.expected_nominal_exposure_photons,
+        12_000.0,
+        12_250,
+        "test-rule",
+    )
+    zero = ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0)
+    delta = _advance_full_resources(zero, full_observation, 0.001)
+    common: dict[str, object] = {
+        "resource_join_status": "unavailable" if unavailable else "authenticated",
+        "query": query,
+        "expected_measurement_midpoint_s": 0.0035,
+        "measurement_midpoint_s": 0.0035,
+        "full_observation": full_observation,
+        "safe_observation": full_observation.estimator_view(),
+        "instrument_resources_before": zero,
+        "instrument_resources_after": delta,
+    }
+    if unavailable:
+        common["resource_mismatch_fields"] = ("expected_photons",)
+        common["instrument_resources_after"] = replace(
+            delta, expected_photons=delta.expected_photons + 1.0
+        )
+    else:
+        common["instrument_resource_delta"] = delta
+    return common
+
+
+def test_evaluator_resource_and_abort_intrinsic_matrix() -> None:
+    from odmr_bench.emulator import ResourceSnapshot
+    from odmr_bench.evaluation.two_point import (
+        TwoPointAbortedRun,
+        TwoPointEvaluatorResources,
+        TwoPointResourceJoinUnavailableAcquisition,
+        TwoPointTrackingAcquisition,
+    )
+    from odmr_bench.evaluation.two_point.types import TwoPointAbortReason
+    from tests.two_point_helpers import make_legal_estimate
+
+    for incomplete_pair_observations in (0, 1):
+        for unaccepted_observations in (0, 1):
+            resources = TwoPointEvaluatorResources(
+                **_evaluator_resource_arguments(
+                    incomplete_pair_observations=incomplete_pair_observations,
+                    unaccepted_observations=unaccepted_observations,
+                )  # type: ignore[arg-type]
+            )
+            assert resources.incomplete_pair_observations == (
+                incomplete_pair_observations
+            )
+            assert resources.unaccepted_observations == unaccepted_observations
+            assert resources.accepted_charged_resources != resources.charged_resources
+
+    valid_resources = TwoPointEvaluatorResources(
+        **_evaluator_resource_arguments()  # type: ignore[arg-type]
+    )
+    invalid_resource_rows = (
+        ("calibration_observations", object(), TypeError),
+        ("calibration_observations", (object(),), TypeError),
+        ("accepted_tracking_observations", object(), TypeError),
+        ("unaccepted_tracking_observations", (object(),), TypeError),
+        ("calibration_resources", object(), TypeError),
+        ("accepted_tracking_resources", object(), TypeError),
+        ("unaccepted_tracking_resources", object(), TypeError),
+        ("tracking_resources", object(), TypeError),
+        ("accepted_charged_resources", object(), TypeError),
+        ("charged_resources", object(), TypeError),
+        ("calibration_budget_treatment", "unknown", ValueError),
+        ("incomplete_pair_observations", True, TypeError),
+        ("incomplete_pair_observations", 2, ValueError),
+        ("unaccepted_observations", False, TypeError),
+        ("unaccepted_observations", -1, ValueError),
+    )
+    for field_name, value, error_type in invalid_resource_rows:
+        with pytest.raises(error_type):
+            replace(valid_resources, **{field_name: value})
+
+    authenticated = TwoPointTrackingAcquisition(
+        **_pending_tracking_acquisition_arguments(  # type: ignore[arg-type]
+            unavailable=False
+        )
+    )
+    unavailable = TwoPointResourceJoinUnavailableAcquisition(
+        **_pending_tracking_acquisition_arguments(  # type: ignore[arg-type]
+            unavailable=True
+        )
+    )
+    estimate = make_legal_estimate("first")
+    abort_reasons = (
+        "resource_join_unavailable",
+        "tracker_observation_validation_error",
+        "tracker_update_construction_error",
+        "tracker_update_unexpected_error",
+    )
+    assert get_args(TwoPointAbortReason) == abort_reasons
+    aborts = {}
+    for reason in abort_reasons:
+        unavailable_reason = reason == "resource_join_unavailable"
+        abort = TwoPointAbortedRun(
+            reason,
+            None if unavailable_reason else "RuntimeError",
+            None if unavailable_reason else "",
+            unavailable if unavailable_reason else authenticated,
+            1,
+            estimate,
+            replace(estimate),
+        )
+        aborts[reason] = abort
+        assert abort.tracker_estimate_before == abort.tracker_estimate_after
+
+    invalid_abort_rows = (
+        (aborts["resource_join_unavailable"], {"reason": "unknown"}, ValueError),
+        (
+            aborts["resource_join_unavailable"],
+            {"unaccepted_acquisition": authenticated},
+            ValueError,
+        ),
+        (
+            aborts["resource_join_unavailable"],
+            {"exception_type": "RuntimeError", "exception_message": "boom"},
+            ValueError,
+        ),
+        (
+            aborts["tracker_observation_validation_error"],
+            {"unaccepted_acquisition": unavailable},
+            ValueError,
+        ),
+        (
+            aborts["tracker_update_construction_error"],
+            {"exception_type": ""},
+            ValueError,
+        ),
+        (
+            aborts["tracker_update_unexpected_error"],
+            {"exception_message": None},
+            TypeError,
+        ),
+        (
+            aborts["tracker_update_unexpected_error"],
+            {"unaccepted_observation_count": 0},
+            ValueError,
+        ),
+        (
+            aborts["tracker_update_unexpected_error"],
+            {"tracker_estimate_before": object()},
+            TypeError,
+        ),
+        (
+            aborts["tracker_update_unexpected_error"],
+            {
+                "tracker_estimate_before": make_legal_estimate("boundary"),
+                "tracker_estimate_after": make_legal_estimate("boundary"),
+            },
+            ValueError,
+        ),
+        (
+            aborts["tracker_update_unexpected_error"],
+            {"tracker_estimate_after": make_legal_estimate("boundary")},
+            ValueError,
+        ),
+    )
+    for target, overrides, error_type in invalid_abort_rows:
+        with pytest.raises(error_type):
+            replace(target, **overrides)
+
+    assert type(valid_resources.calibration_resources) is ResourceSnapshot
+
+
+def _runner_state_arguments(phase: str) -> dict[str, object]:
+    from odmr_bench.emulator import ResourceSnapshot
+    from odmr_bench.estimators import calibrate_two_point
+    from odmr_bench.evaluation.two_point import (
+        TwoPointAbortedRun,
+        TwoPointEvaluatorInstrumentConfiguration,
+        TwoPointResourceJoinUnavailableAcquisition,
+        VerifiedTwoPointCalibrationFailure,
+        VerifiedTwoPointCalibrationSuccess,
+    )
+    from tests.two_point_helpers import (
+        make_legal_estimate,
+        make_legal_tracker_configuration,
+    )
+
+    success = VerifiedTwoPointCalibrationSuccess(
+        **_calibration_outcome_arguments(None)  # type: ignore[arg-type]
+    )
+    failure = VerifiedTwoPointCalibrationFailure(
+        **_calibration_outcome_arguments("fit_failed")  # type: ignore[arg-type]
+    )
+    calibration = calibrate_two_point(
+        success.source,
+        make_legal_tracker_configuration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    zero = ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0)
+    active = phase in {
+        "tracking",
+        "budget_stopped",
+        "externally_stopped",
+        "aborted",
+    }
+    estimate = (
+        replace(
+            make_legal_estimate("boundary"), stopped_reason="budget_exhausted"
+        )
+        if phase == "budget_stopped"
+        else make_legal_estimate("first")
+        if phase == "aborted"
+        else make_legal_estimate("boundary")
+    )
+    terminal_abort = None
+    if phase == "aborted":
+        unavailable = TwoPointResourceJoinUnavailableAcquisition(
+            **_pending_tracking_acquisition_arguments(  # type: ignore[arg-type]
+                unavailable=True
+            )
+        )
+        terminal_abort = TwoPointAbortedRun(
+            "resource_join_unavailable",
+            None,
+            None,
+            unavailable,
+            1,
+            estimate,
+            replace(estimate),
+        )
+    return {
+        "phase": phase,
+        "run_token": success.run_token,
+        "instrument_configuration": TwoPointEvaluatorInstrumentConfiguration(
+            2.5e6, 0.001
+        ),
+        "calibration_outcome": (
+            failure
+            if phase == "calibration_failed"
+            else success
+            if phase == "calibration_succeeded"
+            else None
+        ),
+        "verified_calibration": (
+            success if phase == "calibration_succeeded" or active else None
+        ),
+        "calibration": calibration if active else None,
+        "tracker_estimate": estimate if active else None,
+        "normal_tracking_trace": (),
+        "pair_timings": (),
+        "instrument_resources_at_bind": zero,
+        "tracking_resources_before": zero if active else None,
+        "instrument_resources_current": (
+            failure.instrument_resources_after
+            if phase == "calibration_failed"
+            else success.instrument_resources_after
+            if phase == "calibration_succeeded"
+            else zero
+        ),
+        "instrument_current_sequence_index": (
+            0
+            if phase in {"calibration_failed", "calibration_succeeded"}
+            else None
+        ),
+        "current_virtual_time_s": (
+            0.006
+            if phase in {"calibration_failed", "calibration_succeeded"}
+            else 0.0
+        ),
+        "last_instrument_failure": None,
+        "terminal_abort": terminal_abort,
+    }
+
+
+@pytest.mark.parametrize(
+    "phase",
+    (
+        "ready",
+        "calibration_succeeded",
+        "calibration_failed",
+        "tracking",
+        "budget_stopped",
+        "externally_stopped",
+        "aborted",
+    ),
+)
+def test_runner_phase_and_outcome_discriminator_matrix(phase: str) -> None:
+    from odmr_bench.estimators import TwoPointUpdate
+    from odmr_bench.evaluation.two_point import (
+        TwoPointAbortedRun,
+        TwoPointEvaluatorPairTiming,
+        TwoPointEvaluatorResources,
+        TwoPointEvaluatorRunnerState,
+        TwoPointInstrumentQueryFailure,
+        TwoPointRunnerAborted,
+        TwoPointRunnerAccepted,
+        TwoPointRunnerBudgetStopped,
+        TwoPointRunnerExternallyStopped,
+        TwoPointRunnerInstrumentFailure,
+        TwoPointTrackingAcquisition,
+        VerifiedTwoPointCalibrationSuccess,
+    )
+    from odmr_bench.evaluation.two_point.types import TwoPointRunnerPhase
+    from tests.two_point_helpers import make_legal_estimate, make_legal_update
+
+    phases = (
+        "ready",
+        "calibration_succeeded",
+        "calibration_failed",
+        "tracking",
+        "budget_stopped",
+        "externally_stopped",
+        "aborted",
+    )
+    assert get_args(TwoPointRunnerPhase) == phases
+    state = TwoPointEvaluatorRunnerState(
+        **_runner_state_arguments(phase)  # type: ignore[arg-type]
+    )
+    assert state.phase == phase
+
+    invalid_overrides: dict[str, object]
+    if phase == "ready":
+        invalid_overrides = {
+            "calibration": _runner_state_arguments("tracking")["calibration"]
+        }
+    elif phase == "calibration_failed":
+        invalid_overrides = {
+            "calibration_outcome": _runner_state_arguments(
+                "calibration_succeeded"
+            )["calibration_outcome"]
+        }
+    elif phase == "calibration_succeeded":
+        success = state.verified_calibration
+        assert success is not None
+        invalid_overrides = {"verified_calibration": replace(success)}
+    elif phase == "tracking":
+        invalid_overrides = {"tracking_resources_before": None}
+    elif phase == "budget_stopped":
+        invalid_overrides = {"tracker_estimate": make_legal_estimate("boundary")}
+    elif phase == "externally_stopped":
+        invalid_overrides = {
+            "terminal_abort": _runner_state_arguments("aborted")["terminal_abort"]
+        }
+    else:
+        invalid_overrides = {"terminal_abort": None}
+    with pytest.raises(ValueError):
+        replace(state, **invalid_overrides)
+
+    if phase != "tracking":
+        return
+
+    authenticated = TwoPointTrackingAcquisition(
+        **_pending_tracking_acquisition_arguments(  # type: ignore[arg-type]
+            unavailable=False
+        )
+    )
+    update = make_legal_update("first")
+    assert type(update) is TwoPointUpdate
+    accepted_state = replace(
+        state,
+        tracker_estimate=update.estimate,
+        normal_tracking_trace=(authenticated,),
+        instrument_current_sequence_index=0,
+        current_virtual_time_s=0.006,
+    )
+    accepted = TwoPointRunnerAccepted(
+        "accepted", authenticated, update, accepted_state
+    )
+    assert accepted.state.tracker_estimate is update.estimate
+    mismatched_acquisition = TwoPointTrackingAcquisition(
+        **_tracking_acquisition_arguments(unavailable=False)  # type: ignore[arg-type]
+    )
+    mismatched_accepted_state = replace(
+        accepted_state, normal_tracking_trace=(mismatched_acquisition,)
+    )
+    with pytest.raises(ValueError):
+        TwoPointRunnerAccepted(
+            "accepted", mismatched_acquisition, update, mismatched_accepted_state
+        )
+
+    failure = TwoPointInstrumentQueryFailure(
+        authenticated.query,
+        "RuntimeError",
+        "",
+        authenticated.instrument_resources_before,
+        replace(authenticated.instrument_resources_before),
+    )
+    failure_state = replace(
+        state,
+        tracker_estimate=make_legal_estimate("first"),
+        last_instrument_failure=failure,
+    )
+    instrument_failure = TwoPointRunnerInstrumentFailure(
+        "instrument_failure", failure, failure_state
+    )
+    assert instrument_failure.state.last_instrument_failure is failure
+    with pytest.raises(ValueError):
+        replace(failure_state, tracker_estimate=make_legal_estimate("boundary"))
+
+    resources = TwoPointEvaluatorResources(
+        **_evaluator_resource_arguments()  # type: ignore[arg-type]
+    )
+    budget_state = TwoPointEvaluatorRunnerState(
+        **_runner_state_arguments("budget_stopped")  # type: ignore[arg-type]
+    )
+    budget_stopped = TwoPointRunnerBudgetStopped(
+        "budget_stopped", resources, budget_state
+    )
+    external_state = TwoPointEvaluatorRunnerState(
+        **_runner_state_arguments("externally_stopped")  # type: ignore[arg-type]
+    )
+    externally_stopped = TwoPointRunnerExternallyStopped(
+        "externally_stopped", resources, external_state
+    )
+    aborted_state = TwoPointEvaluatorRunnerState(
+        **_runner_state_arguments("aborted")  # type: ignore[arg-type]
+    )
+    abort = aborted_state.terminal_abort
+    assert type(abort) is TwoPointAbortedRun
+    aborted = TwoPointRunnerAborted("aborted", abort, None, aborted_state)
+    assert budget_stopped.state.phase == "budget_stopped"
+    assert externally_stopped.state.phase == "externally_stopped"
+    assert aborted.state.phase == "aborted"
+
+    invalid_outcome_rows = (
+        (accepted, {"kind": "instrument_failure"}),
+        (accepted, {"state": budget_state}),
+        (instrument_failure, {"failure": object()}),
+        (instrument_failure, {"state": accepted_state}),
+        (budget_stopped, {"state": external_state}),
+        (externally_stopped, {"state": budget_state}),
+        (aborted, {"abort": replace(abort)}),
+        (aborted, {"resources": resources}),
+    )
+    for target, overrides in invalid_outcome_rows:
+        with pytest.raises((TypeError, ValueError)):
+            replace(target, **overrides)
+
+    timing = TwoPointEvaluatorPairTiming(
+        0, "r0", 0.0035, 0.0095, 0.006500000000000001, 0.0065, 1, 0.012
+    )
+    with pytest.raises(ValueError):
+        replace(state, pair_timings=(timing,))
+    with pytest.raises(ValueError):
+        replace(state, normal_tracking_trace=(authenticated,))
+
+    success = state.verified_calibration
+    assert type(success) is VerifiedTwoPointCalibrationSuccess
+    with pytest.raises(ValueError):
+        replace(state, calibration_outcome=replace(success))
 
 
 def _calibration_outcome_arguments(
