@@ -4,18 +4,26 @@ from __future__ import annotations
 
 import inspect
 import math
+from collections.abc import Mapping
+from concurrent.futures import Future
 from copy import copy
-from dataclasses import replace
+from dataclasses import dataclass, fields, is_dataclass, replace
 
 import numpy as np
 import pytest
 
-from odmr_bench.emulator.observations import EstimatorObservation
+from odmr_bench.dynamics import SpectralSnapshot
+from odmr_bench.emulator.observations import (
+    EstimatorObservation,
+    InstrumentObservation,
+)
+from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators import (
     CalibratedTwoPointTracker,
     NormalizedFluorescenceProvenance,
     PublicAcquisitionResources,
     TwoPointBudgetCeiling,
+    TwoPointCalibration,
     TwoPointClockMapping,
     TwoPointIdentityBinding,
     TwoPointObservationValidationError,
@@ -26,6 +34,11 @@ from odmr_bench.estimators import (
     calibrate_two_point,
 )
 from odmr_bench.estimators import two_point_tracker as tracker_module
+from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_target_only_model,
+    _target_center_derivative,
+)
+from odmr_bench.models import Baseline
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_fit_configuration,
@@ -1037,3 +1050,1790 @@ def test_unaffordable_boundary_stops_atomically_without_partial_pair() -> None:
 
     assert tracker.choose_next_query() is None
     assert tracker.estimate() is stopped
+
+
+def test_second_side_computes_signed_hertz_update_and_refreshes_zero_step_source(
+) -> None:
+    tracker, calibration, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    cell = calibration.identities[0]
+    observations = []
+    updates = []
+
+    for expected_side in ("minus", "plus"):
+        query = tracker.choose_next_query()
+        assert query is not None
+        assert query.side == expected_side
+        fluorescence = _evaluate_target_only_model(
+            calibration.source.source_fit,
+            cell.source_fit_index,
+            query.frequency_hz,
+            query.interrogation_center_hz,
+        )
+        observation = EstimatorObservation(
+            query.expected_sequence_index,
+            query.expected_end_timestamp_s,
+            query.frequency_hz,
+            fluorescence,
+            query.integration_time_s,
+            query.expected_nominal_exposure_photons,
+            None,
+        )
+        observations.append(observation)
+        updates.append(tracker.update(observation))
+
+    first_observation, second_observation = observations
+    assert updates[0].completed_pair is None
+    completed = updates[1].completed_pair
+    assert completed is not None
+    assert completed.minus_observation is first_observation
+    assert completed.plus_observation is second_observation
+    assert completed.first_side == "minus"
+    first_reference_s = (
+        first_observation.timestamp_s - first_observation.integration_time_s / 2.0
+    )
+    second_reference_s = (
+        second_observation.timestamp_s
+        - second_observation.integration_time_s / 2.0
+    )
+    assert completed.pair_reference_timestamp_s == first_reference_s + (
+        second_reference_s - first_reference_s
+    ) / 2.0
+    assert completed.release_sequence_index == second_observation.sequence_index
+    assert completed.release_timestamp_s == second_observation.timestamp_s
+    assert completed.discriminator == completed.zero_discriminator
+    assert completed.raw_innovation_hz == 0.0
+    assert completed.requested_step_hz == 0.0
+    assert completed.applied_step_hz == 0.0
+    assert completed.candidate_center_hz == completed.interrogation_center_hz
+    assert completed.lock_state == "tracking"
+    assert completed.failure_code is None
+
+    estimate = tracker.estimate()
+    assert updates[1].estimate is estimate
+    assert estimate.incomplete_pair is None
+    assert estimate.pending_query is None
+    assert tracker.pending_query is None
+    assert estimate.pair_history == tracker.pair_history == (completed,)
+    assert estimate.accepted_observations == 2
+    assert estimate.completed_pairs == 1
+    identity = estimate.identities[0]
+    assert identity.completed_pairs == 1
+    assert identity.latest_pair is completed
+    assert identity.center_hz == completed.interrogation_center_hz
+    assert identity.active_source_kind == "pair"
+    assert identity.active_source_pair_index == 0
+    assert (
+        identity.active_reference_timestamp_s
+        == completed.pair_reference_timestamp_s
+    )
+    assert identity.active_release_sequence_index == completed.release_sequence_index
+    assert identity.active_release_timestamp_s == completed.release_timestamp_s
+    assert identity.estimate_age_sequence_indices == 0
+    assert identity.estimate_age_s == (
+        completed.release_timestamp_s - completed.pair_reference_timestamp_s
+    )
+    assert identity.release_age_s == 0.0
+
+
+@pytest.mark.parametrize(
+    "budget_treatment",
+    ("included_same_run", "conditional_free_precalibration"),
+)
+def test_second_arrival_resources_are_exact_left_associated_binary64(
+    budget_treatment: str,
+) -> None:
+    configuration, included_calibration, metadata = (
+        _make_rounding_witness_calibration()
+    )
+    calibration = calibrate_two_point(
+        included_calibration.source,
+        configuration,
+        budget_treatment=budget_treatment,
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        metadata,
+        calibration,
+        TwoPointBudgetCeiling(None, 100.0, None, None),
+        seed=37,
+    )
+    cell = calibration.identities[0]
+    for realized_photons in (7, 11):
+        query = tracker.choose_next_query()
+        assert query is not None
+        tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                _evaluate_target_only_model(
+                    calibration.source.source_fit,
+                    cell.source_fit_index,
+                    query.frequency_hz,
+                    query.interrogation_center_hz,
+                ),
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                realized_photons,
+            )
+        )
+
+    atom_integration = configuration.integration_time_s
+    atom_nominal = metadata.nominal_photon_rate_hz * atom_integration
+    atom_elapsed = metadata.frequency_overhead_s + atom_integration
+    tracking_expected = PublicAcquisitionResources(
+        2,
+        (0.0 + atom_integration) + atom_integration,
+        (0.0 + atom_nominal) + atom_nominal,
+        18,
+        0,
+        (0.0 + atom_elapsed) + atom_elapsed,
+    )
+    source = calibration.source.safe_resources
+    included_expected = PublicAcquisitionResources(
+        (source.observations + 1) + 1,
+        (source.integration_time_s + atom_integration) + atom_integration,
+        (source.nominal_exposure_photons + atom_nominal) + atom_nominal,
+        (source.realized_photons + 7) + 11,
+        (source.observations_without_realized_counts + 0) + 0,
+        (source.virtual_elapsed_time_s + atom_elapsed) + atom_elapsed,
+    )
+    assert included_expected.integration_time_s != (
+        source.integration_time_s + 2.0 * atom_integration
+    )
+    assert included_expected.nominal_exposure_photons != (
+        source.nominal_exposure_photons + 2.0 * atom_nominal
+    )
+    assert included_expected.virtual_elapsed_time_s != (
+        source.virtual_elapsed_time_s + 2.0 * atom_elapsed
+    )
+
+    estimate = tracker.estimate()
+    charged_expected = (
+        included_expected
+        if budget_treatment == "included_same_run"
+        else tracking_expected
+    )
+    for field in fields(PublicAcquisitionResources):
+        assert getattr(estimate.tracking_resources, field.name) == getattr(
+            tracking_expected, field.name
+        )
+        assert getattr(estimate.charged_resources, field.name) == getattr(
+            charged_expected, field.name
+        )
+
+
+def _complete_pair_for_gate(case: str):
+    base_configuration, base_calibration, metadata = (
+        _make_rounding_witness_calibration()
+    )
+    base_cell = base_calibration.identities[0]
+    source_fit = base_calibration.source.source_fit
+    center_hz = base_cell.calibration_center_hz
+    minus_frequency_hz = center_hz - base_cell.offset_hz
+    plus_frequency_hz = center_hz + base_cell.offset_hz
+    mu_minus = _evaluate_target_only_model(
+        source_fit, base_cell.source_fit_index, minus_frequency_hz, center_hz
+    )
+    mu_plus = _evaluate_target_only_model(
+        source_fit, base_cell.source_fit_index, plus_frequency_hz, center_hz
+    )
+    g_minus = _target_center_derivative(
+        source_fit, base_cell.source_fit_index, minus_frequency_hz, center_hz
+    )
+    g_plus = _target_center_derivative(
+        source_fit, base_cell.source_fit_index, plus_frequency_hz, center_hz
+    )
+    model_sum = mu_minus + mu_plus
+    zero_discriminator = (mu_minus - mu_plus) / model_sum
+    slope_per_hz = 2.0 * (
+        mu_plus * g_minus - mu_minus * g_plus
+    ) / model_sum**2
+
+    desired_raw_hz = 0.0
+    desired_common = 0.0
+    proportional_gain = base_configuration.proportional_gain
+    if case in {"numerical", "numerical-combined"}:
+        desired_raw_hz = 2.0
+        proportional_gain = 1.0e308
+        if case == "numerical-combined":
+            desired_common = -0.25
+    elif case in {"common-strict", "common-equality"}:
+        desired_common = 0.25
+    elif case in {
+        "common-negative-strict-combined",
+        "common-negative-equality",
+    }:
+        desired_common = -0.25
+        desired_raw_hz = -0.15 * base_cell.calibration_fwhm_hz
+    elif case in {"capture-strict", "capture-equality", "domain", "tracking"}:
+        desired_raw_hz = 0.05 * base_cell.calibration_fwhm_hz
+    elif case in {"capture-negative-strict-combined", "capture-negative-equality"}:
+        desired_raw_hz = -0.05 * base_cell.calibration_fwhm_hz
+    elif case == "step-limited":
+        desired_raw_hz = 0.15 * base_cell.calibration_fwhm_hz
+
+    if case == "invalid-sum":
+        minus_fluorescence = 1.0
+        plus_fluorescence = -1.0
+    else:
+        observed_sum = model_sum + desired_common * base_cell.target_pair_depth
+        desired_discriminator = (
+            zero_discriminator + slope_per_hz * desired_raw_hz
+        )
+        minus_fluorescence = (
+            observed_sum * (1.0 + desired_discriminator) / 2.0
+        )
+        plus_fluorescence = observed_sum - minus_fluorescence
+
+    observed_sum = minus_fluorescence + plus_fluorescence
+    actual_discriminator = (
+        None
+        if observed_sum <= 0.0
+        else (minus_fluorescence - plus_fluorescence) / observed_sum
+    )
+    actual_common = (
+        None
+        if observed_sum <= 0.0
+        else (observed_sum - model_sum) / base_cell.target_pair_depth
+    )
+    actual_raw_hz = (
+        None
+        if actual_discriminator is None
+        else (actual_discriminator - zero_discriminator) / slope_per_hz
+    )
+    common_limit = None
+    if case in {
+        "common-strict",
+        "common-negative-strict-combined",
+        "numerical-combined",
+    }:
+        assert actual_common is not None
+        common_limit = math.nextafter(abs(actual_common), 0.0)
+    elif case in {
+        "common-equality",
+        "common-negative-equality",
+    }:
+        assert actual_common is not None
+        common_limit = abs(actual_common)
+
+    configuration = replace(
+        base_configuration,
+        proportional_gain=proportional_gain,
+        common_mode_limit_target_depths=common_limit,
+    )
+    calibration = calibrate_two_point(
+        base_calibration.source,
+        configuration,
+        budget_treatment="included_same_run",
+    )
+    cell = calibration.identities[0]
+    if case in {
+        "capture-strict",
+        "capture-equality",
+        "common-negative-strict-combined",
+        "capture-negative-strict-combined",
+        "capture-negative-equality",
+        "numerical-combined",
+    }:
+        assert actual_raw_hz is not None
+        capture_radius_hz = abs(actual_raw_hz)
+        if case in {
+            "capture-strict",
+            "common-negative-strict-combined",
+            "capture-negative-strict-combined",
+            "numerical-combined",
+        }:
+            capture_radius_hz = math.nextafter(capture_radius_hz, 0.0)
+        calibration = replace(
+            calibration,
+            identities=(
+                replace(cell, capture_radius_hz=capture_radius_hz),
+                *calibration.identities[1:],
+            ),
+        )
+    if case in {
+        "domain",
+        "common-negative-strict-combined",
+        "capture-negative-strict-combined",
+        "numerical-combined",
+    }:
+        assert actual_raw_hz is not None
+        requested_step_hz = (
+            base_configuration.proportional_gain * actual_raw_hz
+            if case == "numerical-combined"
+            else configuration.proportional_gain * actual_raw_hz
+        )
+        applied_step_hz = max(
+            -cell.max_step_hz,
+            min(requested_step_hz, cell.max_step_hz),
+        )
+        candidate_center_hz = center_hz + applied_step_hz
+        domain_changes = (
+            {
+                "allowed_center_min_hz": math.nextafter(
+                    candidate_center_hz, math.inf
+                )
+            }
+            if candidate_center_hz < center_hz
+            else {
+                "allowed_center_max_hz": math.nextafter(
+                    candidate_center_hz, -math.inf
+                )
+            }
+        )
+        current_cell = calibration.identities[0]
+        calibration = replace(
+            calibration,
+            identities=(
+                replace(current_cell, **domain_changes),
+                *calibration.identities[1:],
+            ),
+        )
+
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        metadata,
+        calibration,
+        TwoPointBudgetCeiling(None, 100.0, None, None),
+        seed=43,
+    )
+    completed = None
+    for fluorescence in (minus_fluorescence, plus_fluorescence):
+        query = tracker.choose_next_query()
+        assert query is not None
+        update = tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                fluorescence,
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                None,
+            )
+        )
+        completed = update.completed_pair
+    assert completed is not None
+    return completed, configuration, calibration.identities[0]
+
+
+@pytest.mark.parametrize(
+    ("case", "lock_state", "failure_code", "diagnostic_presence"),
+    (
+        pytest.param(
+            "invalid-sum",
+            "lost",
+            "invalid_pair_normalization",
+            (False, False, False, False, False),
+            id="invalid-sum",
+        ),
+        pytest.param(
+            "numerical",
+            "lost",
+            "numerical_failure",
+            (True, True, True, False, False),
+            id="nonfinite-derived-arithmetic",
+        ),
+        pytest.param(
+            "numerical-combined",
+            "lost",
+            "numerical_failure",
+            (True, True, True, False, False),
+            id="numerical-precedes-common-capture-domain",
+        ),
+        pytest.param(
+            "common-strict",
+            "lost",
+            "common_mode_limit_exceeded",
+            (True, True, False, False, False),
+            id="common-strict-exceed",
+        ),
+        pytest.param(
+            "common-equality",
+            "tracking",
+            None,
+            (True, True, True, True, True),
+            id="common-equality-passes",
+        ),
+        pytest.param(
+            "common-negative-strict-combined",
+            "lost",
+            "common_mode_limit_exceeded",
+            (True, True, False, False, False),
+            id="negative-common-precedes-capture-domain",
+        ),
+        pytest.param(
+            "common-negative-equality",
+            "step_limited",
+            None,
+            (True, True, True, True, True),
+            id="negative-common-equality-passes",
+        ),
+        pytest.param(
+            "capture-strict",
+            "lost",
+            "capture_exceeded",
+            (True, True, True, False, False),
+            id="capture-strict-exceed",
+        ),
+        pytest.param(
+            "capture-equality",
+            "tracking",
+            None,
+            (True, True, True, True, True),
+            id="capture-equality-passes",
+        ),
+        pytest.param(
+            "capture-negative-strict-combined",
+            "lost",
+            "capture_exceeded",
+            (True, True, True, False, False),
+            id="negative-capture-precedes-domain",
+        ),
+        pytest.param(
+            "capture-negative-equality",
+            "tracking",
+            None,
+            (True, True, True, True, True),
+            id="negative-capture-equality-passes",
+        ),
+        pytest.param(
+            "domain",
+            "lost",
+            "calibration_domain_exceeded",
+            (True, True, True, True, True),
+            id="domain",
+        ),
+        pytest.param(
+            "tracking",
+            "tracking",
+            None,
+            (True, True, True, True, True),
+            id="tracking",
+        ),
+        pytest.param(
+            "step-limited",
+            "step_limited",
+            None,
+            (True, True, True, True, True),
+            id="step-limited",
+        ),
+    ),
+)
+def test_pair_gate_precedence_and_retained_diagnostics(
+    case: str,
+    lock_state: str,
+    failure_code: str | None,
+    diagnostic_presence: tuple[bool, bool, bool, bool, bool],
+) -> None:
+    pair, configuration, cell = _complete_pair_for_gate(case)
+
+    assert pair.lock_state == lock_state
+    assert pair.failure_code == failure_code
+    assert tuple(
+        value is not None
+        for value in (
+            pair.discriminator,
+            pair.common_mode_target_depths,
+            pair.raw_innovation_hz,
+            pair.requested_step_hz,
+            pair.candidate_center_hz,
+        )
+    ) == diagnostic_presence
+    if case == "invalid-sum":
+        assert (pair.zero_discriminator, pair.discriminator_slope_per_hz) == (
+            None,
+            None,
+        )
+    else:
+        assert pair.zero_discriminator is not None
+        assert pair.discriminator_slope_per_hz is not None
+        assert math.isfinite(pair.zero_discriminator)
+        assert math.isfinite(pair.discriminator_slope_per_hz)
+        assert pair.discriminator_slope_per_hz > 0.0
+    if lock_state == "lost":
+        assert pair.applied_step_hz == 0.0
+        assert pair.candidate_center_hz != pair.interrogation_center_hz
+    elif lock_state == "tracking":
+        assert pair.applied_step_hz == pair.requested_step_hz
+        assert pair.candidate_center_hz == (
+            pair.interrogation_center_hz + pair.applied_step_hz
+        )
+    else:
+        assert pair.requested_step_hz is not None
+        assert pair.applied_step_hz * pair.requested_step_hz > 0.0
+        assert abs(pair.applied_step_hz) < abs(pair.requested_step_hz)
+
+    if case in {"common-strict", "common-negative-strict-combined"}:
+        assert pair.common_mode_target_depths is not None
+        assert configuration.common_mode_limit_target_depths is not None
+        assert (
+            abs(pair.common_mode_target_depths)
+            > configuration.common_mode_limit_target_depths
+        )
+    elif case in {"common-equality", "common-negative-equality"}:
+        assert pair.common_mode_target_depths is not None
+        assert (
+            abs(pair.common_mode_target_depths)
+            == configuration.common_mode_limit_target_depths
+        )
+    elif case in {"capture-strict", "capture-negative-strict-combined"}:
+        assert pair.raw_innovation_hz is not None
+        assert abs(pair.raw_innovation_hz) > cell.capture_radius_hz
+    elif case in {"capture-equality", "capture-negative-equality"}:
+        assert pair.raw_innovation_hz is not None
+        assert abs(pair.raw_innovation_hz) == cell.capture_radius_hz
+    elif case == "domain":
+        assert pair.candidate_center_hz is not None
+        assert pair.candidate_center_hz > cell.allowed_center_max_hz
+
+
+def test_public_schedule_advances_second_side_next_identity_and_odd_alternation(
+) -> None:
+    tracker, calibration, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    queries = []
+    failed_pair_index = 5
+
+    for pair_index in range(18):
+        identity_index = pair_index % 8
+        identity_pair_index = pair_index // 8
+        first_side = "minus" if identity_pair_index % 2 == 0 else "plus"
+        expected_sides = (
+            (first_side, "plus" if first_side == "minus" else "minus")
+        )
+        completed = None
+        for arrival_index, expected_side in enumerate(expected_sides):
+            query = tracker.choose_next_query()
+            assert query is not None
+            queries.append(query)
+            assert query.query_index == 2 * pair_index + arrival_index
+            assert query.pair_index == pair_index
+            assert query.identity_pair_index == identity_pair_index
+            assert query.resonance_id == f"r{identity_index}"
+            assert query.side == expected_side
+
+            if pair_index == failed_pair_index:
+                fluorescence = 1.0 if arrival_index == 0 else -1.0
+            else:
+                cell = calibration.identities[identity_index]
+                fluorescence = _evaluate_target_only_model(
+                    calibration.source.source_fit,
+                    cell.source_fit_index,
+                    query.frequency_hz,
+                    query.interrogation_center_hz,
+                )
+            update = tracker.update(
+                EstimatorObservation(
+                    query.expected_sequence_index,
+                    query.expected_end_timestamp_s,
+                    query.frequency_hz,
+                    fluorescence,
+                    query.integration_time_s,
+                    query.expected_nominal_exposure_photons,
+                    None,
+                )
+            )
+            completed = update.completed_pair
+            if arrival_index == 0:
+                assert completed is None
+
+        assert completed is not None
+        assert completed.pair_index == pair_index
+        if pair_index == failed_pair_index:
+            assert completed.lock_state == "lost"
+            assert completed.failure_code == "invalid_pair_normalization"
+        if pair_index < 17:
+            next_query = tracker.choose_next_query()
+            assert next_query is not None
+            assert next_query.pair_index == pair_index + 1
+            assert next_query.resonance_id == f"r{(pair_index + 1) % 8}"
+            assert tracker.choose_next_query() is next_query
+
+    assert tuple(query.resonance_id for query in queries) == tuple(
+        f"r{pair_index % 8}"
+        for pair_index in range(18)
+        for _ in range(2)
+    )
+    assert all(
+        second.query_index == first.query_index + 1
+        and second.expected_sequence_index == first.expected_sequence_index + 1
+        for first, second in zip(queries[::2], queries[1::2], strict=True)
+    )
+    assert tuple(query.side for query in queries[16:18]) == ("plus", "minus")
+    estimate = tracker.estimate()
+    assert estimate.accepted_observations == 36
+    assert estimate.completed_pairs == 18
+    assert len(estimate.pair_history) == 18
+    assert tuple(identity.completed_pairs for identity in estimate.identities) == (
+        3,
+        3,
+        2,
+        2,
+        2,
+        2,
+        2,
+        2,
+    )
+
+
+def _pair_fluorescence_for_raw(
+    calibration, identity_index: int, center_hz: float, raw_hz: float
+) -> tuple[float, float, float]:
+    cell = calibration.identities[identity_index]
+    source_fit = calibration.source.source_fit
+    minus_frequency_hz = center_hz - cell.offset_hz
+    plus_frequency_hz = center_hz + cell.offset_hz
+    mu_minus = _evaluate_target_only_model(
+        source_fit, cell.source_fit_index, minus_frequency_hz, center_hz
+    )
+    mu_plus = _evaluate_target_only_model(
+        source_fit, cell.source_fit_index, plus_frequency_hz, center_hz
+    )
+    g_minus = _target_center_derivative(
+        source_fit, cell.source_fit_index, minus_frequency_hz, center_hz
+    )
+    g_plus = _target_center_derivative(
+        source_fit, cell.source_fit_index, plus_frequency_hz, center_hz
+    )
+    model_sum = mu_minus + mu_plus
+    zero_discriminator = (mu_minus - mu_plus) / model_sum
+    slope_per_hz = 2.0 * (
+        mu_plus * g_minus - mu_minus * g_plus
+    ) / model_sum**2
+    discriminator = zero_discriminator + slope_per_hz * raw_hz
+    minus_fluorescence = model_sum * (1.0 + discriminator) / 2.0
+    plus_fluorescence = model_sum - minus_fluorescence
+    actual_discriminator = (
+        minus_fluorescence - plus_fluorescence
+    ) / (minus_fluorescence + plus_fluorescence)
+    actual_raw_hz = (
+        actual_discriminator - zero_discriminator
+    ) / slope_per_hz
+    return minus_fluorescence, plus_fluorescence, actual_raw_hz
+
+
+def _complete_pair_with_raw(tracker, calibration, raw_hz: float):
+    first_query = tracker.choose_next_query()
+    assert first_query is not None
+    identity_index = first_query.pair_index % 8
+    minus_fluorescence, plus_fluorescence, _ = _pair_fluorescence_for_raw(
+        calibration,
+        identity_index,
+        first_query.interrogation_center_hz,
+        raw_hz,
+    )
+    first_fluorescence = (
+        minus_fluorescence if first_query.side == "minus" else plus_fluorescence
+    )
+    first_update = tracker.update(
+        EstimatorObservation(
+            first_query.expected_sequence_index,
+            first_query.expected_end_timestamp_s,
+            first_query.frequency_hz,
+            first_fluorescence,
+            first_query.integration_time_s,
+            first_query.expected_nominal_exposure_photons,
+            None,
+        )
+    )
+    assert first_update.completed_pair is None
+    second_query = tracker.choose_next_query()
+    assert second_query is not None
+    second_fluorescence = (
+        minus_fluorescence if second_query.side == "minus" else plus_fluorescence
+    )
+    completed = tracker.update(
+        EstimatorObservation(
+            second_query.expected_sequence_index,
+            second_query.expected_end_timestamp_s,
+            second_query.frequency_hz,
+            second_fluorescence,
+            second_query.integration_time_s,
+            second_query.expected_nominal_exposure_photons,
+            None,
+        )
+    ).completed_pair
+    assert completed is not None
+    return completed
+
+
+def test_domain_endpoints_and_active_age_transitions_are_exact() -> None:
+    base_configuration, base_calibration, metadata = (
+        _make_rounding_witness_calibration()
+    )
+    base_cell = base_calibration.identities[0]
+    for direction in (-1.0, 1.0):
+        requested_raw_hz = (
+            direction * 0.05 * base_cell.calibration_fwhm_hz
+        )
+        _, _, actual_raw_hz = _pair_fluorescence_for_raw(
+            base_calibration,
+            0,
+            base_cell.calibration_center_hz,
+            requested_raw_hz,
+        )
+        exact_candidate_hz = base_cell.calibration_center_hz + actual_raw_hz
+        if direction < 0.0:
+            exact_cell = replace(
+                base_cell, allowed_center_min_hz=exact_candidate_hz
+            )
+            outward_cell = replace(
+                base_cell,
+                allowed_center_min_hz=math.nextafter(
+                    exact_candidate_hz, math.inf
+                ),
+            )
+        else:
+            exact_cell = replace(
+                base_cell, allowed_center_max_hz=exact_candidate_hz
+            )
+            outward_cell = replace(
+                base_cell,
+                allowed_center_max_hz=math.nextafter(
+                    exact_candidate_hz, -math.inf
+                ),
+            )
+
+        for cell, should_pass in ((exact_cell, True), (outward_cell, False)):
+            calibration = replace(
+                base_calibration,
+                identities=(cell, *base_calibration.identities[1:]),
+            )
+            tracker = CalibratedTwoPointTracker(base_configuration)
+            tracker.reset(
+                metadata,
+                calibration,
+                TwoPointBudgetCeiling(None, 100.0, None, None),
+                seed=47,
+            )
+            pair = _complete_pair_with_raw(
+                tracker, calibration, requested_raw_hz
+            )
+            assert pair.candidate_center_hz == exact_candidate_hz
+            if should_pass:
+                assert pair.lock_state == "tracking"
+                assert pair.failure_code is None
+                assert tracker.estimate().identities[0].center_hz == (
+                    cell.allowed_center_min_hz
+                    if direction < 0.0
+                    else cell.allowed_center_max_hz
+                )
+            else:
+                assert pair.lock_state == "lost"
+                assert pair.failure_code == "calibration_domain_exceeded"
+                endpoint_hz = (
+                    cell.allowed_center_min_hz
+                    if direction < 0.0
+                    else cell.allowed_center_max_hz
+                )
+                assert pair.candidate_center_hz == math.nextafter(
+                    endpoint_hz,
+                    -math.inf if direction < 0.0 else math.inf,
+                )
+                assert tracker.estimate().identities[0].center_hz == (
+                    base_cell.calibration_center_hz
+                )
+
+    tracker = CalibratedTwoPointTracker(base_configuration)
+    tracker.reset(
+        metadata,
+        base_calibration,
+        TwoPointBudgetCeiling(None, 100.0, None, None),
+        seed=53,
+    )
+    expected_centers = tuple(
+        identity.center_hz for identity in tracker.estimate().identities
+    )
+    for pair_index in range(21):
+        identity_index = pair_index % 8
+        cell = base_calibration.identities[identity_index]
+        raw_hz = 0.0
+        if identity_index == 3:
+            raw_hz = 0.15 * cell.calibration_fwhm_hz
+        elif identity_index == 4:
+            raw_hz = -0.15 * cell.calibration_fwhm_hz
+        before_center_hz = tracker.estimate().identities[identity_index].center_hz
+        pair = _complete_pair_with_raw(tracker, base_calibration, raw_hz)
+        if identity_index in {3, 4}:
+            direction = 1.0 if identity_index == 3 else -1.0
+            assert pair.lock_state == "step_limited"
+            assert pair.applied_step_hz == direction * cell.max_step_hz
+            expected_centers = tuple(
+                center + direction * cell.max_step_hz
+                if index == identity_index
+                else center
+                for index, center in enumerate(expected_centers)
+            )
+            assert pair.candidate_center_hz == (
+                before_center_hz + direction * cell.max_step_hz
+            )
+            assert (
+                cell.allowed_center_min_hz
+                <= pair.candidate_center_hz
+                <= cell.allowed_center_max_hz
+            )
+        assert tuple(
+            identity.center_hz for identity in tracker.estimate().identities
+        ) == expected_centers
+
+    tracker = CalibratedTwoPointTracker(base_configuration)
+    tracker.reset(
+        metadata,
+        base_calibration,
+        TwoPointBudgetCeiling(None, 100.0, None, None),
+        seed=59,
+    )
+    initial = tracker.estimate()
+    r0_initial = initial.identities[0]
+    r0_initial_epoch = (
+        r0_initial.center_hz,
+        r0_initial.active_source_kind,
+        r0_initial.active_source_pair_index,
+        r0_initial.active_reference_timestamp_s,
+        r0_initial.active_release_sequence_index,
+        r0_initial.active_release_timestamp_s,
+    )
+    first_query = tracker.choose_next_query()
+    assert first_query is not None
+    first_value, _, _ = _pair_fluorescence_for_raw(
+        base_calibration, 0, first_query.interrogation_center_hz, 0.0
+    )
+    tracker.update(
+        EstimatorObservation(
+            first_query.expected_sequence_index,
+            first_query.expected_end_timestamp_s,
+            first_query.frequency_hz,
+            first_value,
+            first_query.integration_time_s,
+            first_query.expected_nominal_exposure_photons,
+            None,
+        )
+    )
+    after_first = tracker.estimate()
+    r0_after_first = after_first.identities[0]
+    assert (
+        r0_after_first.center_hz,
+        r0_after_first.active_source_kind,
+        r0_after_first.active_source_pair_index,
+        r0_after_first.active_reference_timestamp_s,
+        r0_after_first.active_release_sequence_index,
+        r0_after_first.active_release_timestamp_s,
+    ) == r0_initial_epoch
+    assert r0_after_first.active_source_kind == "calibration"
+    assert r0_after_first.estimate_age_sequence_indices == (
+        after_first.current_sequence_index
+        - r0_after_first.active_release_sequence_index
+    )
+    assert r0_after_first.estimate_age_s == (
+        after_first.current_timestamp_s
+        - r0_after_first.active_reference_timestamp_s
+    )
+    assert r0_after_first.release_age_s == (
+        after_first.current_timestamp_s
+        - r0_after_first.active_release_timestamp_s
+    )
+    assert r0_after_first.estimate_age_s > r0_initial.estimate_age_s
+
+    second_query = tracker.choose_next_query()
+    assert second_query is not None
+    _, second_value, _ = _pair_fluorescence_for_raw(
+        base_calibration, 0, second_query.interrogation_center_hz, 0.0
+    )
+    released = tracker.update(
+        EstimatorObservation(
+            second_query.expected_sequence_index,
+            second_query.expected_end_timestamp_s,
+            second_query.frequency_hz,
+            second_value,
+            second_query.integration_time_s,
+            second_query.expected_nominal_exposure_photons,
+            None,
+        )
+    ).completed_pair
+    assert released is not None
+    r0_fresh = tracker.estimate().identities[0]
+    assert r0_fresh.active_source_kind == "pair"
+    assert r0_fresh.estimate_age_sequence_indices == 0
+    assert r0_fresh.estimate_age_s == (
+        released.release_timestamp_s - released.pair_reference_timestamp_s
+    )
+    assert r0_fresh.estimate_age_s > 0.0
+    assert r0_fresh.release_age_s == 0.0
+
+    r1_before_failure = tracker.estimate().identities[1]
+    failed_first = tracker.choose_next_query()
+    assert failed_first is not None
+    tracker.update(
+        EstimatorObservation(
+            failed_first.expected_sequence_index,
+            failed_first.expected_end_timestamp_s,
+            failed_first.frequency_hz,
+            1.0,
+            failed_first.integration_time_s,
+            failed_first.expected_nominal_exposure_photons,
+            None,
+        )
+    )
+    r0_nonfresh = tracker.estimate().identities[0]
+    assert r0_nonfresh.estimate_age_sequence_indices == (
+        tracker.estimate().current_sequence_index
+        - r0_nonfresh.active_release_sequence_index
+    )
+    failed_second = tracker.choose_next_query()
+    assert failed_second is not None
+    failed = tracker.update(
+        EstimatorObservation(
+            failed_second.expected_sequence_index,
+            failed_second.expected_end_timestamp_s,
+            failed_second.frequency_hz,
+            -1.0,
+            failed_second.integration_time_s,
+            failed_second.expected_nominal_exposure_photons,
+            None,
+        )
+    ).completed_pair
+    assert failed is not None
+    assert failed.failure_code == "invalid_pair_normalization"
+    r1_after_failure = tracker.estimate().identities[1]
+    assert r1_after_failure.center_hz == r1_before_failure.center_hz
+    assert (
+        r1_after_failure.active_source_kind
+        == r1_before_failure.active_source_kind
+        == "calibration"
+    )
+    assert (
+        r1_after_failure.active_reference_timestamp_s
+        == r1_before_failure.active_reference_timestamp_s
+    )
+    assert (
+        r1_after_failure.active_release_sequence_index
+        == r1_before_failure.active_release_sequence_index
+    )
+    assert r1_after_failure.estimate_age_sequence_indices == (
+        tracker.estimate().current_sequence_index
+        - r1_after_failure.active_release_sequence_index
+    )
+    assert r1_after_failure.estimate_age_s == (
+        tracker.estimate().current_timestamp_s
+        - r1_after_failure.active_reference_timestamp_s
+    )
+    assert r1_after_failure.release_age_s == (
+        tracker.estimate().current_timestamp_s
+        - r1_after_failure.active_release_timestamp_s
+    )
+
+    for _ in range(6):
+        retained_pair = _complete_pair_with_raw(tracker, base_calibration, 0.0)
+        assert retained_pair.lock_state == "tracking"
+    r0_before_failure = tracker.estimate().identities[0]
+    r0_pair_epoch = (
+        r0_before_failure.center_hz,
+        r0_before_failure.active_source_kind,
+        r0_before_failure.active_source_pair_index,
+        r0_before_failure.active_reference_timestamp_s,
+        r0_before_failure.active_release_sequence_index,
+        r0_before_failure.active_release_timestamp_s,
+    )
+    assert r0_pair_epoch[1:3] == ("pair", 0)
+
+    failed_r0 = None
+    for arrival_index, fluorescence in enumerate((1.0, -1.0)):
+        query = tracker.choose_next_query()
+        assert query is not None
+        assert query.pair_index == 8
+        failed_r0 = tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                fluorescence,
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                None,
+            )
+        ).completed_pair
+        r0_after_arrival = tracker.estimate().identities[0]
+        assert (
+            r0_after_arrival.center_hz,
+            r0_after_arrival.active_source_kind,
+            r0_after_arrival.active_source_pair_index,
+            r0_after_arrival.active_reference_timestamp_s,
+            r0_after_arrival.active_release_sequence_index,
+            r0_after_arrival.active_release_timestamp_s,
+        ) == r0_pair_epoch
+        if arrival_index == 0:
+            assert failed_r0 is None
+    assert failed_r0 is not None
+    assert failed_r0.failure_code == "invalid_pair_normalization"
+    assert tracker.estimate().identities[0].estimate_age_sequence_indices == (
+        tracker.estimate().current_sequence_index - r0_pair_epoch[4]
+    )
+    assert tracker.estimate().identities[0].estimate_age_s == (
+        tracker.estimate().current_timestamp_s - r0_pair_epoch[3]
+    )
+    assert tracker.estimate().identities[0].release_age_s == (
+        tracker.estimate().current_timestamp_s - r0_pair_epoch[5]
+    )
+
+
+class _RejectingFutureObservationContainer:
+    def __getattribute__(self, name: str):
+        if name.startswith("__"):
+            return object.__getattribute__(self, name)
+        raise AssertionError("tracker inspected a future-observation container")
+
+
+def _assert_tracker_graph_has_no_truth_path(value: object) -> None:
+    forbidden_types = (
+        InstrumentObservation,
+        ResourceSnapshot,
+        SpectralSnapshot,
+        Future,
+    )
+    forbidden_name_fragments = (
+        "expected_photons",
+        "truth",
+        "dynamics",
+        "future",
+        "noise",
+        "callback",
+        "evaluator",
+        "capability",
+    )
+    visited: set[int] = set()
+
+    def inspect_name(name: object, path: str) -> None:
+        if isinstance(name, bytes):
+            name = name.decode(errors="replace")
+        if isinstance(name, str):
+            normalized = name.casefold()
+            assert not any(
+                fragment in normalized for fragment in forbidden_name_fragments
+            ), f"forbidden name or token at {path}: {name!r}"
+
+    def inspect_value(item: object, path: str) -> None:
+        if isinstance(item, forbidden_types):
+            raise AssertionError(f"forbidden full-resource type at {path}")
+        inspect_name(item, path)
+        type_name = f"{type(item).__module__}.{type(item).__qualname__}"
+        inspect_name(type_name, f"{path}.__type__")
+        if callable(item) and not isinstance(item, type):
+            raise AssertionError(f"forbidden retained callback at {path}")
+        if item is None or isinstance(item, str | bytes | int | float | bool):
+            return
+        identity = id(item)
+        if identity in visited:
+            return
+        visited.add(identity)
+        represented_names: set[str] = set()
+        if is_dataclass(item) and not isinstance(item, type):
+            for field in fields(item):
+                represented_names.add(field.name)
+                inspect_name(field.name, f"{path}.{field.name}")
+                inspect_value(getattr(item, field.name), f"{path}.{field.name}")
+        if isinstance(item, Mapping):
+            for key, nested in item.items():
+                inspect_name(key, f"{path}.key")
+                inspect_value(key, f"{path}.key")
+                inspect_value(nested, f"{path}[{key!r}]")
+            return
+        if isinstance(item, tuple | list | set | frozenset):
+            for index, nested in enumerate(item):
+                inspect_value(nested, f"{path}[{index}]")
+            return
+        instance_dictionary = getattr(item, "__dict__", None)
+        if isinstance(instance_dictionary, Mapping):
+            for key, nested in instance_dictionary.items():
+                if key in represented_names:
+                    continue
+                inspect_name(key, f"{path}.__dict__.key")
+                inspect_value(nested, f"{path}.{key}")
+        for owner in type(item).__mro__:
+            slots = getattr(owner, "__slots__", ())
+            slots = (slots,) if isinstance(slots, str) else slots
+            for slot in slots:
+                if slot in {"__dict__", "__weakref__"}:
+                    continue
+                if slot in represented_names:
+                    continue
+                inspect_name(slot, f"{path}.{slot}")
+                if hasattr(item, slot):
+                    inspect_value(getattr(item, slot), f"{path}.{slot}")
+
+    inspect_value(value, "tracker")
+
+
+class _EvaluatorSentinel:
+    pass
+
+
+class _CapabilitySentinel:
+    pass
+
+
+class _DictionaryHolder:
+    pass
+
+
+class _BaseSlotHolder:
+    __slots__ = ("retained",)
+
+    def __init__(self, retained: object) -> None:
+        self.retained = retained
+
+
+class _DerivedSlotHolder(_BaseSlotHolder):
+    __slots__ = ()
+
+
+@dataclass
+class _DynamicDataclassHolder:
+    public_value: int
+
+
+def test_truth_graph_checker_rejects_every_forbidden_storage_form() -> None:
+    dictionary_holder = _DictionaryHolder()
+    dictionary_holder.retained = Future()
+    dataclass_holder = _DynamicDataclassHolder(1)
+    dataclass_holder.retained = Future()
+    rejecting_holder = _BaseSlotHolder(_RejectingFutureObservationContainer())
+    forbidden_values = (
+        object.__new__(InstrumentObservation),
+        object.__new__(ResourceSnapshot),
+        object.__new__(SpectralSnapshot),
+        Future(),
+        _EvaluatorSentinel(),
+        _CapabilitySentinel(),
+        {"expected_photons": 1.0},
+        {"safe": Future()},
+        dictionary_holder,
+        dataclass_holder,
+        _DerivedSlotHolder(Future()),
+        rejecting_holder,
+    )
+
+    for forbidden in forbidden_values:
+        with pytest.raises(AssertionError):
+            _assert_tracker_graph_has_no_truth_path(forbidden)
+
+
+def test_tracker_public_surface_has_no_evaluator_or_capability_api() -> None:
+    assert tuple(
+        name for name in dir(CalibratedTwoPointTracker) if not name.startswith("_")
+    ) == (
+        "calibration",
+        "choose_next_query",
+        "configuration",
+        "estimate",
+        "pair_history",
+        "pending_query",
+        "reset",
+        "update",
+    )
+
+
+def test_seed_is_observationally_inert_and_tracker_has_no_truth_path() -> None:
+    configuration, calibration, metadata = _make_rounding_witness_calibration()
+    seeds = (60, 997, (1 << 127) + 3)
+    assert {seed % 2 for seed in seeds} == {0, 1}
+    assert len({seed % 8 for seed in seeds}) == 3
+    trackers = tuple(CalibratedTwoPointTracker(configuration) for _ in seeds)
+    for tracker, seed in zip(trackers, seeds, strict=True):
+        tracker.reset(
+            metadata,
+            calibration,
+            TwoPointBudgetCeiling(None, 100.0, None, None),
+            seed=seed,
+        )
+    reference = trackers[0]
+    for comparison in trackers[1:]:
+        assert replace(
+            reference.estimate(), seed=comparison.estimate().seed
+        ) == comparison.estimate()
+
+    for _ in range(18):
+        queries = tuple(tracker.choose_next_query() for tracker in trackers)
+        assert all(query == queries[0] for query in queries[1:])
+        reference_query = queries[0]
+        assert reference_query is not None
+        identity_index = reference_query.pair_index % 8
+        cell = calibration.identities[identity_index]
+        fluorescence = _evaluate_target_only_model(
+            calibration.source.source_fit,
+            cell.source_fit_index,
+            reference_query.frequency_hz,
+            reference_query.interrogation_center_hz,
+        )
+        observation = EstimatorObservation(
+            reference_query.expected_sequence_index,
+            reference_query.expected_end_timestamp_s,
+            reference_query.frequency_hz,
+            fluorescence,
+            reference_query.integration_time_s,
+            reference_query.expected_nominal_exposure_photons,
+            None,
+        )
+        updates = tuple(tracker.update(observation) for tracker in trackers)
+        reference_update = updates[0]
+        for comparison, comparison_update in zip(
+            trackers[1:], updates[1:], strict=True
+        ):
+            assert replace(
+                reference_update.estimate,
+                seed=comparison_update.estimate.seed,
+            ) == comparison_update.estimate
+            assert reference_update.query == comparison_update.query
+            assert reference_update.observation == comparison_update.observation
+            assert reference_update.completed_pair == comparison_update.completed_pair
+            assert reference.pending_query == comparison.pending_query
+            assert reference.pair_history == comparison.pair_history
+
+    pending = reference.choose_next_query()
+    assert pending is not None
+    before = _tracker_snapshot(reference)
+    with pytest.raises(TwoPointObservationValidationError) as caught:
+        reference.update(  # type: ignore[arg-type]
+            _RejectingFutureObservationContainer()
+        )
+    assert caught.value.code == "invalid_observation_type"
+    assert _tracker_snapshot(reference) == before
+    for tracker in trackers:
+        _assert_tracker_graph_has_no_truth_path(tracker)
+
+
+def _tracker_at_public_zero_model_sum_endpoint():
+    fit_configuration = replace(make_legal_fit_configuration(), baseline_degree=2)
+    source_fit = make_legal_source_fit(fit_configuration)
+    endpoint_baseline = Baseline(
+        0.004290640100839996,
+        2.777e9,
+        0.0,
+        1.0e-14,
+    )
+    assert source_fit.initial_guess is not None
+    source_fit = replace(
+        source_fit,
+        baseline_degree=2,
+        baseline_estimate=endpoint_baseline,
+        initial_guess=replace(
+            source_fit.initial_guess,
+            baseline=endpoint_baseline,
+        ),
+        jacobian_rank=35,
+    )
+    source = make_legal_caller_asserted_source(
+        source_fit=source_fit,
+        fit_configuration=fit_configuration,
+    )
+    configuration = replace(
+        make_legal_tracker_configuration(),
+        proportional_gain=100.0,
+        max_step_fwhm_fraction=16_175_000.0 / 1_500_000.0,
+    )
+    calibration = calibrate_two_point(
+        source,
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        TwoPointRunMetadata(
+            "clock",
+            None,
+            0.010,
+            2.5e6,
+            0.0,
+            "normalized_fluorescence",
+        ),
+        calibration,
+        TwoPointBudgetCeiling(100, None, None, None),
+        seed=67,
+    )
+
+    endpoint_pair = _complete_pair_with_raw(
+        tracker,
+        calibration,
+        0.15 * calibration.identities[0].calibration_fwhm_hz,
+    )
+    assert endpoint_pair.lock_state == "step_limited"
+    assert endpoint_pair.candidate_center_hz == 2_776_175_000.0
+    assert (
+        tracker.estimate().identities[0].center_hz
+        == calibration.identities[0].allowed_center_max_hz
+        == 2_776_175_000.0
+    )
+    cell = calibration.identities[0]
+    endpoint_center_hz = tracker.estimate().identities[0].center_hz
+    endpoint_models = (
+        _evaluate_target_only_model(
+            calibration.source.source_fit,
+            cell.source_fit_index,
+            endpoint_center_hz - cell.offset_hz,
+            endpoint_center_hz,
+        ),
+        _evaluate_target_only_model(
+            calibration.source.source_fit,
+            cell.source_fit_index,
+            endpoint_center_hz + cell.offset_hz,
+            endpoint_center_hz,
+        ),
+    )
+    assert tuple(value.hex() for value in endpoint_models) == (
+        "0x1.1be389a7e357ep-7",
+        "-0x1.1be389a7e357ep-7",
+    )
+    assert math.copysign(1.0, endpoint_models[0] + endpoint_models[1]) == 1.0
+    assert endpoint_models[0] + endpoint_models[1] == 0.0
+    for _ in range(7):
+        pair = _complete_pair_with_raw(tracker, calibration, 0.0)
+        assert pair.lock_state == "tracking"
+    assert tracker.estimate().completed_pairs == 8
+    return tracker, calibration
+
+
+def _tracker_at_shifted_r0_pair(
+) -> tuple[CalibratedTwoPointTracker, TwoPointCalibration]:
+    tracker, calibration, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    first_cell = calibration.identities[0]
+    moved = _complete_pair_with_raw(
+        tracker,
+        calibration,
+        0.05 * first_cell.calibration_fwhm_hz,
+    )
+    assert moved.lock_state == "tracking"
+    assert moved.candidate_center_hz != first_cell.calibration_center_hz
+    for _ in range(7):
+        assert _complete_pair_with_raw(tracker, calibration, 0.0).lock_state == (
+            "tracking"
+        )
+    assert tracker.estimate().completed_pairs == 8
+    return tracker, calibration
+
+
+@pytest.mark.parametrize("invalid_normalization", (False, True))
+def test_pair_geometry_is_current_center_only_or_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+    invalid_normalization: bool,
+) -> None:
+    tracker, calibration = _tracker_at_shifted_r0_pair()
+    cell = calibration.identities[0]
+    center_hz = tracker.estimate().identities[0].center_hz
+    minus_frequency_hz = center_hz - cell.offset_hz
+    plus_frequency_hz = center_hz + cell.offset_hz
+    mu_minus = _evaluate_target_only_model(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    mu_plus = _evaluate_target_only_model(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    g_minus = _target_center_derivative(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    g_plus = _target_center_derivative(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    model_sum = mu_minus + mu_plus
+    expected_geometry = (
+        (mu_minus - mu_plus) / model_sum,
+        2.0 * (mu_plus * g_minus - mu_minus * g_plus) / model_sum**2,
+    )
+    calibration_center_hz = cell.calibration_center_hz
+    calibration_mu_minus = _evaluate_target_only_model(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        calibration_center_hz - cell.offset_hz,
+        calibration_center_hz,
+    )
+    calibration_mu_plus = _evaluate_target_only_model(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        calibration_center_hz + cell.offset_hz,
+        calibration_center_hz,
+    )
+    calibration_g_minus = _target_center_derivative(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        calibration_center_hz - cell.offset_hz,
+        calibration_center_hz,
+    )
+    calibration_g_plus = _target_center_derivative(
+        calibration.source.source_fit,
+        cell.source_fit_index,
+        calibration_center_hz + cell.offset_hz,
+        calibration_center_hz,
+    )
+    calibration_sum = calibration_mu_minus + calibration_mu_plus
+    calibration_geometry = (
+        (calibration_mu_minus - calibration_mu_plus) / calibration_sum,
+        2.0
+        * (
+            calibration_mu_plus * calibration_g_minus
+            - calibration_mu_minus * calibration_g_plus
+        )
+        / calibration_sum**2,
+    )
+    assert expected_geometry != calibration_geometry
+
+    fluorescence_by_side = (
+        {"minus": 1.0, "plus": -1.0}
+        if invalid_normalization
+        else {"minus": mu_minus, "plus": mu_plus}
+    )
+    completed = None
+    for arrival_index in range(2):
+        query = tracker.choose_next_query()
+        assert query is not None
+        if arrival_index == 1 and invalid_normalization:
+            def reject_model_evaluation(*args, **kwargs):
+                del args, kwargs
+                raise AssertionError("invalid normalization must skip local geometry")
+
+            monkeypatch.setattr(
+                tracker_module,
+                "_evaluate_target_only_model",
+                reject_model_evaluation,
+            )
+        completed = tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                fluorescence_by_side[query.side],
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                None,
+            )
+        ).completed_pair
+
+    assert completed is not None
+    if invalid_normalization:
+        assert completed.failure_code == "invalid_pair_normalization"
+        assert (
+            completed.zero_discriminator,
+            completed.discriminator_slope_per_hz,
+        ) == (None, None)
+    else:
+        assert completed.failure_code is None
+        assert completed.lock_state == "tracking"
+        assert (
+            completed.zero_discriminator,
+            completed.discriminator_slope_per_hz,
+        ) == expected_geometry
+
+
+@pytest.mark.parametrize(
+    ("arrival_fluorescence", "expected_failure"),
+    (
+        pytest.param((1.0, 1.0), "numerical_failure", id="positive-observed-sum"),
+        pytest.param(
+            (1.0, -1.0),
+            "invalid_pair_normalization",
+            id="zero-observed-sum",
+        ),
+    ),
+)
+def test_public_endpoint_bad_model_commits_pair_and_advances_without_wedging(
+    monkeypatch: pytest.MonkeyPatch,
+    arrival_fluorescence: tuple[float, float],
+    expected_failure: str,
+) -> None:
+    tracker, calibration = _tracker_at_public_zero_model_sum_endpoint()
+    active_before = tracker.estimate().identities[0]
+    active_epoch_before = (
+        active_before.center_hz,
+        active_before.active_source_kind,
+        active_before.active_source_pair_index,
+        active_before.active_reference_timestamp_s,
+        active_before.active_release_sequence_index,
+        active_before.active_release_timestamp_s,
+    )
+    queries = []
+    completed = None
+    for arrival_index, fluorescence in enumerate(arrival_fluorescence):
+        query = tracker.choose_next_query()
+        assert query is not None
+        queries.append(query)
+        if arrival_index == 1 and expected_failure == "invalid_pair_normalization":
+            def reject_lower_precedence_model(*args, **kwargs):
+                del args, kwargs
+                raise AssertionError(
+                    "invalid observed normalization must precede model arithmetic"
+                )
+
+            monkeypatch.setattr(
+                tracker_module,
+                "_evaluate_target_only_model",
+                reject_lower_precedence_model,
+            )
+        completed = tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                fluorescence,
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                None,
+            )
+        ).completed_pair
+
+    assert tuple(query.side for query in queries) == ("plus", "minus")
+    assert completed is not None
+    assert completed.pair_index == 8
+    assert completed.failure_code == expected_failure
+    assert completed.lock_state == "lost"
+    assert completed.applied_step_hz == 0.0
+    assert (
+        completed.zero_discriminator,
+        completed.discriminator_slope_per_hz,
+    ) == (None, None)
+    assert (
+        completed.discriminator,
+        completed.common_mode_target_depths,
+        completed.raw_innovation_hz,
+        completed.requested_step_hz,
+        completed.candidate_center_hz,
+    ) == (None, None, None, None, None)
+    after = tracker.estimate()
+    assert after.completed_pairs == 9
+    assert after.accepted_observations == 18
+    assert after.pair_history[-1] is completed
+    active_after = after.identities[0]
+    assert active_after.latest_pair is completed
+    assert active_after.completed_pairs == 2
+    assert (
+        active_after.center_hz,
+        active_after.active_source_kind,
+        active_after.active_source_pair_index,
+        active_after.active_reference_timestamp_s,
+        active_after.active_release_sequence_index,
+        active_after.active_release_timestamp_s,
+    ) == active_epoch_before
+    next_query = tracker.choose_next_query()
+    assert next_query is not None
+    assert next_query.pair_index == 9
+    assert next_query.resonance_id == calibration.identities[1].resonance_id
+    assert next_query.identity_pair_index == 1
+    assert next_query.side == "plus"
+
+
+def _complete_numeric_witness_pair(
+    fluorescence: tuple[float, float],
+    monkeypatch: pytest.MonkeyPatch | None = None,
+    injected_stage: str | None = None,
+):
+    configuration, calibration, _ = _make_rounding_witness_calibration()
+    tracker, _, _ = _reset_rounding_witness(
+        TwoPointBudgetCeiling(None, 100.0, None, None)
+    )
+    completed = None
+    for arrival_index, value in enumerate(fluorescence):
+        query = tracker.choose_next_query()
+        assert query is not None
+        if arrival_index == 1 and injected_stage is not None:
+            assert monkeypatch is not None
+            if injected_stage == "model":
+                original_evaluator = tracker_module._evaluate_target_only_model
+                calls = 0
+
+                def nonfinite_current_model(
+                    *args,
+                    _original_evaluator=original_evaluator,
+                    **kwargs,
+                ):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        return math.inf
+                    return _original_evaluator(*args, **kwargs)
+
+                monkeypatch.setattr(
+                    tracker_module,
+                    "_evaluate_target_only_model",
+                    nonfinite_current_model,
+                )
+            elif injected_stage == "raw":
+                monkeypatch.setattr(
+                    tracker_module,
+                    "_pair_model_geometry",
+                    lambda *args, **kwargs: (
+                        1.0,
+                        0.0,
+                        float.fromhex("0x0.0000000000001p-1022"),
+                    ),
+                )
+            elif injected_stage == "candidate":
+                monkeypatch.setattr(
+                    tracker_module,
+                    "max",
+                    lambda *args: math.inf,
+                    raising=False,
+                )
+            else:
+                raise AssertionError(f"unknown injected stage: {injected_stage}")
+        completed = tracker.update(
+            EstimatorObservation(
+                query.expected_sequence_index,
+                query.expected_end_timestamp_s,
+                query.frequency_hz,
+                value,
+                query.integration_time_s,
+                query.expected_nominal_exposure_photons,
+                None,
+            )
+        ).completed_pair
+    assert completed is not None
+    return completed, configuration, calibration
+
+
+@pytest.mark.parametrize(
+    ("stage", "fluorescence", "diagnostic_presence"),
+    (
+        pytest.param(
+            "observed",
+            (1.0e308, 1.0e308),
+            (False, False, False, False, False),
+            id="observed-sum",
+        ),
+        pytest.param(
+            "discriminator",
+            (1.0e308, -8.0e307),
+            (False, False, False, False, False),
+            id="discriminator",
+        ),
+        pytest.param(
+            "common",
+            (5.0e307, 5.0e307),
+            (True, False, False, False, False),
+            id="common",
+        ),
+    ),
+)
+def test_numerical_failure_retains_exact_public_arithmetic_prefix(
+    stage: str,
+    fluorescence: tuple[float, float],
+    diagnostic_presence: tuple[bool, bool, bool, bool, bool],
+) -> None:
+    pair, _, _ = _complete_numeric_witness_pair(fluorescence)
+
+    assert pair.failure_code == "numerical_failure"
+    assert pair.lock_state == "lost"
+    assert pair.applied_step_hz == 0.0
+    assert tuple(
+        value is not None
+        for value in (
+            pair.discriminator,
+            pair.common_mode_target_depths,
+            pair.raw_innovation_hz,
+            pair.requested_step_hz,
+            pair.candidate_center_hz,
+        )
+    ) == diagnostic_presence
+    if stage == "observed":
+        assert (pair.zero_discriminator, pair.discriminator_slope_per_hz) == (
+            None,
+            None,
+        )
+    else:
+        assert pair.zero_discriminator is not None
+        assert pair.discriminator_slope_per_hz is not None
+        assert pair.discriminator_slope_per_hz > 0.0
+
+
+@pytest.mark.parametrize(
+    ("stage", "fluorescence", "diagnostic_presence"),
+    (
+        pytest.param(
+            "model",
+            (0.5, 0.5),
+            (False, False, False, False, False),
+            id="model-value",
+        ),
+        pytest.param(
+            "raw",
+            (1.0, 0.0),
+            (True, True, False, False, False),
+            id="raw-innovation",
+        ),
+        pytest.param(
+            "candidate",
+            (1.0, 0.0),
+            (True, True, True, True, False),
+            id="candidate-center",
+        ),
+    ),
+)
+def test_numerical_failure_retains_exact_fault_injected_arithmetic_prefix(
+    monkeypatch: pytest.MonkeyPatch,
+    stage: str,
+    fluorescence: tuple[float, float],
+    diagnostic_presence: tuple[bool, bool, bool, bool, bool],
+) -> None:
+    pair, _, _ = _complete_numeric_witness_pair(
+        fluorescence,
+        monkeypatch,
+        stage,
+    )
+
+    assert pair.failure_code == "numerical_failure"
+    assert pair.lock_state == "lost"
+    assert pair.applied_step_hz == 0.0
+    assert tuple(
+        value is not None
+        for value in (
+            pair.discriminator,
+            pair.common_mode_target_depths,
+            pair.raw_innovation_hz,
+            pair.requested_step_hz,
+            pair.candidate_center_hz,
+        )
+    ) == diagnostic_presence
+    if stage == "model":
+        assert (pair.zero_discriminator, pair.discriminator_slope_per_hz) == (
+            None,
+            None,
+        )
+    else:
+        assert pair.zero_discriminator is not None
+        assert pair.discriminator_slope_per_hz is not None
+        assert pair.discriminator_slope_per_hz > 0.0
+
+
+def test_requested_step_numerical_failure_retains_exact_prefix() -> None:
+    pair, _, _ = _complete_pair_for_gate("numerical")
+
+    assert pair.failure_code == "numerical_failure"
+    assert pair.lock_state == "lost"
+    assert pair.applied_step_hz == 0.0
+    assert tuple(
+        value is not None
+        for value in (
+            pair.discriminator,
+            pair.common_mode_target_depths,
+            pair.raw_innovation_hz,
+            pair.requested_step_hz,
+            pair.candidate_center_hz,
+        )
+    ) == (True, True, True, False, False)
+    assert pair.zero_discriminator is not None
+    assert pair.discriminator_slope_per_hz is not None
+    assert pair.discriminator_slope_per_hz > 0.0

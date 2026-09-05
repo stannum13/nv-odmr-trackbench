@@ -1014,6 +1014,8 @@ def _validate_pair_diagnostic_state(
     *,
     lock_state: object,
     failure_code: object,
+    zero_discriminator: float | None,
+    discriminator_slope_per_hz: float | None,
     discriminator: float | None,
     raw_innovation_hz: float | None,
     requested_step_hz: float | None,
@@ -1039,6 +1041,19 @@ def _validate_pair_diagnostic_state(
         requested_step_hz,
         candidate_center_hz,
     )
+    geometry_available = zero_discriminator is not None
+    if geometry_available != (discriminator_slope_per_hz is not None):
+        raise ValueError("pair-local zero and slope must be jointly available")
+    if not geometry_available and not (
+        lock_state == "lost"
+        and failure_code in {"invalid_pair_normalization", "numerical_failure"}
+        and all(value is None for value in diagnostic_values)
+    ):
+        raise ValueError(
+            "unavailable pair-local geometry requires an early scientific loss"
+        )
+    if failure_code == "invalid_pair_normalization" and geometry_available:
+        raise ValueError("invalid normalization cannot publish pair-local geometry")
     if lock_state in {"tracking", "step_limited"}:
         if failure_code is not None or any(
             value is None for value in diagnostic_values
@@ -1218,8 +1233,8 @@ class TwoPointPairResult:
     release_sequence_index: int
     release_timestamp_s: float
     discriminator: float | None
-    zero_discriminator: float
-    discriminator_slope_per_hz: float
+    zero_discriminator: float | None
+    discriminator_slope_per_hz: float | None
     raw_innovation_hz: float | None
     requested_step_hz: float | None
     candidate_center_hz: float | None
@@ -1326,14 +1341,17 @@ class TwoPointPairResult:
         ):
             raise ValueError("pair release must equal the second observation endpoint")
         discriminator = _optional_finite_float(self.discriminator, "discriminator")
-        zero_discriminator = _finite_float(
+        zero_discriminator = _optional_finite_float(
             self.zero_discriminator, "zero_discriminator"
         )
-        discriminator_slope_per_hz = _finite_float(
+        discriminator_slope_per_hz = _optional_finite_float(
             self.discriminator_slope_per_hz, "discriminator_slope_per_hz"
         )
-        if discriminator_slope_per_hz == 0.0:
-            raise ValueError("discriminator_slope_per_hz must be nonzero")
+        if (
+            discriminator_slope_per_hz is not None
+            and discriminator_slope_per_hz <= 0.0
+        ):
+            raise ValueError("discriminator_slope_per_hz must be positive")
         raw_innovation_hz = _optional_finite_float(
             self.raw_innovation_hz, "raw_innovation_hz"
         )
@@ -1350,6 +1368,8 @@ class TwoPointPairResult:
         _validate_pair_diagnostic_state(
             lock_state=lock_state,
             failure_code=failure_code,
+            zero_discriminator=zero_discriminator,
+            discriminator_slope_per_hz=discriminator_slope_per_hz,
             discriminator=discriminator,
             raw_innovation_hz=raw_innovation_hz,
             requested_step_hz=requested_step_hz,

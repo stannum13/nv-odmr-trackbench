@@ -335,8 +335,8 @@ TwoPointPairResult(
     release_sequence_index: int,
     release_timestamp_s: float,
     discriminator: float | None,
-    zero_discriminator: float,
-    discriminator_slope_per_hz: float,
+    zero_discriminator: float | None,
+    discriminator_slope_per_hz: float | None,
     raw_innovation_hz: float | None,
     requested_step_hz: float | None,
     candidate_center_hz: float | None,
@@ -1192,6 +1192,28 @@ e_0=\frac{\mu_- - \mu_+}{\mu_-+\mu_+},
 \frac{2(\mu_+g_- - \mu_-g_+)}{(\mu_-+\mu_+)^2}.
 \]
 
+`zero_discriminator` and `discriminator_slope_per_hz` describe only this
+pair-local geometry at the pair's frozen `q_i`; values from the calibration
+center may never be substituted for a shifted or singular pair. Both fields are
+jointly `None` when observed normalization prevents model evaluation, or when
+the pair-local model values, modeled sum, zero, or slope do not yield valid
+geometry. Once pair-local geometry is valid, `zero_discriminator` is finite and
+`discriminator_slope_per_hz` is finite and strictly positive; both remain
+present through later numerical or policy diagnostics and every successful
+pair.
+
+This is a narrow post-implementation correction to the original mandatory-
+float record contract. Mandatory fields could not represent an invalid observed
+sum without evaluating a lower-precedence model, and could not represent a
+zero-model-sum endpoint without falsely publishing calibration-center geometry
+as pair-local. Caching geometry at each actual pair start was considered, but
+would perform model arithmetic before the observed-sum gate and expand the
+partial-pair state solely to populate diagnostics that may be scientifically
+unavailable. Joint optional fields preserve gate precedence and honest
+provenance at the cost that consumers must branch on availability. The
+constructor enforces joint presence, the early-loss-only rule for absence, and
+strictly positive available slope.
+
 On the minus flank `u<0`, so `g_minus>0`; on the plus flank `u>0`,
 so `g_plus<0`. With positive modeled flank fluorescence, `kappa_i>0`: a
 target center displaced upward produces a positive innovation. A non-positive
@@ -1411,9 +1433,17 @@ The exact pair-decision precedence is:
 
 1. Compute the pair sum from finite observations. A non-finite sum is
    `numerical_failure`; a finite sum `<=0` is `invalid_pair_normalization`.
+   Pair-local model arithmetic is not evaluated, so both pair-local zero and
+   slope are `None`.
 2. Any non-finite discriminator, common diagnostic, innovation, requested
    step, clipped step, candidate, model value, or derived arithmetic is
-   `numerical_failure`. Later gates are not evaluated.
+   `numerical_failure`. Later gates are not evaluated. Model geometry is
+   evaluated only at the frozen pair center. If a model value, modeled sum,
+   zero, or slope prevents valid pair-local geometry, zero and slope are both
+   `None`; if a later derived value is non-finite, the already-valid finite zero
+   and positive slope remain present. An actually raised `ArithmeticError` is a
+   construction failure and rolls the update back; this gate covers computed
+   non-finite values rather than raised exceptions.
 3. If configured, `abs(common_mode_target_depths) > limit` gives
    `common_mode_limit_exceeded`; equality passes.
 4. `abs(raw_innovation_hz) > capture_radius_hz` gives `capture_exceeded`;

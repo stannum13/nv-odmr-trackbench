@@ -388,6 +388,82 @@ def test_pair_diagnostic_prefix_matrix(
         replace(pair, **{field: value})
 
 
+def test_pair_local_geometry_is_optional_only_before_it_is_available() -> None:
+    from odmr_bench.estimators import TwoPointPairResult
+
+    assert TwoPointPairResult.__annotations__["zero_discriminator"] == "float | None"
+    assert (
+        TwoPointPairResult.__annotations__["discriminator_slope_per_hz"]
+        == "float | None"
+    )
+
+    invalid_normalization = make_legal_pair_result(
+        lock_state="lost",
+        failure_code="invalid_pair_normalization",
+    )
+    unavailable_model = make_legal_pair_result(
+        lock_state="lost",
+        failure_code="numerical_failure",
+        numerical_prefix=0,
+    )
+    assert (
+        invalid_normalization.zero_discriminator,
+        invalid_normalization.discriminator_slope_per_hz,
+    ) == (None, None)
+    assert (
+        unavailable_model.zero_discriminator,
+        unavailable_model.discriminator_slope_per_hz,
+    ) == (None, None)
+
+    discriminator_failure = replace(
+        unavailable_model,
+        zero_discriminator=0.0,
+        discriminator_slope_per_hz=1.0e-6,
+    )
+    assert discriminator_failure.zero_discriminator == 0.0
+    assert discriminator_failure.discriminator_slope_per_hz == 1.0e-6
+
+    for changes in (
+        {"zero_discriminator": 0.0},
+        {"discriminator_slope_per_hz": 1.0e-6},
+        {
+            "zero_discriminator": 0.0,
+            "discriminator_slope_per_hz": 0.0,
+        },
+        {
+            "zero_discriminator": 0.0,
+            "discriminator_slope_per_hz": -1.0e-6,
+        },
+    ):
+        with pytest.raises((TypeError, ValueError)):
+            replace(unavailable_model, **changes)
+
+    with pytest.raises(ValueError):
+        replace(
+            invalid_normalization,
+            zero_discriminator=0.0,
+            discriminator_slope_per_hz=1.0e-6,
+        )
+    for pair in (
+        make_legal_pair_result(),
+        make_legal_pair_result(
+            lock_state="lost",
+            failure_code="common_mode_limit_exceeded",
+        ),
+        make_legal_pair_result(
+            lock_state="lost",
+            failure_code="numerical_failure",
+            numerical_prefix=1,
+        ),
+    ):
+        with pytest.raises(ValueError):
+            replace(
+                pair,
+                zero_discriminator=None,
+                discriminator_slope_per_hz=None,
+            )
+
+
 def test_identity_estimate_aggregate_estimate_and_update_intrinsic_matrix() -> None:
     from odmr_bench.estimators import PublicAcquisitionResources
 

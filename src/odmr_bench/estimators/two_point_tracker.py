@@ -10,6 +10,10 @@ from typing import final
 import numpy as np
 
 from odmr_bench.emulator.observations import EstimatorObservation
+from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_target_only_model,
+    _target_center_derivative,
+)
 from odmr_bench.estimators.two_point_resources import _zero_public_resources
 from odmr_bench.estimators.two_point_types import (
     PairSide,
@@ -27,6 +31,7 @@ from odmr_bench.estimators.two_point_types import (
     TwoPointUpdate,
     TwoPointUpdateConstructionError,
 )
+from odmr_bench.estimators.types import SpectrumFitResult
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +116,167 @@ def _advance_observation_resources(
     )
 
 
+def _pair_model_geometry(
+    source_fit: SpectrumFitResult,
+    source_fit_index: int,
+    minus_frequency_hz: float,
+    plus_frequency_hz: float,
+    center_hz: float,
+) -> tuple[float, float, float] | None:
+    """Return finite pair-model sum, zero and slope, or a scientific failure."""
+    mu_minus = _evaluate_target_only_model(
+        source_fit,
+        source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    mu_plus = _evaluate_target_only_model(
+        source_fit,
+        source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    g_minus = _target_center_derivative(
+        source_fit,
+        source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    g_plus = _target_center_derivative(
+        source_fit,
+        source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    model_sum = mu_minus + mu_plus
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (mu_minus, mu_plus, g_minus, g_plus, model_sum)
+        )
+        or model_sum == 0.0
+    ):
+        return None
+    zero_discriminator = (mu_minus - mu_plus) / model_sum
+    discriminator_slope_per_hz = 2.0 * (
+        mu_plus * g_minus - mu_minus * g_plus
+    ) / model_sum**2
+    if (
+        not math.isfinite(zero_discriminator)
+        or not math.isfinite(discriminator_slope_per_hz)
+        or discriminator_slope_per_hz <= 0.0
+    ):
+        return None
+    return model_sum, zero_discriminator, discriminator_slope_per_hz
+
+
+def _identity_after_observation(
+    identity: TwoPointIdentityEstimate,
+    observation: EstimatorObservation,
+    *,
+    completed_pair: TwoPointPairResult | None = None,
+) -> TwoPointIdentityEstimate:
+    successful_pair = completed_pair is not None and completed_pair.lock_state in {
+        "tracking",
+        "step_limited",
+    }
+    center_hz = (
+        completed_pair.candidate_center_hz
+        if successful_pair and completed_pair is not None
+        else identity.center_hz
+    )
+    active_source_kind = "pair" if successful_pair else identity.active_source_kind
+    active_source_pair_index = (
+        completed_pair.pair_index
+        if successful_pair and completed_pair is not None
+        else identity.active_source_pair_index
+    )
+    active_reference_timestamp_s = (
+        completed_pair.pair_reference_timestamp_s
+        if successful_pair and completed_pair is not None
+        else identity.active_reference_timestamp_s
+    )
+    active_release_sequence_index = (
+        completed_pair.release_sequence_index
+        if successful_pair and completed_pair is not None
+        else identity.active_release_sequence_index
+    )
+    active_release_timestamp_s = (
+        completed_pair.release_timestamp_s
+        if successful_pair and completed_pair is not None
+        else identity.active_release_timestamp_s
+    )
+    estimate_age_sequence_indices = (
+        None
+        if active_release_sequence_index is None
+        else observation.sequence_index - active_release_sequence_index
+    )
+    return TwoPointIdentityEstimate(
+        resonance_id=identity.resonance_id,
+        center_hz=center_hz,
+        calibration_fwhm_hz=identity.calibration_fwhm_hz,
+        calibration_cell_lower_hz=identity.calibration_cell_lower_hz,
+        calibration_cell_upper_hz=identity.calibration_cell_upper_hz,
+        allowed_center_min_hz=identity.allowed_center_min_hz,
+        allowed_center_max_hz=identity.allowed_center_max_hz,
+        active_source_kind=active_source_kind,
+        active_source_pair_index=active_source_pair_index,
+        active_reference_timestamp_s=active_reference_timestamp_s,
+        active_release_sequence_index=active_release_sequence_index,
+        active_release_timestamp_s=active_release_timestamp_s,
+        estimate_age_sequence_indices=estimate_age_sequence_indices,
+        estimate_age_s=observation.timestamp_s - active_reference_timestamp_s,
+        release_age_s=observation.timestamp_s - active_release_timestamp_s,
+        completed_pairs=(
+            identity.completed_pairs + int(completed_pair is not None)
+        ),
+        lock_state=(
+            completed_pair.lock_state
+            if completed_pair is not None
+            else identity.lock_state
+        ),
+        failure_code=(
+            completed_pair.failure_code
+            if completed_pair is not None
+            else identity.failure_code
+        ),
+        latest_pair=(
+            completed_pair if completed_pair is not None else identity.latest_pair
+        ),
+    )
+
+
+def _estimate_after_observation(
+    previous: TwoPointEstimate,
+    observation: EstimatorObservation,
+    *,
+    identities: tuple[TwoPointIdentityEstimate, ...],
+    incomplete_pair: TwoPointPartialPair | None,
+    pair_history: tuple[TwoPointPairResult, ...],
+    tracking_resources: PublicAcquisitionResources,
+    charged_resources: PublicAcquisitionResources,
+) -> TwoPointEstimate:
+    return TwoPointEstimate(
+        identities=identities,
+        calibration_source_id=previous.calibration_source_id,
+        calibration_source_provenance=previous.calibration_source_provenance,
+        calibration_budget_treatment=previous.calibration_budget_treatment,
+        current_sequence_index=observation.sequence_index,
+        current_timestamp_s=observation.timestamp_s,
+        accepted_observations=previous.accepted_observations + 1,
+        completed_pairs=len(pair_history),
+        incomplete_pair=incomplete_pair,
+        pending_query=None,
+        pair_history=pair_history,
+        tracking_resources=tracking_resources,
+        calibration_resources=previous.calibration_resources,
+        charged_resources=charged_resources,
+        budget_ceiling=previous.budget_ceiling,
+        stopped_reason=previous.stopped_reason,
+        seed=previous.seed,
+    )
+
+
 def _build_pending_query(
     *,
     query_index: int,
@@ -186,14 +352,20 @@ def _prospective_first_pair(
     if second_end_timestamp_s <= expected_end_timestamp_s:
         raise ValueError("second-query endpoint must strictly advance")
 
-    target = estimate.identities[0]
-    cell = calibration.identities[0]
+    pair_index = estimate.completed_pairs
+    identity_index = pair_index % len(estimate.identities)
+    target = estimate.identities[identity_index]
+    cell = calibration.identities[identity_index]
+    identity_pair_index = target.completed_pairs
+    first_side: PairSide = (
+        "minus" if identity_pair_index % 2 == 0 else "plus"
+    )
     query = _build_pending_query(
-        query_index=0,
-        pair_index=0,
-        identity_pair_index=0,
+        query_index=estimate.accepted_observations,
+        pair_index=pair_index,
+        identity_pair_index=identity_pair_index,
         resonance_id=target.resonance_id,
-        side="minus",
+        side=first_side,
         interrogation_center_hz=target.center_hz,
         offset_hz=cell.offset_hz,
         metadata=metadata,
@@ -445,7 +617,7 @@ class CalibratedTwoPointTracker:
                 pair_index=partial_pair.pair_index,
                 identity_pair_index=partial_pair.identity_pair_index,
                 resonance_id=partial_pair.resonance_id,
-                side="plus",
+                side=("plus" if partial_pair.first_side == "minus" else "minus"),
                 interrogation_center_hz=partial_pair.interrogation_center_hz,
                 offset_hz=cell.offset_hz,
                 metadata=state.metadata,
@@ -535,6 +707,245 @@ class CalibratedTwoPointTracker:
                 "observation values must preserve their constructor invariants",
             )
 
+        if state.estimate.incomplete_pair is not None:
+            partial_pair = state.estimate.incomplete_pair
+            try:
+                if partial_pair.first_side == "minus":
+                    minus_query = partial_pair.first_query
+                    minus_observation = partial_pair.first_observation
+                    plus_query = query
+                    plus_observation = observation
+                else:
+                    minus_query = query
+                    minus_observation = observation
+                    plus_query = partial_pair.first_query
+                    plus_observation = partial_pair.first_observation
+
+                cell_index = state.estimate.completed_pairs % len(
+                    state.calibration.identities
+                )
+                cell = state.calibration.identities[cell_index]
+                source_fit = state.calibration.source.source_fit
+                center_hz = partial_pair.interrogation_center_hz
+                observed_sum = (
+                    minus_observation.fluorescence
+                    + plus_observation.fluorescence
+                )
+                discriminator = None
+                common_mode_target_depths = None
+                raw_innovation_hz = None
+                requested_step_hz = None
+                candidate_center_hz = None
+                zero_discriminator = None
+                discriminator_slope_per_hz = None
+                applied_step_hz = 0.0
+                lock_state = "lost"
+                failure_code = None
+                if not math.isfinite(observed_sum):
+                    failure_code = "numerical_failure"
+                elif observed_sum <= 0.0:
+                    failure_code = "invalid_pair_normalization"
+                else:
+                    model_geometry = _pair_model_geometry(
+                        source_fit,
+                        cell.source_fit_index,
+                        minus_query.frequency_hz,
+                        plus_query.frequency_hz,
+                        center_hz,
+                    )
+                    if model_geometry is None:
+                        failure_code = "numerical_failure"
+                    else:
+                        (
+                            model_sum,
+                            zero_discriminator,
+                            discriminator_slope_per_hz,
+                        ) = model_geometry
+                        computed_discriminator = (
+                            minus_observation.fluorescence
+                            - plus_observation.fluorescence
+                        ) / observed_sum
+                        if math.isfinite(computed_discriminator):
+                            discriminator = computed_discriminator
+                            computed_common_mode = (
+                                observed_sum - model_sum
+                            ) / cell.target_pair_depth
+                            if math.isfinite(computed_common_mode):
+                                common_mode_target_depths = computed_common_mode
+                                computed_raw_innovation_hz = (
+                                    computed_discriminator - zero_discriminator
+                                ) / discriminator_slope_per_hz
+                                if math.isfinite(computed_raw_innovation_hz):
+                                    raw_innovation_hz = computed_raw_innovation_hz
+                                    computed_requested_step_hz = (
+                                        self._configuration.proportional_gain
+                                        * computed_raw_innovation_hz
+                                    )
+                                    if math.isfinite(computed_requested_step_hz):
+                                        requested_step_hz = computed_requested_step_hz
+                                        computed_applied_step_hz = max(
+                                            -cell.max_step_hz,
+                                            min(
+                                                computed_requested_step_hz,
+                                                cell.max_step_hz,
+                                            ),
+                                        )
+                                        computed_candidate_center_hz = (
+                                            center_hz + computed_applied_step_hz
+                                        )
+                                        if math.isfinite(
+                                            computed_candidate_center_hz
+                                        ):
+                                            candidate_center_hz = (
+                                                computed_candidate_center_hz
+                                            )
+                                        else:
+                                            failure_code = "numerical_failure"
+                                    else:
+                                        failure_code = "numerical_failure"
+                                else:
+                                    failure_code = "numerical_failure"
+                            else:
+                                failure_code = "numerical_failure"
+                        else:
+                            failure_code = "numerical_failure"
+
+                if failure_code is None:
+                    assert common_mode_target_depths is not None
+                    assert raw_innovation_hz is not None
+                    assert requested_step_hz is not None
+                    assert candidate_center_hz is not None
+                    common_limit = self._configuration.common_mode_limit_target_depths
+                    if (
+                        common_limit is not None
+                        and abs(common_mode_target_depths) > common_limit
+                    ):
+                        raw_innovation_hz = None
+                        requested_step_hz = None
+                        candidate_center_hz = None
+                        failure_code = "common_mode_limit_exceeded"
+                    elif abs(raw_innovation_hz) > cell.capture_radius_hz:
+                        requested_step_hz = None
+                        candidate_center_hz = None
+                        failure_code = "capture_exceeded"
+                    elif not (
+                        cell.allowed_center_min_hz
+                        <= candidate_center_hz
+                        <= cell.allowed_center_max_hz
+                    ):
+                        failure_code = "calibration_domain_exceeded"
+                    else:
+                        applied_step_hz = computed_applied_step_hz
+                        lock_state = (
+                            "tracking"
+                            if applied_step_hz == requested_step_hz
+                            else "step_limited"
+                        )
+                first_observation = partial_pair.first_observation
+                first_reference_s = (
+                    first_observation.timestamp_s
+                    - first_observation.integration_time_s / 2.0
+                )
+                second_reference_s = (
+                    observation.timestamp_s - observation.integration_time_s / 2.0
+                )
+                pair_reference_timestamp_s = first_reference_s + (
+                    second_reference_s - first_reference_s
+                ) / 2.0
+                pair_result = TwoPointPairResult(
+                    pair_index=query.pair_index,
+                    identity_pair_index=query.identity_pair_index,
+                    resonance_id=query.resonance_id,
+                    interrogation_center_hz=center_hz,
+                    first_side=partial_pair.first_side,
+                    minus_query=minus_query,
+                    plus_query=plus_query,
+                    minus_observation=minus_observation,
+                    plus_observation=plus_observation,
+                    pair_reference_timestamp_s=pair_reference_timestamp_s,
+                    release_sequence_index=observation.sequence_index,
+                    release_timestamp_s=observation.timestamp_s,
+                    discriminator=discriminator,
+                    zero_discriminator=zero_discriminator,
+                    discriminator_slope_per_hz=discriminator_slope_per_hz,
+                    raw_innovation_hz=raw_innovation_hz,
+                    requested_step_hz=requested_step_hz,
+                    candidate_center_hz=candidate_center_hz,
+                    applied_step_hz=applied_step_hz,
+                    common_mode_target_depths=common_mode_target_depths,
+                    lock_state=lock_state,
+                    failure_code=failure_code,
+                )
+            except Exception as error:
+                raise TwoPointUpdateConstructionError(
+                    "pair_result_construction_failed",
+                    f"pair-result construction failed: {error}",
+                ) from error
+            pair_history = (*state.pair_history, pair_result)
+
+            try:
+                identities = tuple(
+                    _identity_after_observation(
+                        identity,
+                        observation,
+                        completed_pair=(pair_result if index == cell_index else None),
+                    )
+                    for index, identity in enumerate(state.estimate.identities)
+                )
+            except Exception as error:
+                raise TwoPointUpdateConstructionError(
+                    "identity_estimate_construction_failed",
+                    f"identity-estimate construction failed: {error}",
+                ) from error
+
+            try:
+                tracking_resources = _advance_observation_resources(
+                    state.estimate.tracking_resources,
+                    observation,
+                    state.metadata,
+                )
+                charged_resources = _advance_observation_resources(
+                    state.estimate.charged_resources,
+                    observation,
+                    state.metadata,
+                )
+            except Exception as error:
+                raise TwoPointUpdateConstructionError(
+                    "resource_construction_failed",
+                    f"resource construction failed: {error}",
+                ) from error
+
+            try:
+                estimate = _estimate_after_observation(
+                    state.estimate,
+                    observation,
+                    identities=identities,
+                    incomplete_pair=None,
+                    pair_history=pair_history,
+                    tracking_resources=tracking_resources,
+                    charged_resources=charged_resources,
+                )
+                metadata = replace(
+                    state.metadata,
+                    current_sequence_index=observation.sequence_index,
+                    current_timestamp_s=observation.timestamp_s,
+                )
+                prospective_state = replace(
+                    state,
+                    metadata=metadata,
+                    pending_query=None,
+                    pair_history=pair_history,
+                    estimate=estimate,
+                )
+                update = TwoPointUpdate(query, observation, pair_result, estimate)
+            except Exception as error:
+                raise TwoPointUpdateConstructionError(
+                    "aggregate_estimate_construction_failed",
+                    f"aggregate-estimate construction failed: {error}",
+                ) from error
+            self._state = prospective_state
+            return update
+
         try:
             partial_pair = TwoPointPartialPair(
                 pair_index=query.pair_index,
@@ -556,47 +967,17 @@ class CalibratedTwoPointTracker:
                 state.metadata,
             )
             identities = tuple(
-                replace(
-                    identity,
-                    estimate_age_sequence_indices=(
-                        None
-                        if identity.active_release_sequence_index is None
-                        else observation.sequence_index
-                        - identity.active_release_sequence_index
-                    ),
-                    estimate_age_s=(
-                        observation.timestamp_s
-                        - identity.active_reference_timestamp_s
-                    ),
-                    release_age_s=(
-                        observation.timestamp_s
-                        - identity.active_release_timestamp_s
-                    ),
-                )
+                _identity_after_observation(identity, observation)
                 for identity in state.estimate.identities
             )
-            estimate = TwoPointEstimate(
+            estimate = _estimate_after_observation(
+                state.estimate,
+                observation,
                 identities=identities,
-                calibration_source_id=state.estimate.calibration_source_id,
-                calibration_source_provenance=(
-                    state.estimate.calibration_source_provenance
-                ),
-                calibration_budget_treatment=(
-                    state.estimate.calibration_budget_treatment
-                ),
-                current_sequence_index=observation.sequence_index,
-                current_timestamp_s=observation.timestamp_s,
-                accepted_observations=state.estimate.accepted_observations + 1,
-                completed_pairs=state.estimate.completed_pairs,
                 incomplete_pair=partial_pair,
-                pending_query=None,
                 pair_history=state.estimate.pair_history,
                 tracking_resources=tracking_resources,
-                calibration_resources=state.estimate.calibration_resources,
                 charged_resources=charged_resources,
-                budget_ceiling=state.estimate.budget_ceiling,
-                stopped_reason=state.estimate.stopped_reason,
-                seed=state.estimate.seed,
             )
             metadata = replace(
                 state.metadata,

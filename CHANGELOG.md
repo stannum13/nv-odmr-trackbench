@@ -70,6 +70,37 @@ once a package version is introduced.
 
 ### Added
 
+- Completed estimator-side calibrated two-point pair updates. The tracker now
+  computes the canonical public discriminator, common-mode diagnostic, signed
+  hertz innovation, proportional request, strict capture/common-mode gates,
+  inclusive fixed-cell domain check, and exact tracking-versus-step-limited
+  result. Scientific failures retain the diagnostic prefix owned by their
+  six-stage precedence, apply exactly zero step, preserve the prior active
+  source, charge both accepted observations, and still advance history and the
+  r0…r7 schedule. Successful pairs refresh public reference/release epochs and
+  exact active ages, including zero-step releases; per-identity odd pairs flip
+  arrival order to plus/minus. Pair, identity, resource, and aggregate
+  construction are prospective, commit once, and expose distinct chained
+  failure codes. Focused coverage pins one-ULP domain boundaries, repeated
+  legal steps, failed-pair aging, inert seeds, and the absence of retained
+  truth/full-resource state. Evaluator behavior remains assigned to later
+  tasks. Review hardening gives invalid observed normalization precedence over
+  model evaluation and converts publicly reachable model or derived arithmetic
+  failures into committed numerical losses, including an exact quadratic
+  allowed-endpoint zero-model-sum witness. Combined signed gate defects and all
+  numerical diagnostic prefixes are pinned, as are exact six-field
+  second-arrival resources in both budget modes, recursive rejection of hidden
+  snapshots/futures/evaluator capabilities through mappings, dictionaries, and
+  inherited slots, the closed non-evaluator tracker surface, diverse inert
+  seeds, and complete retained active-source epochs. Final re-review hardening
+  restores typed rollback for actually raised arithmetic exceptions while
+  preserving committed numerical losses for computed non-finite values. It
+  also corrects the original public pair-result contract: modeled zero and
+  slope are jointly optional when frozen-center geometry was not evaluated or
+  unavailable, never borrowed from the calibration center, and otherwise must
+  be finite with a strictly positive slope. The truth audit now inspects
+  dataclass dynamic storage and all inherited slots after declared fields. The
+  final task re-review reported zero Critical, Important, or Minor findings.
 - Added first-flank acceptance and the reserved plus-side transition to the
   calibrated two-point tracker. `update` now rejects non-exact or mismatched
   estimator observations with the closed eight-code precedence before any

@@ -267,6 +267,23 @@ and the complete capture-plus-probe envelope must remain inside the assigned
 domain. A finite candidate that exits it is a zero-step policy failure, not
 permission to relabel a resonance.
 
+The public pair result's modeled zero discriminator and discriminator slope
+refer only to the pair's frozen interrogation center. They are jointly absent
+when an invalid observed sum prevents model evaluation or when pair-local model
+geometry is unavailable, including a zero modeled sum; calibration-center
+values must not be substituted. After pair-local geometry is reached, the zero
+is finite and the slope is finite and strictly positive, and both remain
+available through later numerical or policy outcomes. The original mandatory-
+field contract could represent these early losses only by evaluating a lower-
+precedence model or mislabeling a different center's geometry. Caching actual
+pair-start geometry was considered, but it would move model arithmetic before
+the observed-normalization gate and enlarge partial state. Joint optional
+fields instead preserve causal precedence and scientific provenance, with an
+explicit availability branch required of consumers. Computed non-finite values
+are committed scientific numerical losses; an arithmetic exception raised
+during model or derived evaluation remains a construction failure with atomic
+rollback.
+
 ### 4.3 Common estimator boundary
 
 Realtime estimators should converge on a common behavioral contract:

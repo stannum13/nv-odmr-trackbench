@@ -93,7 +93,44 @@ second public-resource construction proves typed chaining and rollback after
 the first resource construction succeeds, and the update-surface test now
 checks the typed exception message contract instead of a vacuous class-truth
 assertion. The final independent re-review approved Task 7 with zero Critical,
-Important, or Minor findings after these locally verified corrections.
+Important, or Minor findings after these locally verified corrections. Task 8
+completes the estimator-side pair transition. Adjacent public flank values now
+produce the signed hertz discriminator update through the exact six-stage
+normalization, numerical, common-mode, capture, fixed-domain, and clipping
+policy. Scientific failures commit charged `lost` pairs without refreshing the
+active source; successful pairs refresh the center's public reference and
+release epochs even for an exact zero step. Every pair advances the r0…r7
+round-robin schedule, including failures, and per-identity arrival order flips
+from minus/plus to plus/minus on odd pairs. Pair, identity, resource, and
+aggregate construction have distinct chained failure codes and one commit-last
+state replacement. Inclusive allowed endpoints, one-ULP outward rejection,
+active-age equations, inert tracker seeds, and absence of full-resource/truth
+paths are covered by focused tests. Evaluator APIs remain deferred.
+Task 8's first combined review found four Important and two Minor gaps. The
+amendment gives observed-sum validation precedence over current-center model
+arithmetic and commits every representability failure reachable from a valid
+public calibration as `lost/numerical_failure`. Its initial calibration-center
+fallback for unavailable mandatory geometry was subsequently rejected as
+scientifically mislabeled. The exact quadratic allowed-endpoint witness now
+advances after both positive and zero observed sums. Combined signed gate
+defects, every numerical diagnostic prefix, exact
+second-arrival resource fields in both budget modes, recursive truth/capability
+storage sentinels, the closed tracker surface, seed parity/modulo diversity, and
+full retained pair-source epochs now have focused regression coverage.
+Task 8's final re-review found three remaining Important contract/evidence
+defects. Raised model or derived `ArithmeticError` values now retain the brief's
+typed construction-error rollback, while explicitly computed non-finite values
+remain committed scientific losses. The approved design and scientific spec
+now correct the original mandatory pair-geometry deficiency:
+`zero_discriminator` and `discriminator_slope_per_hz` are jointly optional,
+absent only when current-pair geometry was not evaluated or unavailable, and
+never substituted from the calibration center; available geometry is computed
+at the frozen pair center with a finite zero and strictly positive finite slope.
+The recursive truth audit also continues past declared dataclass fields through
+dynamic dictionaries and inherited slots with de-duplication and a dedicated
+dynamic-extra sentinel. The final independent re-review approved Task 8 and
+the documented contract correction with zero Critical, Important, or Minor
+findings.
 
 ## Completed work
 
@@ -387,7 +424,7 @@ Important, or Minor findings after these locally verified corrections.
 
 ## Tests currently passing
 
-- `pytest`: 935 passed.
+- `pytest`: 980 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -430,6 +467,6 @@ Important, or Minor findings after these locally verified corrections.
 
 ## Next actions
 
-1. Implement Task 8 completed-pair policy, schedule advancement, ages, and
-   update atomicity.
-2. Run the Task 8 per-task spec and quality review before advancing.
+1. Implement Task 9 instrument configuration and evaluator primitive
+   contracts.
+2. Run the Task 9 per-task spec and quality review before advancing.

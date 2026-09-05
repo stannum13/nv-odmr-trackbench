@@ -312,6 +312,9 @@ def make_legal_pair_result(
         and not capture_failure
         and (not numerical_failure or numerical_prefix >= 5)
     )
+    geometry_available = not invalid_normalization and (
+        not numerical_failure or numerical_prefix >= 1
+    )
     return TwoPointPairResult(
         pair_index=pair_index,
         identity_pair_index=identity_pair_index,
@@ -329,8 +332,8 @@ def make_legal_pair_result(
         release_sequence_index=1,
         release_timestamp_s=0.012,
         discriminator=0.01 if discriminator_present else None,
-        zero_discriminator=0.0,
-        discriminator_slope_per_hz=1.0e-6,
+        zero_discriminator=0.0 if geometry_available else None,
+        discriminator_slope_per_hz=1.0e-6 if geometry_available else None,
         raw_innovation_hz=10_000.0 if innovation_present else None,
         requested_step_hz=10_000.0 if requested_step_present else None,
         candidate_center_hz=(
