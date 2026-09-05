@@ -148,6 +148,21 @@ their local timing/exposure invariants. Binding, verified acquisition, outcome,
 runner state, and full resource accounting remain assigned to later tasks.
 The final independent re-review approved Task 9 and its corrected in-process
 capability boundary with zero Critical, Important, or Minor findings.
+Task 10 adds evaluator-private full-resource zero, single-arrival advance,
+arrival-ordered replay, estimator-safe projection, and exact mismatch helpers.
+Full replay retains expected photons while projection intentionally omits them;
+missing realized counts add an exact integer zero and increment the separate
+missing-count field. Every floating total follows the instrument ledger's
+left-associated `old + atom` arithmetic, including elapsed time as
+`old + (overhead + integration)`, and mismatch reporting compares every full
+snapshot field exactly in declaration order without tolerance. The helpers are
+not package exports, and estimator modules neither import `ResourceSnapshot`
+nor expose full-resource helpers. Calibration outcomes, acquisition records,
+resource aggregates, and runner behavior remain assigned to later tasks.
+Task 10's final review approved the production implementation with zero
+Critical or Important findings. Its order-sensitive replay witness now detects
+reversed arrival processing; one Minor limitation in the test-only package AST
+scanner is retained for final branch-review triage.
 
 ## Completed work
 
@@ -441,7 +456,7 @@ capability boundary with zero Critical, Important, or Minor findings.
 
 ## Tests currently passing
 
-- `pytest`: 984 passed.
+- `pytest`: 988 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -481,8 +496,12 @@ capability boundary with zero Critical, Important, or Minor findings.
   update-core process CPU interval and optimizer evaluation count are
   machine-dependent descriptive diagnostics and establish neither within-sweep
   realtime utility nor universal computational improvement.
+- The Task 10 test-only estimator isolation scanner does not recognize every
+  exotic parent-relative import/identifier form and can conservatively flag
+  forbidden words in docstrings; the production tree was separately inspected
+  and contains no full-resource estimator path.
 
 ## Next actions
 
-1. Implement Task 10 evaluator-private full-resource replay and mismatch joins.
-2. Run the Task 10 per-task spec and quality review before advancing.
+1. Implement Task 11 verified calibration outcomes and acquisition records.
+2. Run the Task 11 per-task spec and quality review before advancing.

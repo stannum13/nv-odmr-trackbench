@@ -70,6 +70,18 @@ once a package version is introduced.
 
 ### Added
 
+- Added evaluator-private full-resource accounting for calibrated two-point
+  runs. One canonical arrival atom now advances observations, integration,
+  nominal exposure, evaluator-only expected photons, realized or missing-count
+  totals, and virtual elapsed time with the same exact association as the
+  instrument ledger. Arrival-ordered replay starts from an exact all-zero
+  snapshot, safe projection deliberately omits expected photons, and exact
+  fieldwise mismatch reporting follows `ResourceSnapshot` declaration order
+  with no tolerance. None of these helpers is exported or imported into an
+  estimator module. Review hardening adds an order-sensitive binary64 replay
+  witness and package-wide estimator isolation scan; final review reported zero
+  Critical or Important findings and retained one test-scanner Minor for final
+  branch-review triage.
 - Added the first evaluator-owned calibrated two-point primitives without
   starting runner or acquisition behavior. `ODMRInstrument` exposes canonical
   nominal-photon-rate and frequency-overhead configuration through read-only
