@@ -70,6 +70,28 @@ once a package version is introduced.
 
 ### Added
 
+- Added the public two-point evaluator resource builder and the exact private
+  seam needed to continue one authenticated but unaccepted abort observation.
+  The builder authenticates the original registry-bound runner, token,
+  instrument, configuration, verified outcome/source, calibration, tracker,
+  and estimate; reconstructs the accepted full trace in estimator arrival
+  order; and validates exact safe views, physical boundaries, midpoints, pair
+  timing, and accepted charged projection. Full calibration, tracking, and
+  charged totals replay one atomic observation at a time without subtraction,
+  subtotal addition, `math.fsum`, or exposure of evaluator-only expected
+  photons to the estimator. Included same-run accounting continues directly
+  from its calibration replay, conditional accounting charges tracking from
+  zero, and an optional authenticated abort atom remains outside the accepted
+  tuple while extending final totals. A resource-join-unavailable terminal
+  record instead validates its raw acquisition, mismatch fields, and
+  authoritative final boundary, then returns `None` without fabricating any
+  aggregate. Review hardening makes midpoint presence contextual: a valid
+  integration/endpoint/resource-time association requires the exact midpoint
+  even on an unavailable expected-only resource mismatch, while a timing-invalid
+  raw record retains `None`. Retriable query failures now also authenticate
+  their pending query and identical before/after snapshots against the exact
+  accepted/current full-resource boundary, including expected photons.
+  Stop/abort execution and run-loop transitions remain deferred to Task 17.
 - Added the accepted and retriable-failure portions of the evaluator runner's
   `step` transition. Each accepted query is snapshotted after issuance, records
   the actual instrument midpoint computed before acquisition, authenticates

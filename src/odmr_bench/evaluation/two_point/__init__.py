@@ -1,5 +1,8 @@
 """Public evaluator-owned contracts for calibrated two-point runs."""
 
+from odmr_bench.evaluation.two_point.resource_accounting import (
+    build_two_point_evaluator_resources,
+)
 from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
 from odmr_bench.evaluation.two_point.types import (
     ResourceJoinMismatchField,
@@ -54,4 +57,5 @@ __all__ = [
     "VerifiedTwoPointCalibrationFailure",
     "VerifiedTwoPointCalibrationOutcome",
     "VerifiedTwoPointCalibrationSuccess",
+    "build_two_point_evaluator_resources",
 ]

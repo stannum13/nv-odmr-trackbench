@@ -51,6 +51,7 @@ def test_evaluator_primitive_names_are_public() -> None:
         TwoPointRunnerStateError,
         VerifiedCalibrationQueryRequest,
         VerifiedInstrumentRunToken,
+        build_two_point_evaluator_resources,
     )
 
     assert tuple(two_point.__all__) == (
@@ -79,6 +80,7 @@ def test_evaluator_primitive_names_are_public() -> None:
         "VerifiedTwoPointCalibrationFailure",
         "VerifiedTwoPointCalibrationOutcome",
         "VerifiedTwoPointCalibrationSuccess",
+        "build_two_point_evaluator_resources",
     )
     assert get_args(ResourceJoinMismatchField) == (
         "observations",
@@ -89,8 +91,10 @@ def test_evaluator_primitive_names_are_public() -> None:
         "observations_without_realized_counts",
         "virtual_elapsed_time_s",
     )
-    forbidden_later_names = ("build_two_point_evaluator_resources",)
-    assert not any(hasattr(two_point, name) for name in forbidden_later_names)
+    assert (
+        build_two_point_evaluator_resources
+        is two_point.build_two_point_evaluator_resources
+    )
 
     assert TwoPointCalibrationPreflightError
     assert TwoPointEvaluatorInstrumentConfiguration

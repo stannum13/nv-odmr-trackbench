@@ -289,6 +289,37 @@ unavailable classification, and run-loop behavior remain deferred to Tasks
 The final bounded independent review reported zero Critical, Important, or
 Minor findings; the independent full repository gate passed all 1,127 tests
 and Ruff.
+The synchronized Task 15 commit also passed the remote GitHub CI matrix on
+Python 3.11 and 3.12.
+Task 16 adds the public evaluator resource builder and its private
+authenticated-unaccepted assembly seam. The builder accepts only the original
+registry-bound runner and exact token, instrument, configuration, verified
+outcome, source, calibration, tracker, and estimate context. It reconstructs
+the accepted full trace from estimator arrival order, checks every stored
+resource and timing boundary, and replays full resource atoms without
+subtraction or subtotal regrouping. Calibration remains separately reported in
+both treatments; accepted charged resources start with the calibration replay
+only for included same-run accounting and must exactly project to the safe
+estimate before an optional authenticated abort atom is continued. Expected
+photons remain evaluator-only. An authenticated unaccepted observation stays
+outside the accepted tuple but contributes to final tracking and charged
+resources, while an intrinsically valid unavailable-resource abort validates
+its raw record and authoritative final boundary and returns `None` without
+constructing an aggregate. No Task 17 stop, abort-transition, or run-loop
+behavior is introduced. The five required TDD nodes and the authorized updated
+public-surface stage gate are green; the local full repository gate passes all
+1,133 tests and Ruff. A fresh review found two Important contextual-authentication
+gaps and no Critical or Minor findings. The amended builder now requires a
+non-`None` exact unaccepted midpoint whenever the retained observation passes
+the established integration/endpoint/resource-time predicate, while preserving
+`None` only for timing-invalid raw records. It also authenticates any retained
+retriable instrument failure's pending query and equal before/after snapshots
+against the exact accepted/current physical boundary, including evaluator-only
+expected photons. Focused RED/GREEN witnesses pin valid authenticated and
+expected-only-unavailable midpoint erasure plus a one-ULP failure-boundary
+divergence. The amended local gate passes all 1,136 tests and Ruff.
+The final bounded independent re-review reported zero Critical, Important, or
+Minor findings.
 
 ## Completed work
 
@@ -582,9 +613,9 @@ and Ruff.
 
 ## Tests currently passing
 
-- `pytest`: 1127 passed.
-- Focused `tests/estimators tests/evaluation tests/emulator`: 1029 passed.
-- Task 15 runner file: 18 passed.
+- `pytest`: 1136 passed.
+- Focused `tests/estimators tests/evaluation tests/emulator`: 1038 passed.
+- Task 16 resource file: 13 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -638,5 +669,5 @@ and Ruff.
 
 ## Next actions
 
-1. Implement Task 16 public evaluator resource assembly.
-2. Run the Task 16 per-task specification and quality review.
+1. Implement Task 17 terminal runner transitions.
+2. Run the Task 17 per-task specification and quality review.
