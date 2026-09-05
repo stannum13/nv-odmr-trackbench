@@ -163,6 +163,30 @@ Task 10's final review approved the production implementation with zero
 Critical or Important findings. Its order-sensitive replay witness now detects
 reversed arrival processing; one Minor limitation in the test-only package AST
 scanner is retained for final branch-review triage.
+Task 11 adds the exact seven public verified-calibration outcome, tracking-
+acquisition, evaluator-pair-timing, and instrument-query-failure names. The six
+records are frozen/slotted and enforce only their intrinsic evidence: closed
+success/failure/resource-join discriminators; aligned full, safe, and midpoint
+tuples; exact full-to-safe observation and aggregate projections; failure-code
+specific request, fit, exception, mismatch, and aggregate presence; an exact
+authenticated one-observation resource atom; nonempty ordered mismatch fields
+without a fabricated unavailable delta; optional midpoint bounds; ordered pair
+truth timing and release; and an unchanged atomic query-failure boundary. The
+review correction removed a non-invertible midpoint lower bound and a cross-
+convention public-reference interval bound: exact binary64 witnesses show both
+reject valid instrument traces. Constructors retain only finite, nonnegative,
+endpoint-or-release facts, while later runners own exact producer association
+and public pair-result equality. A final missing midpoint is now limited to
+acquisition-contract or precedence-winning resource-join failures. The expanded
+matrix pins exact schemas, nested capability rejection, canonical built-in
+strings, both fit polarities, all field-presence directions, adjacent-ULP truth
+means, equal-but-distinct failure snapshots, and exact Task 10 helper
+delegation. The validators consume the reviewed Task 10 resource primitives
+through method-local imports after evaluator type initialization. They add no
+runner, acquisition-loop, fit, registry, or resource-builder behavior. The
+final independent review approved Task 11 with zero Critical or Important
+findings and retained one test-only AST-sentinel Minor for final branch-review
+triage.
 
 ## Completed work
 
@@ -456,7 +480,7 @@ scanner is retained for final branch-review triage.
 
 ## Tests currently passing
 
-- `pytest`: 988 passed.
+- `pytest`: 1041 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -500,8 +524,12 @@ scanner is retained for final branch-review triage.
   exotic parent-relative import/identifier form and can conservatively flag
   forbidden words in docstrings; the production tree was separately inspected
   and contains no full-resource estimator path.
+- The Task 11 test-only Task 10 delegation sentinel counts direct imported
+  helper calls but does not yet detect a module-qualified helper call; current
+  production uses only the reviewed direct method-local calls.
 
 ## Next actions
 
-1. Implement Task 11 verified calibration outcomes and acquisition records.
-2. Run the Task 11 per-task spec and quality review before advancing.
+1. Implement Task 12 evaluator resource, abort, runner-state, and outcome
+   contracts.
+2. Run the Task 12 per-task spec and quality review before advancing.

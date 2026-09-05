@@ -916,7 +916,11 @@ expected-photon and every other ledger total evaluator-side.
 
 A success has one finite exact midpoint per observation. A failure has one slot
 per returned observation: a slot is the exact midpoint after timing checks pass,
-while a timing-mismatched final observation stores `None`. Earlier slots remain
+while a timing-mismatched final observation stores `None` only for
+`acquisition_contract_mismatch` or the precedence-winning
+`resource_join_unavailable`. The other four failure codes require every
+retained midpoint to be concrete because either no final observation returned
+or the complete trace already passed timing validation. Earlier slots remain
 exact. On a mid-acquisition instrument exception the `after` snapshot is the
 current cumulative ledger after the earlier successes and equals the snapshot
 immediately before the failed atomic query. `resource_mismatch_fields` is
@@ -1538,10 +1542,41 @@ nearby but distinct binary64 conventions:
    and Stage 6.5 error/lock calculations use this value exactly, never the
    endpoint-reconstructed public reference.
 
+These records validate only timing facts intrinsic to the value and its own
+endpoint. An exact instrument midpoint must be finite, nonnegative, and no later
+than that endpoint; it is not lower-bounded by `endpoint - integration`. The
+endpoint is computed independently as `start + integration`, so subtracting the
+integration is not an inverse in binary64. The exact witness
+`start=0x1.0000000000001p+0`, `integration=0x1.0000000000000p-53` produces an
+actual midpoint of `0x1.0000000000001p+0` but an endpoint, and an
+endpoint-minus-integration reconstruction, of `0x1.0000000000002p+0`. The
+outcome trace and both authenticated and unavailable acquisition variants must
+retain that midpoint. Exact association with the producer's pre-query
+instrument state is a contextual runner proof performed later; record
+construction cannot reconstruct or authenticate that state.
+
 `TwoPointEvaluatorPairTiming.public_reference_timestamp_s` must exactly equal
 the pair result, so both conventions remain auditable. The pair release
 sequence/timestamp is the second-arriving observation's endpoint. A correction
 is unavailable at either reference and becomes causal only at release.
+Constructor-level public-reference facts are therefore limited to a finite,
+nonnegative value no later than release. The public value must never be bounded
+by the interval between the two actual midpoints. For the one-ULP convention
+witness, actual midpoints `0x1.0000000000000p+0` and
+`0x1.0000000000001p+0` have the exact ordered truth mean
+`0x1.0000000000000p+0`, while the required public mean is
+`0x1.0000000000002p+0`, one ULP above the second actual midpoint. Both adjacent
+binary64 neighbors of the truth mean remain invalid.
+
+An earlier constructor design attempted stronger local validation by deriving
+an acquisition start from the rounded endpoint and by placing the public
+reference inside the actual-midpoint interval. Those checks reject the two
+valid witnesses above because the relevant mappings are non-invertible or use
+different clock conventions. Retaining only intrinsic endpoint/release facts
+weakens standalone constructors deliberately; the alternative would conflate
+public and truth clocks. Later evaluator-runner validation supplies the missing
+producer association and exact pair-result equality without rejecting valid
+binary64 traces.
 
 For the first fresh fixture pair, both midpoint associations happen to agree:
 

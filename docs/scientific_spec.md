@@ -259,6 +259,21 @@ association, and use their overflow-safe ordered mean for hidden-truth lookup.
 The two values may differ by binary64 ULPs and must not be substituted. A pair
 is unavailable until the second observation's endpoint, so reports preserve
 the public reference, actual evaluator reference, and causal release endpoint.
+A record can validate that an actual midpoint is finite, nonnegative, and no
+later than its endpoint, but it cannot infer a lower bound by subtracting the
+integration from that rounded endpoint. For the exact binary64 witness
+`start=0x1.0000000000001p+0` and `integration=0x1.0000000000000p-53`, both the
+endpoint and `endpoint - integration` are `0x1.0000000000002p+0`, while the
+instrument midpoint is `0x1.0000000000001p+0`. Likewise, a public pair reference
+is finite, nonnegative, and no later than release, but need not lie between the
+actual midpoints: actual values `0x1.0000000000000p+0` and
+`0x1.0000000000001p+0` have ordered truth mean `0x1.0000000000000p+0`, while a
+valid endpoint-derived public mean is `0x1.0000000000002p+0`. Earlier local
+reconstruction/bounding checks appeared stronger but conflated non-invertible
+rounding and distinct public/truth conventions. The chosen tradeoff leaves
+exact producer association and public pair-result equality to the later
+evaluator runner while preserving all intrinsically defensible endpoint and
+release checks.
 A successful exact-zero correction still refreshes that identity's active pair
 source and ages. A lone acquired flank consumes its full resources but produces
 no discriminator or center update. Two-point identity domains must be fixed

@@ -70,6 +70,27 @@ once a package version is introduced.
 
 ### Added
 
+- Added frozen/slotted verified-calibration outcome, tracking-acquisition,
+  evaluator-pair-timing, and instrument-query-failure contracts. Outcome
+  constructors close their success/failure matrices, align full/safe/midpoint
+  tuples, require exact estimator-safe projections, and expose aggregate
+  resources except when a resource join is explicitly unavailable.
+  Authenticated tracking records require the exact Task 10 one-observation
+  full-resource transition; unavailable records retain nonempty ordered
+  mismatch fields without fabricating a delta. Timing and query-failure records
+  preserve ordered physical/public reference and atomic equal-boundary
+  semantics. Resource validation calls the reviewed evaluator-private helpers
+  through method-local imports and adds no runner behavior.
+  Review hardening removes a non-invertible endpoint-derived midpoint lower
+  bound and keeps endpoint-derived public time separate from the exact truth
+  midpoint interval. Exact hexadecimal witnesses, failure-code-specific missing
+  midpoint rules, complete bidirectional field-presence matrices, exact schemas,
+  capability-bearing subclass rejection and canonicalization, adjacent-ULP
+  means, equal-but-distinct failure snapshots, and association-sensitive Task 10
+  delegation are now committed regressions. Exact producer and pair-result
+  association remain later-runner responsibilities. The final task review
+  reported zero Critical or Important findings and retained one test-only AST
+  call-form Minor for final branch-review triage.
 - Added evaluator-private full-resource accounting for calibrated two-point
   runs. One canonical arrival atom now advances observations, integration,
   nominal exposure, evaluator-only expected photons, realized or missing-count
