@@ -26,21 +26,31 @@ public evaluator resources begin only after successful tracking start, and
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
 
-Task 4 now constructs pure frozen sparse fit geometry and validates every
+Task 5 now performs one isolated four-parameter TRF fit in exact dimensionless
+center-correction/FWHM/amplitude/baseline-offset coordinates. The canonical
+source-bound model retains baseline shape, target eta, and every non-target
+line in immutable source order while fitting only the target's local center,
+FWHM, amplitude, and constant offset. The solver receives the public initial
+guess and intersected bounds once, residuals retain model-minus-observation
+arrival order, and validated success results publish the local center, signed
+scan Q, RMSE, and scaled-Jacobian diagnostics without mutating source/query/
+observation inputs. Scientific failure gates remain deferred to Task 6.
+
+Task 4 constructs pure frozen sparse fit geometry and validates every
 calibration-seeded identity prospectively. It fixes the exact even five-point
 order and odd reversal, checks finite lower then upper frequency envelopes,
 intersects scaled optimizer bounds with the source fit, requires a strictly
 interior initial guess, and applies empty-bounds, calibration-cell, then
 source-domain failures in that order. The geometry retains no acquisition,
 sequence, endpoint, exposure, resource, or mutable-clock fact; query scheduling
-and fitting remain deferred. Task 3 extracts a private, source-bound spectral-model evaluator for the
+remains deferred. Task 3 extracts a private, source-bound spectral-model evaluator for the
 sparse estimator while preserving the Stage 6.3 scalar calibration path exactly.
 It evaluates the frozen baseline once, adds only the caller-provided constant
 offset, and subtracts the immutable source tuple in order; only the target
 resonance's center, FWHM, and amplitude may vary. The legacy target-center
 helper delegates to the same scalar core without a public surface or arithmetic
 change. Lorentzian/pseudo-Voigt, affine/quadratic, scalar/vector, boundary, and
-source-order regressions pin that differential. Task 5 remains next.
+source-order regressions pin that differential.
 The bound-only entry point now rejects non-finite and non-scalar supplied target
 parameters before source access or arithmetic, preserves canonical built-in
 float values, requires positive FWHM and non-negative amplitude, and leaves the
@@ -791,6 +801,10 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 5 focused sparse fit file: 21 passed.
+- Stage 6.4 Task 5 success/model slice: 3 passed, 18 deselected.
+- Stage 6.4 Task 5 estimator/evaluator/emulator integration gate: 1,279 passed.
+- Stage 6.4 Task 5 full repository gate: 1,380 passed.
 - Stage 6.4 Task 3 source-bound model focused/differential gate: 120 passed.
 - Stage 6.4 Task 3 estimator/evaluator/emulator integration gate: 1,313 passed.
 - Stage 6.4 Task 3 full repository gate: 1,359 passed.
@@ -870,7 +884,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 5 after Task 4's pure geometry and prospective
-   calibration validation.
+1. Continue Stage 6.4 with Task 6's ordered sparse-fit failure gates and exact
+   diagnostic/exception/CPU semantics.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

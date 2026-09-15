@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's isolated sparse local-fit success path: one bounded TRF
+  attempt in exact dimensionless variables fits only target center correction,
+  FWHM, amplitude, and constant baseline offset while preserving target eta,
+  baseline shape, non-target tails, immutable source order, and five-point
+  arrival order. Validated results publish local center, signed scan Q, RMSE,
+  and scaled-Jacobian diagnostics; ordered scientific failure gates remain
+  deferred to Task 6.
 - Added Stage 6.4's pure sparse linewidth-fit geometry constructor and
   prospective calibration validation. It freezes the exact five-point
   time-symmetric order, source/cell/domain facts, and scaled bounded-fit setup

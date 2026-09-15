@@ -3,16 +3,26 @@
 from __future__ import annotations
 
 import math
+import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from numbers import Integral
 
+import numpy as np
+from scipy.optimize import least_squares
+
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators.sparse_linewidth_types import (
     CompositeIdentityEstimate,
     SparseLinewidthConfiguration,
+    SparseLinewidthQuery,
     SparseLinewidthResetError,
+    SparseLinewidthScanResult,
 )
+from odmr_bench.estimators.two_point_calibration import _evaluate_bound_source_model
 from odmr_bench.estimators.two_point_types import (
     TwoPointCalibration,
+    TwoPointCalibrationSource,
     TwoPointIdentityCalibration,
 )
 
@@ -270,4 +280,162 @@ def _construct_sparse_fit_geometry(
         w0_hz=identity.active_fwhm_hz,
         scan_index=scan_index,
         identity_scan_index=identity_scan_index,
+    )
+
+
+def fit_sparse_linewidth(
+    source: TwoPointCalibrationSource,
+    configuration: SparseLinewidthConfiguration,
+    queries: Sequence[SparseLinewidthQuery],
+    observations: Sequence[EstimatorObservation],
+) -> SparseLinewidthScanResult:
+    """Fit one completed sparse scan's four-parameter local source model."""
+    started_ns = time.process_time_ns()
+    frozen_queries = tuple(queries)
+    frozen_observations = tuple(observations)
+    first_query = frozen_queries[0]
+    q0_hz = first_query.frozen_fast_center_hz
+    w0_hz = first_query.frozen_prior_fwhm_hz
+    target = next(
+        resonance
+        for resonance in source.source_fit.resonance_estimates
+        if resonance.resonance_id == first_query.resonance_id
+    )
+    a0 = target.amplitude
+    frequency_hz = np.asarray(
+        [query.frequency_hz for query in frozen_queries], dtype=np.float64
+    )
+    observed = np.asarray(
+        [observation.fluorescence for observation in frozen_observations],
+        dtype=np.float64,
+    )
+    lower_bounds = np.asarray(
+        (
+            -configuration.center_correction_limit_fwhm_fraction,
+            max(
+                configuration.min_fwhm_prior_ratio,
+                source.fit_configuration.min_fwhm_hz / w0_hz,
+            ),
+            0.0,
+            -configuration.baseline_offset_source_amplitude_fraction,
+        ),
+        dtype=np.float64,
+    )
+    upper_bounds = np.asarray(
+        (
+            configuration.center_correction_limit_fwhm_fraction,
+            min(
+                configuration.max_fwhm_prior_ratio,
+                source.fit_configuration.max_fwhm_hz / w0_hz,
+            ),
+            min(
+                configuration.max_amplitude_source_ratio,
+                source.fit_configuration.max_amplitude / a0,
+            ),
+            configuration.baseline_offset_source_amplitude_fraction,
+        ),
+        dtype=np.float64,
+    )
+    initial_guess = np.asarray((0.0, 1.0, 1.0, 0.0), dtype=np.float64)
+
+    def scaled_residual(packed: np.ndarray) -> np.ndarray:
+        dc_hz = packed[0] * w0_hz
+        fwhm_hz = packed[1] * w0_hz
+        amplitude = packed[2] * a0
+        baseline_offset = packed[3] * a0
+        model = _evaluate_bound_source_model(
+            frequency_hz,
+            source,
+            first_query.resonance_id,
+            center_hz=q0_hz + dc_hz,
+            fwhm_hz=fwhm_hz,
+            amplitude=amplitude,
+            baseline_offset=baseline_offset,
+        )
+        return np.asarray(model - observed, dtype=np.float64)
+
+    optimization = least_squares(
+        scaled_residual,
+        initial_guess,
+        bounds=(lower_bounds, upper_bounds),
+        method="trf",
+        max_nfev=configuration.max_nfev,
+    )
+    fitted_scaled = np.asarray(optimization.x, dtype=np.float64)
+    fitted_center_correction_hz = float(fitted_scaled[0] * w0_hz)
+    fitted_local_center_hz = float(q0_hz + fitted_center_correction_hz)
+    fitted_fwhm_hz = float(fitted_scaled[1] * w0_hz)
+    fitted_amplitude = float(fitted_scaled[2] * a0)
+    fitted_baseline_offset = float(fitted_scaled[3] * a0)
+    residual = np.asarray(optimization.fun, dtype=np.float64)
+    rmse = float(np.sqrt(np.sum(residual**2) / 5.0))
+    amplitude_normalized_rmse = float(rmse / fitted_amplitude)
+    singular_values = np.linalg.svd(
+        np.asarray(optimization.jac, dtype=np.float64), compute_uv=False
+    )
+    cutoff = singular_values[0] * configuration.rank_rtol
+    scaled_jacobian_rank = int(np.count_nonzero(singular_values > cutoff))
+    scaled_jacobian_condition = float(singular_values[0] / singular_values[-1])
+    fitted_q = float(fitted_local_center_hz / fitted_fwhm_hz)
+    public_reference_timestamp_s = (
+        frozen_observations[0].timestamp_s
+        - frozen_observations[0].integration_time_s / 2.0
+    )
+    for count, observation in enumerate(frozen_observations[1:], start=2):
+        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
+        public_reference_timestamp_s = public_reference_timestamp_s + (
+            midpoint_s - public_reference_timestamp_s
+        ) / count
+    fit_cpu_time_s = (time.process_time_ns() - started_ns) / 1_000_000_000.0
+    return SparseLinewidthScanResult(
+        scan_index=first_query.scan_index,
+        identity_scan_index=first_query.identity_scan_index,
+        resonance_id=first_query.resonance_id,
+        frozen_fast_center_hz=first_query.frozen_fast_center_hz,
+        frozen_fast_center_source_kind=first_query.frozen_fast_center_source_kind,
+        frozen_fast_center_source_pair_index=(
+            first_query.frozen_fast_center_source_pair_index
+        ),
+        frozen_fast_center_reference_timestamp_s=(
+            first_query.frozen_fast_center_reference_timestamp_s
+        ),
+        frozen_fast_center_release_sequence_index=(
+            first_query.frozen_fast_center_release_sequence_index
+        ),
+        frozen_fast_center_release_timestamp_s=(
+            first_query.frozen_fast_center_release_timestamp_s
+        ),
+        frozen_prior_fwhm_hz=first_query.frozen_prior_fwhm_hz,
+        frozen_fwhm_source_kind=first_query.frozen_fwhm_source_kind,
+        frozen_fwhm_source_scan_index=first_query.frozen_fwhm_source_scan_index,
+        frozen_fwhm_reference_timestamp_s=(
+            first_query.frozen_fwhm_reference_timestamp_s
+        ),
+        frozen_fwhm_release_sequence_index=(
+            first_query.frozen_fwhm_release_sequence_index
+        ),
+        frozen_fwhm_release_timestamp_s=(
+            first_query.frozen_fwhm_release_timestamp_s
+        ),
+        queries=frozen_queries,
+        observations=frozen_observations,
+        public_reference_timestamp_s=public_reference_timestamp_s,
+        release_sequence_index=frozen_observations[-1].sequence_index,
+        release_timestamp_s=frozen_observations[-1].timestamp_s,
+        status="success",
+        failure_code=None,
+        fitted_center_correction_hz=fitted_center_correction_hz,
+        fitted_local_center_hz=fitted_local_center_hz,
+        fitted_fwhm_hz=fitted_fwhm_hz,
+        fitted_amplitude=fitted_amplitude,
+        fitted_baseline_offset=fitted_baseline_offset,
+        fitted_q=fitted_q,
+        rmse=rmse,
+        amplitude_normalized_rmse=amplitude_normalized_rmse,
+        scaled_jacobian_rank=scaled_jacobian_rank,
+        scaled_jacobian_condition=scaled_jacobian_condition,
+        scipy_status=int(optimization.status),
+        scipy_message=str(optimization.message),
+        nfev=int(optimization.nfev),
+        fit_cpu_time_s=fit_cpu_time_s,
     )

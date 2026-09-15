@@ -6,9 +6,12 @@ import inspect
 import math
 import sys
 from dataclasses import fields, replace
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
     SparseLinewidthConfiguration,
     SparseLinewidthResetError,
@@ -18,11 +21,16 @@ from odmr_bench.estimators.sparse_linewidth_fit import (
     _construct_sparse_fit_geometry,
     _SparseFitGeometry,
     _validate_calibration_sparse_geometry,
+    fit_sparse_linewidth,
 )
-from tests.sparse_linewidth_helpers import make_composite_identity
+from odmr_bench.estimators.two_point_calibration import _evaluate_bound_source_model
+from odmr_bench.models import Baseline
+from tests.sparse_linewidth_helpers import make_composite_identity, make_sparse_query
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
+    make_legal_fit_configuration,
     make_legal_identity_calibrations,
+    make_legal_source_fit,
     make_legal_tracker_configuration,
 )
 
@@ -45,6 +53,103 @@ def _seeded_identity(calibration: TwoPointCalibration, index: int = 0):
         active_fwhm_hz=seeded.calibration_fwhm_hz,
         live_q=seeded.calibration_center_hz / seeded.calibration_fwhm_hz,
     )
+
+
+def _fit_source(*, model_kind: str, quadratic: bool):
+    configuration = replace(
+        make_legal_fit_configuration(),
+        model_kind=model_kind,
+        baseline_degree=2 if quadratic else 1,
+    )
+    fit = make_legal_source_fit(configuration)
+    resonances = tuple(
+        replace(resonance, eta=1.0)
+        if model_kind == "lorentzian"
+        else resonance
+        for resonance in fit.resonance_estimates
+    )
+    baseline = Baseline(
+        intercept=1.03,
+        reference_hz=2.88e9,
+        slope_per_hz=2.1e-11,
+        quadratic_per_hz2=1.7e-20 if quadratic else 0.0,
+    )
+    fit = replace(
+        fit,
+        model_kind=model_kind,
+        baseline_degree=2 if quadratic else 1,
+        resonance_estimates=resonances,
+        baseline_estimate=baseline,
+        initial_guess=replace(
+            fit.initial_guess,
+            resonances=resonances,
+            baseline=baseline,
+        ),
+        jacobian_rank=(3 if quadratic else 2)
+        + 8 * (3 if model_kind == "lorentzian" else 4),
+    )
+    return make_legal_caller_asserted_source(
+        source_fit=fit,
+        fit_configuration=configuration,
+    )
+
+
+def _fit_inputs(
+    source: object,
+    *,
+    scan_index: int = 0,
+    q0_hz: float | None = None,
+    dc_hz: float = 120_000.0,
+    fwhm_hz: float = 1.65e6,
+    amplitude: float = 0.018,
+    baseline_offset: float = 0.002,
+):
+    target = source.source_fit.resonance_estimates[0]
+    q0_hz = target.center_hz if q0_hz is None else q0_hz
+    w0_hz = target.fwhm_hz
+    multipliers = (
+        (0.5, -1.0, 0.0, 1.0, -0.5)
+        if (scan_index // 8) % 2 == 0
+        else (-0.5, 1.0, 0.0, -1.0, 0.5)
+    )
+    queries = tuple(
+        make_sparse_query(
+            acquisition_index=10 + point_index,
+            scan_index=scan_index,
+            identity_scan_index=scan_index // 8,
+            point_index=point_index,
+            resonance_id=target.resonance_id,
+            offset_multiplier=multiplier,
+            frozen_fast_center_hz=q0_hz,
+            frozen_prior_fwhm_hz=w0_hz,
+            frequency_hz=q0_hz + multiplier * w0_hz,
+            expected_sequence_index=20 + point_index,
+            expected_end_timestamp_s=0.105 + 0.005 * point_index,
+            expected_nominal_exposure_photons=12_500.0,
+        )
+        for point_index, multiplier in enumerate(multipliers)
+    )
+    fluorescence = _evaluate_bound_source_model(
+        np.asarray([query.frequency_hz for query in queries], dtype=np.float64),
+        source,
+        target.resonance_id,
+        center_hz=q0_hz + dc_hz,
+        fwhm_hz=fwhm_hz,
+        amplitude=amplitude,
+        baseline_offset=baseline_offset,
+    )
+    observations = tuple(
+        EstimatorObservation(
+            sequence_index=query.expected_sequence_index,
+            timestamp_s=query.expected_end_timestamp_s,
+            frequency_hz=query.frequency_hz,
+            fluorescence=float(value),
+            integration_time_s=query.integration_time_s,
+            nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        )
+        for query, value in zip(queries, fluorescence, strict=True)
+    )
+    return queries, observations
 
 
 @pytest.mark.parametrize(
@@ -466,10 +571,159 @@ def test_geometry_is_frozen_and_contains_no_query_clock_or_resource_metadata() -
     )
 
 
-def test_geometry_module_has_no_scipy_or_stateful_query_clock_construction() -> None:
+def test_geometry_module_has_no_stateful_query_clock_construction() -> None:
     import odmr_bench.estimators.sparse_linewidth_fit as sparse_fit
 
     module_source = inspect.getsource(sparse_fit)
-    assert "scipy" not in module_source
-    assert "SparseLinewidthQuery" not in module_source
     assert "TwoPointRunMetadata" not in module_source
+
+
+@pytest.mark.parametrize(
+    ("model_kind", "quadratic"),
+    (("lorentzian", False), ("pseudo_voigt", True)),
+)
+def test_noiseless_success_recovers_exact_four_parameter_local_model(
+    model_kind: str, quadratic: bool
+) -> None:
+    source = _fit_source(model_kind=model_kind, quadratic=quadratic)
+    configuration = SparseLinewidthConfiguration()
+    expected = (120_000.0, 1.65e6, 0.018, 0.002)
+    queries, observations = _fit_inputs(
+        source,
+        dc_hz=expected[0],
+        fwhm_hz=expected[1],
+        amplitude=expected[2],
+        baseline_offset=expected[3],
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.status == "success"
+    assert result.failure_code is None
+    assert result.fitted_center_correction_hz == pytest.approx(expected[0], rel=1.0e-6)
+    assert result.fitted_local_center_hz == (
+        queries[0].frozen_fast_center_hz + result.fitted_center_correction_hz
+    )
+    assert result.fitted_local_center_hz == pytest.approx(
+        queries[0].frozen_fast_center_hz + expected[0], abs=0.1
+    )
+    assert result.fitted_fwhm_hz == pytest.approx(expected[1], rel=1.0e-6)
+    assert result.fitted_amplitude == pytest.approx(expected[2], rel=1.0e-6)
+    assert result.fitted_baseline_offset == pytest.approx(expected[3], rel=2.0e-6)
+    assert result.fitted_q == result.fitted_local_center_hz / result.fitted_fwhm_hz
+    assert result.scaled_jacobian_rank == 4
+    assert result.scaled_jacobian_condition is not None
+    assert result.rmse == pytest.approx(0.0, abs=1.0e-8)
+    assert result.amplitude_normalized_rmse == pytest.approx(0.0, abs=1.0e-6)
+
+
+def test_success_uses_one_scaled_solver_call_and_preserves_arrival_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = _fit_source(model_kind="pseudo_voigt", quadratic=True)
+    configuration = SparseLinewidthConfiguration(max_nfev=123)
+    expected = (90_000.0, 1.62e6, 0.017, -0.0015)
+    queries, observations = _fit_inputs(
+        source,
+        scan_index=8,
+        q0_hz=-2.76e9,
+        dc_hz=expected[0],
+        fwhm_hz=expected[1],
+        amplitude=expected[2],
+        baseline_offset=expected[3],
+    )
+    query_ids = tuple(id(query) for query in queries)
+    observation_ids = tuple(id(observation) for observation in observations)
+    source_resonances = source.source_fit.resonance_estimates
+    calls: list[tuple[object, np.ndarray, dict[str, object]]] = []
+
+    def observing_least_squares(
+        residual: object, x0: object, **kwargs: object
+    ) -> SimpleNamespace:
+        packed = np.asarray(x0, dtype=np.float64)
+        calls.append((residual, packed.copy(), kwargs.copy()))
+        w0 = queries[0].frozen_prior_fwhm_hz
+        a0 = source.source_fit.resonance_estimates[0].amplitude
+        probe = np.asarray((0.07, 1.08, 0.91, -0.04), dtype=np.float64)
+        expected_model = _evaluate_bound_source_model(
+            np.asarray([query.frequency_hz for query in queries], dtype=np.float64),
+            source,
+            queries[0].resonance_id,
+            center_hz=queries[0].frozen_fast_center_hz + probe[0] * w0,
+            fwhm_hz=probe[1] * w0,
+            amplitude=probe[2] * a0,
+            baseline_offset=probe[3] * a0,
+        )
+        expected_residual = expected_model - np.asarray(
+            [observation.fluorescence for observation in observations],
+            dtype=np.float64,
+        )
+        assert np.array_equal(residual(probe), expected_residual)
+        solution = np.asarray(
+            (expected[0] / w0, expected[1] / w0, expected[2] / a0, expected[3] / a0),
+            dtype=np.float64,
+        )
+        fun = np.asarray(residual(solution), dtype=np.float64)
+        return SimpleNamespace(
+            x=solution,
+            fun=fun,
+            jac=np.vstack((np.eye(4), np.ones(4))),
+            cost=float(np.dot(fun, fun) / 2.0),
+            status=1,
+            message="converged",
+            nfev=7,
+        )
+
+    monkeypatch.setattr(
+        "odmr_bench.estimators.sparse_linewidth_fit.least_squares",
+        observing_least_squares,
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert len(calls) == 1
+    _, initial, kwargs = calls[0]
+    target = source.source_fit.resonance_estimates[0]
+    w0 = queries[0].frozen_prior_fwhm_hz
+    a0 = target.amplitude
+    assert np.array_equal(initial, np.asarray((0.0, 1.0, 1.0, 0.0)))
+    lower, upper = kwargs.pop("bounds")
+    assert np.array_equal(
+        np.asarray(lower),
+        np.asarray(
+            (
+                -0.5,
+                max(0.5, source.fit_configuration.min_fwhm_hz / w0),
+                0.0,
+                -1.0,
+            )
+        ),
+    )
+    assert np.array_equal(
+        np.asarray(upper),
+        np.asarray(
+            (
+                0.5,
+                min(2.0, source.fit_configuration.max_fwhm_hz / w0),
+                min(4.0, source.fit_configuration.max_amplitude / a0),
+                1.0,
+            )
+        ),
+    )
+    assert kwargs == {"method": "trf", "max_nfev": 123}
+    assert result.queries == queries
+    assert result.observations == observations
+    assert tuple(id(query) for query in queries) == query_ids
+    assert tuple(id(observation) for observation in observations) == observation_ids
+    assert source.source_fit.resonance_estimates == source_resonances
+    assert result.release_sequence_index == observations[-1].sequence_index
+    assert result.release_timestamp_s == observations[-1].timestamp_s
+    assert result.fitted_center_correction_hz == expected[0]
+    assert result.fitted_local_center_hz == (
+        queries[0].frozen_fast_center_hz + expected[0]
+    )
+    assert result.fitted_fwhm_hz == expected[1]
+    assert result.fitted_amplitude == expected[2]
+    assert result.fitted_baseline_offset == expected[3]
+    assert result.fitted_q == result.fitted_local_center_hz / expected[1]
+    assert result.fitted_q < 0.0
