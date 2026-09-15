@@ -486,8 +486,6 @@ def _validate_unaccepted_midpoint(
     timing_matches = (
         full_observation.integration_time_s == query.integration_time_s
         and full_observation.timestamp_s == query.expected_end_timestamp_s
-        and acquisition.instrument_resources_after.virtual_elapsed_time_s
-        == query.expected_end_timestamp_s
     )
     expected_measurement_midpoint_s = (
         expected_midpoint_s if timing_matches else None

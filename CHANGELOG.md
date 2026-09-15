@@ -10,6 +10,14 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed the first Stage 6.3 integrated-review wave. Common-mode and capture
+  losses retain all finite pre-gate discriminator and center-step diagnostics
+  while applying zero correction; fifth-observation midpoint authentication
+  uses the exact physical endpoint/live clock independently of resource-ledger
+  addition association; foundational closed literals and estimator error codes
+  canonicalize string subclasses so callbacks cannot ride into retained state;
+  and estimator guidance assigns sparse linewidth/Q work to Stage 6.4 and
+  matched-budget evidence to Stage 6.5 without a performance claim.
 - Corrected verified-calibration timing authentication for long exact binary64
   schedules. The physical instrument clock and resource ledger use two
   intentionally different addition associations, so their elapsed-time totals

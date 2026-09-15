@@ -1618,6 +1618,50 @@ def test_resource_join_unavailable_aborts_without_update_or_aggregate(
     assert runner.state is terminal_state
 
 
+def test_fifth_observation_expected_only_corruption_retains_physical_midpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, _ = _conditional_tracking_inputs(monkeypatch)
+    original_query = ODMRInstrument.query
+    calls = 0
+
+    def corrupt_fifth_query(
+        self: ODMRInstrument,
+        frequency_hz: float,
+        integration_time_s: float,
+    ) -> InstrumentObservation:
+        nonlocal calls
+        calls += 1
+        observation = original_query(self, frequency_hz, integration_time_s)
+        if calls != 5:
+            return observation
+        return replace(
+            observation,
+            expected_photons=math.nextafter(observation.expected_photons, math.inf),
+        )
+
+    monkeypatch.setattr(ODMRInstrument, "query", corrupt_fifth_query)
+    for _ in range(4):
+        assert type(runner.step()) is TwoPointRunnerAccepted
+
+    physical_start_s = instrument.virtual_time_s
+    aborted = runner.step()
+
+    assert type(aborted) is TwoPointRunnerAborted
+    acquisition = aborted.abort.unaccepted_acquisition
+    assert type(acquisition) is TwoPointResourceJoinUnavailableAcquisition
+    assert acquisition.resource_mismatch_fields == ("expected_photons",)
+    expected_midpoint_s = (
+        physical_start_s
+        + instrument.frequency_overhead_s
+        + acquisition.query.integration_time_s / 2.0
+    )
+    assert acquisition.expected_measurement_midpoint_s == expected_midpoint_s
+    assert acquisition.measurement_midpoint_s == expected_midpoint_s
+    assert instrument.resources.virtual_elapsed_time_s != instrument.virtual_time_s
+    assert build_two_point_evaluator_resources(runner) is None
+
+
 @pytest.mark.parametrize(
     "boundary",
     ["before_pair", "accepted_first", "pending_second", "instrument_failure"],

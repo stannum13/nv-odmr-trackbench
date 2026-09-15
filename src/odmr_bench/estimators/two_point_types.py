@@ -148,16 +148,18 @@ def _canonical_string_tuple(value: object, name: str) -> tuple[str, ...]:
 
 def _validate_error(
     code: object, message: object, allowed_codes: frozenset[str]
-) -> str:
+) -> tuple[str, str]:
     if not isinstance(code, str):
         raise TypeError("code must be a string")
-    if code not in allowed_codes:
-        raise ValueError(f"unknown two-point error code: {code!r}")
+    canonical_code = str.__str__(code)
+    if canonical_code not in allowed_codes:
+        raise ValueError(f"unknown two-point error code: {canonical_code!r}")
     if not isinstance(message, str):
         raise TypeError("message must be a string")
-    if not message:
+    canonical_message = str.__str__(message)
+    if not canonical_message:
         raise ValueError("message must be nonempty")
-    return message
+    return canonical_code, canonical_message
 
 
 _CALIBRATION_CONSTRUCTION_CODES = frozenset(
@@ -206,8 +208,9 @@ class TwoPointCalibrationConstructionError(ValueError):
     def __init__(
         self, code: TwoPointCalibrationConstructionCode, message: str
     ) -> None:
-        self.message = _validate_error(code, message, _CALIBRATION_CONSTRUCTION_CODES)
-        self.code = code
+        self.code, self.message = _validate_error(
+            code, message, _CALIBRATION_CONSTRUCTION_CODES
+        )
         super().__init__(self.message)
 
 
@@ -218,8 +221,9 @@ class TwoPointObservationValidationError(ValueError):
     def __init__(
         self, code: TwoPointObservationValidationCode, message: str
     ) -> None:
-        self.message = _validate_error(code, message, _OBSERVATION_VALIDATION_CODES)
-        self.code = code
+        self.code, self.message = _validate_error(
+            code, message, _OBSERVATION_VALIDATION_CODES
+        )
         super().__init__(self.message)
 
 
@@ -230,8 +234,9 @@ class TwoPointUpdateConstructionError(RuntimeError):
     def __init__(
         self, code: TwoPointUpdateConstructionCode, message: str
     ) -> None:
-        self.message = _validate_error(code, message, _UPDATE_CONSTRUCTION_CODES)
-        self.code = code
+        self.code, self.message = _validate_error(
+            code, message, _UPDATE_CONSTRUCTION_CODES
+        )
         super().__init__(self.message)
 
 
@@ -336,13 +341,17 @@ class TwoPointIdentityBinding:
     expected_resonance_ids: tuple[str, ...] | None
 
     def __post_init__(self) -> None:
-        if self.mode not in {"require_expected_ids", "adopt_fit_ids"}:
-            raise ValueError("mode must be a supported calibration identity mode")
-        if self.mode == "adopt_fit_ids":
+        mode = _closed_literal_string(
+            self.mode,
+            "mode",
+            frozenset({"require_expected_ids", "adopt_fit_ids"}),
+        )
+        if mode == "adopt_fit_ids":
             if self.expected_resonance_ids is not None:
                 raise ValueError(
                     "adopt_fit_ids requires expected_resonance_ids to be None"
                 )
+            object.__setattr__(self, "mode", mode)
             return
         if self.expected_resonance_ids is None:
             raise ValueError("require_expected_ids requires expected_resonance_ids")
@@ -355,6 +364,7 @@ class TwoPointIdentityBinding:
             )
         if len(set(expected_resonance_ids)) != 8:
             raise ValueError("require_expected_ids requires unique resonance IDs")
+        object.__setattr__(self, "mode", mode)
         object.__setattr__(self, "expected_resonance_ids", expected_resonance_ids)
 
 
@@ -366,8 +376,11 @@ class NormalizedFluorescenceProvenance:
     sampling_rules: tuple[str, ...]
 
     def __post_init__(self) -> None:
-        if self.quantity != "normalized_fluorescence":
-            raise ValueError("quantity must be normalized_fluorescence")
+        quantity = _closed_literal_string(
+            self.quantity,
+            "quantity",
+            frozenset({"normalized_fluorescence"}),
+        )
         normalization_rule = _required_nonblank_string(
             self.normalization_rule, "normalization_rule"
         )
@@ -377,6 +390,7 @@ class NormalizedFluorescenceProvenance:
         sampling_rules = _canonical_string_tuple(self.sampling_rules, "sampling_rules")
         if not sampling_rules:
             raise ValueError("sampling_rules must be nonempty")
+        object.__setattr__(self, "quantity", quantity)
         object.__setattr__(self, "normalization_rule", normalization_rule)
         object.__setattr__(self, "nominal_photon_rate_hz", nominal_photon_rate_hz)
         object.__setattr__(self, "sampling_rules", sampling_rules)
@@ -391,8 +405,11 @@ class TwoPointClockMapping:
     offset_s: float
 
     def __post_init__(self) -> None:
-        if self.kind not in {"shared_clock", "unit_scale_offset"}:
-            raise ValueError("kind must be a supported clock mapping kind")
+        kind = _closed_literal_string(
+            self.kind,
+            "kind",
+            frozenset({"shared_clock", "unit_scale_offset"}),
+        )
         source_clock_id = _required_nonblank_string(
             self.source_clock_id, "source_clock_id"
         )
@@ -403,13 +420,14 @@ class TwoPointClockMapping:
         offset_s = _finite_float(self.offset_s, "offset_s")
         if scale != 1.0:
             raise ValueError("scale must equal exactly 1.0")
-        if self.kind == "shared_clock":
+        if kind == "shared_clock":
             if source_clock_id != tracker_clock_id:
                 raise ValueError("shared_clock requires equal clock IDs")
             if offset_s != 0.0:
                 raise ValueError("shared_clock requires a zero offset_s")
         elif source_clock_id == tracker_clock_id:
             raise ValueError("unit_scale_offset requires distinct clock IDs")
+        object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "source_clock_id", source_clock_id)
         object.__setattr__(self, "tracker_clock_id", tracker_clock_id)
         object.__setattr__(self, "scale", scale)
@@ -506,13 +524,17 @@ class TwoPointRunMetadata:
         frequency_overhead_s = _nonnegative_float(
             self.frequency_overhead_s, "frequency_overhead_s"
         )
-        if self.fluorescence_quantity != "normalized_fluorescence":
-            raise ValueError("fluorescence_quantity must be normalized_fluorescence")
+        fluorescence_quantity = _closed_literal_string(
+            self.fluorescence_quantity,
+            "fluorescence_quantity",
+            frozenset({"normalized_fluorescence"}),
+        )
         object.__setattr__(self, "tracker_clock_id", tracker_clock_id)
         object.__setattr__(self, "current_sequence_index", current_sequence_index)
         object.__setattr__(self, "current_timestamp_s", current_timestamp_s)
         object.__setattr__(self, "nominal_photon_rate_hz", nominal_photon_rate_hz)
         object.__setattr__(self, "frequency_overhead_s", frequency_overhead_s)
+        object.__setattr__(self, "fluorescence_quantity", fluorescence_quantity)
 
 
 def _snapshot_tracker_configuration(
@@ -620,13 +642,16 @@ class TwoPointCalibrationSource:
     clock_mapping: TwoPointClockMapping
 
     def __post_init__(self) -> None:
+        provenance = _closed_literal_string(
+            self.provenance,
+            "provenance",
+            frozenset({"verified_factory_acquisition", "caller_asserted"}),
+        )
         source_id = _required_nonblank_string(self.source_id, "source_id")
-        if self.provenance == "verified_factory_acquisition":
+        if provenance == "verified_factory_acquisition":
             raise ValueError(
                 "verified_factory_acquisition provenance requires the private factory"
             )
-        if self.provenance != "caller_asserted":
-            raise ValueError("provenance must be caller_asserted")
         if not isinstance(self.source_fit, SpectrumFitResult):
             raise TypeError("source_fit must be a SpectrumFitResult")
         if not self.source_fit.success:
@@ -818,6 +843,7 @@ class TwoPointCalibrationSource:
             raise ValueError("identity binding IDs must equal resolved IDs")
 
         object.__setattr__(self, "source_id", source_id)
+        object.__setattr__(self, "provenance", provenance)
         object.__setattr__(self, "source_fit", source_fit)
         object.__setattr__(self, "fit_configuration", fit_configuration)
         object.__setattr__(self, "identity_binding", identity_binding)
@@ -935,14 +961,14 @@ class TwoPointCalibration:
         if not isinstance(self.configuration, TwoPointTrackerConfiguration):
             raise TypeError("configuration must be a TwoPointTrackerConfiguration")
         configuration = _snapshot_tracker_configuration(self.configuration)
-        if self.budget_treatment not in {
-            "included_same_run",
-            "conditional_free_precalibration",
-        }:
-            raise ValueError("budget_treatment must be supported")
+        budget_treatment = _closed_literal_string(
+            self.budget_treatment,
+            "budget_treatment",
+            frozenset({"included_same_run", "conditional_free_precalibration"}),
+        )
         if (
             self.source.provenance == "caller_asserted"
-            and self.budget_treatment != "conditional_free_precalibration"
+            and budget_treatment != "conditional_free_precalibration"
         ):
             raise ValueError(
                 "caller_asserted sources require conditional_free_precalibration"
@@ -981,6 +1007,7 @@ class TwoPointCalibration:
                     "identities must preserve source fit IDs and model values"
                 )
         object.__setattr__(self, "configuration", configuration)
+        object.__setattr__(self, "budget_treatment", budget_treatment)
         object.__setattr__(self, "identities", identities)
 
 
@@ -1091,8 +1118,8 @@ def _validate_pair_diagnostic_state(
                 )
         return
     expected_presence = {
-        "common_mode_limit_exceeded": (True, True, False, False, False),
-        "capture_exceeded": (True, True, True, False, False),
+        "common_mode_limit_exceeded": (True, True, True, True, True),
+        "capture_exceeded": (True, True, True, True, True),
         "calibration_domain_exceeded": (True, True, True, True, True),
     }[failure_code]
     actual_presence = tuple(value is not None for value in diagnostic_values)

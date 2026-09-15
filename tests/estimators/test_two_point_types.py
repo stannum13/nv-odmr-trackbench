@@ -82,6 +82,70 @@ def test_calibration_record_names_are_public() -> None:
     assert TwoPointCalibration
 
 
+def test_foundational_literal_fields_drop_string_subclass_capabilities() -> None:
+    from odmr_bench.estimators import (
+        NormalizedFluorescenceProvenance,
+        TwoPointCalibration,
+        TwoPointCalibrationConstructionError,
+        TwoPointClockMapping,
+        TwoPointIdentityBinding,
+        TwoPointObservationValidationError,
+        TwoPointRunMetadata,
+        TwoPointUpdateConstructionError,
+    )
+
+    class CapabilityString(str):
+        pass
+
+    def capable(value: str) -> CapabilityString:
+        candidate = CapabilityString(value)
+        candidate.callback = lambda: None
+        candidate.payload = {"capability": object()}
+        return candidate
+
+    binding = TwoPointIdentityBinding(
+        capable("require_expected_ids"), tuple(f"r{index}" for index in range(8))
+    )
+    fluorescence = NormalizedFluorescenceProvenance(
+        capable("normalized_fluorescence"), "divide by nominal rate", 2.5e6, ("raw",)
+    )
+    clock = TwoPointClockMapping(
+        capable("shared_clock"), "clock", "clock", 1.0, 0.0
+    )
+    metadata = TwoPointRunMetadata(
+        "clock", None, 0.0, 2.5e6, 0.001, capable("normalized_fluorescence")
+    )
+    source = replace(
+        make_legal_caller_asserted_source(), provenance=capable("caller_asserted")
+    )
+    calibration = TwoPointCalibration(
+        source=source,
+        configuration=make_legal_tracker_configuration(),
+        budget_treatment=capable("conditional_free_precalibration"),
+        identities=make_legal_identity_calibrations(source=source),
+    )
+
+    values = (
+        binding.mode,
+        fluorescence.quantity,
+        clock.kind,
+        metadata.fluorescence_quantity,
+        source.provenance,
+        calibration.budget_treatment,
+        TwoPointCalibrationConstructionError(
+            capable("invalid_argument_type"), "failure"
+        ).code,
+        TwoPointObservationValidationError(
+            capable("invalid_observation_type"), "failure"
+        ).code,
+        TwoPointUpdateConstructionError(
+            capable("pair_result_construction_failed"), "failure"
+        ).code,
+    )
+    assert all(type(value) is str for value in values)
+    assert all(not hasattr(value, "callback") for value in values)
+
+
 def test_two_point_state_record_names_are_public() -> None:
     from odmr_bench.estimators import (
         TwoPointEstimate,
@@ -365,9 +429,9 @@ def test_query_partial_and_pair_intrinsic_state_matrix(case: str) -> None:
         ("lost", "numerical_failure", 4, "raw_innovation_hz", None),
         ("lost", "numerical_failure", 5, "requested_step_hz", None),
         ("lost", "common_mode_limit_exceeded", 0, "common_mode_target_depths", None),
-        ("lost", "common_mode_limit_exceeded", 0, "raw_innovation_hz", 10_000.0),
+        ("lost", "common_mode_limit_exceeded", 0, "raw_innovation_hz", None),
         ("lost", "capture_exceeded", 0, "common_mode_target_depths", None),
-        ("lost", "capture_exceeded", 0, "requested_step_hz", 10_000.0),
+        ("lost", "capture_exceeded", 0, "requested_step_hz", None),
         ("lost", "calibration_domain_exceeded", 0, "common_mode_target_depths", None),
         ("lost", "calibration_domain_exceeded", 0, "candidate_center_hz", None),
     ),

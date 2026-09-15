@@ -1448,7 +1448,7 @@ def _complete_pair_for_gate(case: str):
             "common-strict",
             "lost",
             "common_mode_limit_exceeded",
-            (True, True, False, False, False),
+            (True, True, True, True, True),
             id="common-strict-exceed",
         ),
         pytest.param(
@@ -1462,7 +1462,7 @@ def _complete_pair_for_gate(case: str):
             "common-negative-strict-combined",
             "lost",
             "common_mode_limit_exceeded",
-            (True, True, False, False, False),
+            (True, True, True, True, True),
             id="negative-common-precedes-capture-domain",
         ),
         pytest.param(
@@ -1476,7 +1476,7 @@ def _complete_pair_for_gate(case: str):
             "capture-strict",
             "lost",
             "capture_exceeded",
-            (True, True, True, False, False),
+            (True, True, True, True, True),
             id="capture-strict-exceed",
         ),
         pytest.param(
@@ -1490,7 +1490,7 @@ def _complete_pair_for_gate(case: str):
             "capture-negative-strict-combined",
             "lost",
             "capture_exceeded",
-            (True, True, True, False, False),
+            (True, True, True, True, True),
             id="negative-capture-precedes-domain",
         ),
         pytest.param(
@@ -1556,7 +1556,14 @@ def test_pair_gate_precedence_and_retained_diagnostics(
         assert pair.discriminator_slope_per_hz > 0.0
     if lock_state == "lost":
         assert pair.applied_step_hz == 0.0
-        assert pair.candidate_center_hz != pair.interrogation_center_hz
+        if failure_code in {
+            "common_mode_limit_exceeded",
+            "capture_exceeded",
+        }:
+            assert pair.raw_innovation_hz is not None
+            assert pair.requested_step_hz is not None
+            assert pair.candidate_center_hz is not None
+            assert math.isfinite(pair.candidate_center_hz)
     elif lock_state == "tracking":
         assert pair.applied_step_hz == pair.requested_step_hz
         assert pair.candidate_center_hz == (
@@ -2124,7 +2131,7 @@ def _assert_tracker_graph_has_no_truth_path(value: object) -> None:
         inspect_name(type_name, f"{path}.__type__")
         if callable(item) and not isinstance(item, type):
             raise AssertionError(f"forbidden retained callback at {path}")
-        if item is None or isinstance(item, str | bytes | int | float | bool):
+        if item is None or type(item) in {str, bytes, int, float, bool}:
             return
         identity = id(item)
         if identity in visited:
@@ -2197,6 +2204,11 @@ class _DynamicDataclassHolder:
 
 
 def test_truth_graph_checker_rejects_every_forbidden_storage_form() -> None:
+    class StringCarrier(str):
+        pass
+
+    capability_string = StringCarrier("normalized_fluorescence")
+    capability_string.callback = lambda: None
     dictionary_holder = _DictionaryHolder()
     dictionary_holder.retained = Future()
     dataclass_holder = _DynamicDataclassHolder(1)
@@ -2215,6 +2227,7 @@ def test_truth_graph_checker_rejects_every_forbidden_storage_form() -> None:
         dataclass_holder,
         _DerivedSlotHolder(Future()),
         rejecting_holder,
+        capability_string,
     )
 
     for forbidden in forbidden_values:

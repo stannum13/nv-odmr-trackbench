@@ -820,13 +820,8 @@ class CalibratedTwoPointTracker:
                         common_limit is not None
                         and abs(common_mode_target_depths) > common_limit
                     ):
-                        raw_innovation_hz = None
-                        requested_step_hz = None
-                        candidate_center_hz = None
                         failure_code = "common_mode_limit_exceeded"
                     elif abs(raw_innovation_hz) > cell.capture_radius_hz:
-                        requested_step_hz = None
-                        candidate_center_hz = None
                         failure_code = "capture_exceeded"
                     elif not (
                         cell.allowed_center_min_hz

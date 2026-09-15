@@ -615,7 +615,6 @@ def _build_tracking_acquisition(
         full_observation.integration_time_s == query.integration_time_s
         and full_observation.timestamp_s == query.expected_end_timestamp_s
         and virtual_time_after == query.expected_end_timestamp_s
-        and resources_after.virtual_elapsed_time_s == query.expected_end_timestamp_s
     )
     if resource_mismatch_fields:
         return TwoPointResourceJoinUnavailableAcquisition(

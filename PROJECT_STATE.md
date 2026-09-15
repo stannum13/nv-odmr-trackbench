@@ -403,6 +403,22 @@ package export; the authorized narrow export and stale exact-`__all__` test
 updates make the source and isolated wheel surfaces agree.
 The bounded independent Task 19 review reported zero Critical, Important, or
 Minor findings.
+Task 20's first integrated review wave found three Important cross-task defects
+and one documentation Minor. Common-mode and capture gates now retain every
+finite discriminator, raw-innovation, requested-step, and candidate-center
+diagnostic computed before the gate while applying exactly zero correction and
+preserving gate precedence. Tracking midpoint authentication now separates the
+instrument endpoint/live clock from the independently associated resource
+ledger; an expected-photon-only corruption on the fifth observation retains
+the exact physical midpoint even when ledger elapsed and instrument time differ
+by one ULP. All foundational Stage 6.3 closed literal fields, including typed
+estimator error codes, now store exact built-in strings so subclasses cannot
+retain callbacks or payload capabilities, and the recursive isolation witness
+traverses non-exact scalar subclasses. Documentation assigns sparse linewidth/Q
+estimation to Stage 6.4 and matched-budget comparison to Stage 6.5 without a
+performance claim. Focused gates pass 32 tests, the affected estimator/evaluator
+suite passes 248 tests, the complete repository passes 1,209 tests, and Ruff
+passes.
 
 ## Completed work
 
@@ -696,8 +712,9 @@ Minor findings.
 
 ## Tests currently passing
 
-- Full repository suite including the Task 19 package, example, and guidance
-  nodes: 1207 passed.
+- Full repository suite including the Task 20 integrated fixes: 1209 passed.
+- Task 20 focused scientific/capability regression gate: 32 passed.
+- Task 20 affected estimator/evaluator integration gate: 248 passed.
 - Task 19 import, out-of-tree example, and guidance nodes: 3 passed.
 - Task 18 acceptance file: 7 passed on each of two consecutive complete runs;
   its static exact-schedule node also passed twice independently.
@@ -759,5 +776,5 @@ Minor findings.
 
 ## Next actions
 
-1. Execute Task 20's integrated scientific/software review and closeout.
+1. Re-review Task 20's integrated scientific/software fixes and closeout.
 2. Run the final deterministic test, lint, build, and repository-hygiene gates.

@@ -285,8 +285,6 @@ def make_legal_pair_result(
     successful = lock_state in {"tracking", "step_limited"}
     invalid_normalization = failure_code == "invalid_pair_normalization"
     numerical_failure = failure_code == "numerical_failure"
-    common_mode_failure = failure_code == "common_mode_limit_exceeded"
-    capture_failure = failure_code == "capture_exceeded"
     discriminator_present = (
         not invalid_normalization
         and (not numerical_failure or numerical_prefix >= 1)
@@ -297,19 +295,14 @@ def make_legal_pair_result(
     )
     innovation_present = (
         not invalid_normalization
-        and not common_mode_failure
         and (not numerical_failure or numerical_prefix >= 3)
     )
     requested_step_present = (
         not invalid_normalization
-        and not common_mode_failure
-        and not capture_failure
         and (not numerical_failure or numerical_prefix >= 4)
     )
     candidate_present = (
         not invalid_normalization
-        and not common_mode_failure
-        and not capture_failure
         and (not numerical_failure or numerical_prefix >= 5)
     )
     geometry_available = not invalid_normalization and (

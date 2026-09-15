@@ -308,8 +308,9 @@ outside that typed guarantee.
 The tracker's integer `seed` is retained as run metadata but is currently
 **inert**: this deterministic tracker does not use it to randomize scheduling
 or updates. Instrument/noise seeds remain separate. The current implementation
-tracks center frequency only; sparse realtime linewidth and Q updates and the
-matched-budget comparisons belong to Stage 6.5.
+tracks center frequency only. Sparse linewidth and Q estimation belongs to
+Stage 6.4; matched-budget comparisons belong to Stage 6.5. Those future stages
+must establish their measurement-latency and accuracy claims empirically.
 
 ## Synthetic example and recording interpretation
 
