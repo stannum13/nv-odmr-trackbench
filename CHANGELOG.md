@@ -10,6 +10,17 @@ once a package version is introduced.
 
 ### Added
 
+- Completed Stage 6.4's fifth-point sparse estimator transition. The composite
+  calls the isolated fitter once over the exact reserved block, commits both
+  scientific success and failure to scan history/counters/parity, preserves
+  every fast-center source, refreshes only successful FWHM sources, and
+  maintains separately aged asynchronous live Q. Public midpoint/release
+  timing, signed/zero and nonrepresentable Q, both calibration-budget
+  treatments, five independent arrival-order resource ledgers, and independent
+  sparse/global process-CPU folds are regression-pinned. Every fifth-point
+  validation, construction, and clock failure retains typed rollback or the
+  identical process-control exception. Evaluator/runner behavior and Stage 6.5
+  claims remain out of scope.
 - Added Stage 6.4's sparse partial-scan transitions for accepted points one
   through four. Each normal composite update retains the exact reserved query
   and frozen center/FWHM sources, publishes an immutable partial of length one

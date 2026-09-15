@@ -23,6 +23,7 @@ from odmr_bench.estimators import (
     SparseLinewidthQuery,
     SparseLinewidthResetError,
     SparseLinewidthScanResult,
+    SparseLinewidthUpdateConstructionError,
     SparsePartialScan,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
@@ -38,7 +39,11 @@ from odmr_bench.estimators.sparse_linewidth_fit import (
     _construct_sparse_fit_geometry,
     _SparseGeometryConstructionError,
 )
+from odmr_bench.estimators.sparse_linewidth_fit import (
+    fit_sparse_linewidth as _real_fit_sparse_linewidth,
+)
 from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_bound_source_model,
     _evaluate_target_only_model,
     _target_center_derivative,
 )
@@ -602,6 +607,177 @@ def _sparse_observation(
         nominal_exposure_photons=query.expected_nominal_exposure_photons,
         realized_photons=realized_photons,
     )
+
+
+def _model_sparse_observation(
+    calibration: TwoPointCalibration,
+    query: SparseLinewidthQuery,
+    *,
+    center_correction_fwhm_fraction: float = 0.1,
+    fwhm_prior_ratio: float = 1.2,
+    amplitude_source_ratio: float = 1.1,
+    baseline_offset_source_ratio: float = 0.02,
+    realized_photons: int | None = None,
+) -> EstimatorObservation:
+    target = next(
+        resonance
+        for resonance in calibration.source.source_fit.resonance_estimates
+        if resonance.resonance_id == query.resonance_id
+    )
+    fluorescence = float(
+        _evaluate_bound_source_model(
+            query.frequency_hz,
+            calibration.source,
+            query.resonance_id,
+            center_hz=(
+                query.frozen_fast_center_hz
+                + center_correction_fwhm_fraction * query.frozen_prior_fwhm_hz
+            ),
+            fwhm_hz=fwhm_prior_ratio * query.frozen_prior_fwhm_hz,
+            amplitude=amplitude_source_ratio * target.amplitude,
+            baseline_offset=baseline_offset_source_ratio * target.amplitude,
+        )
+    )
+    return _sparse_observation(
+        query,
+        fluorescence=fluorescence,
+        realized_photons=realized_photons,
+    )
+
+
+def _scan_public_reference(
+    observations: tuple[EstimatorObservation, ...],
+) -> float:
+    reference_s = (
+        observations[0].timestamp_s - observations[0].integration_time_s / 2.0
+    )
+    for count, observation in enumerate(observations[1:], start=2):
+        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
+        reference_s = reference_s + (midpoint_s - reference_s) / count
+    return reference_s
+
+
+def _synthetic_fit_result(
+    queries: tuple[SparseLinewidthQuery, ...],
+    observations: tuple[EstimatorObservation, ...],
+    *,
+    success: bool,
+    fitted_fwhm_hz: float | None = None,
+    fitted_local_center_hz: float | None = None,
+) -> SparseLinewidthScanResult:
+    first = queries[0]
+    common = {
+        "scan_index": first.scan_index,
+        "identity_scan_index": first.identity_scan_index,
+        "resonance_id": first.resonance_id,
+        "frozen_fast_center_hz": first.frozen_fast_center_hz,
+        "frozen_fast_center_source_kind": first.frozen_fast_center_source_kind,
+        "frozen_fast_center_source_pair_index": (
+            first.frozen_fast_center_source_pair_index
+        ),
+        "frozen_fast_center_reference_timestamp_s": (
+            first.frozen_fast_center_reference_timestamp_s
+        ),
+        "frozen_fast_center_release_sequence_index": (
+            first.frozen_fast_center_release_sequence_index
+        ),
+        "frozen_fast_center_release_timestamp_s": (
+            first.frozen_fast_center_release_timestamp_s
+        ),
+        "frozen_prior_fwhm_hz": first.frozen_prior_fwhm_hz,
+        "frozen_fwhm_source_kind": first.frozen_fwhm_source_kind,
+        "frozen_fwhm_source_scan_index": first.frozen_fwhm_source_scan_index,
+        "frozen_fwhm_reference_timestamp_s": (
+            first.frozen_fwhm_reference_timestamp_s
+        ),
+        "frozen_fwhm_release_sequence_index": (
+            first.frozen_fwhm_release_sequence_index
+        ),
+        "frozen_fwhm_release_timestamp_s": (
+            first.frozen_fwhm_release_timestamp_s
+        ),
+        "queries": queries,
+        "observations": observations,
+        "public_reference_timestamp_s": _scan_public_reference(observations),
+        "release_sequence_index": observations[-1].sequence_index,
+        "release_timestamp_s": observations[-1].timestamp_s,
+        "fit_cpu_time_s": 0.002,
+    }
+    if not success:
+        return SparseLinewidthScanResult(
+            **common,
+            status="failure",
+            failure_code="model_evaluation_failed",
+            fitted_center_correction_hz=None,
+            fitted_local_center_hz=None,
+            fitted_fwhm_hz=None,
+            fitted_amplitude=None,
+            fitted_baseline_offset=None,
+            fitted_q=None,
+            rmse=None,
+            amplitude_normalized_rmse=None,
+            scaled_jacobian_rank=None,
+            scaled_jacobian_condition=None,
+            scipy_status=None,
+            scipy_message=None,
+            nfev=None,
+        )
+    fitted_fwhm_hz = (
+        first.frozen_prior_fwhm_hz * 1.25
+        if fitted_fwhm_hz is None
+        else fitted_fwhm_hz
+    )
+    fitted_local_center_hz = (
+        first.frozen_fast_center_hz
+        if fitted_local_center_hz is None
+        else fitted_local_center_hz
+    )
+    fitted_center_correction_hz = (
+        fitted_local_center_hz - first.frozen_fast_center_hz
+    )
+    return SparseLinewidthScanResult(
+        **common,
+        status="success",
+        failure_code=None,
+        fitted_center_correction_hz=fitted_center_correction_hz,
+        fitted_local_center_hz=fitted_local_center_hz,
+        fitted_fwhm_hz=fitted_fwhm_hz,
+        fitted_amplitude=1.0,
+        fitted_baseline_offset=0.0,
+        fitted_q=fitted_local_center_hz / fitted_fwhm_hz,
+        rmse=0.0,
+        amplitude_normalized_rmse=0.0,
+        scaled_jacobian_rank=4,
+        scaled_jacobian_condition=1.0,
+        scipy_status=1,
+        scipy_message="synthetic success",
+        nfev=1,
+    )
+
+
+def _accept_sparse_prefix(
+    tracker: SparseLinewidthCompositeTracker,
+    *,
+    length: int = 4,
+    observation_factory=_sparse_observation,
+) -> tuple[
+    tuple[SparseLinewidthQuery, ...],
+    tuple[EstimatorObservation, ...],
+]:
+    first = tracker.choose_next_query()
+    assert type(first) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    reserved = state.reserved_sparse_queries
+    assert reserved is not None
+    observations: list[EstimatorObservation] = []
+    for point_index in range(length):
+        query = tracker.choose_next_query()
+        assert query is reserved[point_index]
+        observation = observation_factory(query)
+        tracker.update(observation)
+        observations.append(observation)
+    return reserved, tuple(observations)
 
 
 def _identity_source_snapshot(identity) -> tuple[object, ...]:
@@ -1701,19 +1877,393 @@ def test_sparse_partial_resource_ledgers_follow_exact_arrival_order() -> None:
         )
 
 
-def test_fifth_sparse_point_remains_reserved_and_unaccepted_in_task_nine() -> None:
+def test_sparse_success_refreshes_width_but_never_fast_center(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calibration = _calibration()
     tracker = _reset_tracker(calibration=calibration)
     _accept_fast_pairs(tracker, calibration, count=8)
-    for _ in range(4):
-        query = tracker.choose_next_query()
-        assert type(query) is SparseLinewidthQuery
-        tracker.update(_sparse_observation(query))
+    reserved, observations = _accept_sparse_prefix(
+        tracker,
+        observation_factory=lambda query: _model_sparse_observation(
+            calibration, query, realized_photons=31 + query.point_index
+        ),
+    )
+    before = tracker.estimate()
+    before_target = before.identities[0]
     fifth = tracker.choose_next_query()
-    assert type(fifth) is SparseLinewidthQuery
+    assert fifth is reserved[4]
+    fifth_observation = _model_sparse_observation(
+        calibration, fifth, realized_photons=35
+    )
+    calls: list[tuple[object, ...]] = []
+
+    def counted_fit(source, configuration, queries, fit_observations):
+        calls.append((source, configuration, queries, fit_observations))
+        return _real_fit_sparse_linewidth(
+            source, configuration, queries, fit_observations
+        )
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", counted_fit, raising=False
+    )
+
+    update = tracker.update(fifth_observation)
+
+    assert len(calls) == 1
+    source, configuration, queries, fit_observations = calls[0]
+    assert source is calibration.source
+    assert configuration is tracker._configuration
+    assert all(
+        actual is expected
+        for actual, expected in zip(queries, reserved, strict=True)
+    )
+    assert all(
+        actual is expected
+        for actual, expected in zip(
+            fit_observations, (*observations, fifth_observation), strict=True
+        )
+    )
+    scan = update.completed_sparse_scan
+    assert type(scan) is SparseLinewidthScanResult
+    assert scan.status == "success"
+    assert scan.fitted_local_center_hz != before_target.fast_center_hz
+    assert scan.public_reference_timestamp_s == _scan_public_reference(
+        scan.observations
+    )
+    assert scan.release_sequence_index == fifth_observation.sequence_index
+    assert scan.release_timestamp_s == fifth_observation.timestamp_s
+    after = update.estimate
+    after_target = after.identities[0]
+    assert after_target.fast_center_hz == before_target.fast_center_hz
+    assert after_target.fast_center_source_kind == before_target.fast_center_source_kind
+    assert (
+        after_target.fast_center_source_pair_index
+        == before_target.fast_center_source_pair_index
+    )
+    assert (
+        after_target.fast_center_reference_timestamp_s
+        == before_target.fast_center_reference_timestamp_s
+    )
+    assert (
+        after_target.fast_center_release_sequence_index
+        == before_target.fast_center_release_sequence_index
+    )
+    assert (
+        after_target.fast_center_release_timestamp_s
+        == before_target.fast_center_release_timestamp_s
+    )
+    assert after_target.active_fwhm_hz == scan.fitted_fwhm_hz
+    assert after_target.fwhm_source_kind == "scan"
+    assert after_target.fwhm_source_scan_index == scan.scan_index
+    assert (
+        after_target.fwhm_reference_timestamp_s
+        == scan.public_reference_timestamp_s
+    )
+    assert after_target.fwhm_release_sequence_index == scan.release_sequence_index
+    assert after_target.fwhm_release_timestamp_s == scan.release_timestamp_s
+    assert after_target.live_q == (
+        after_target.fast_center_hz / after_target.active_fwhm_hz
+    )
+    assert after_target.center_age_s == (
+        scan.release_timestamp_s - before_target.fast_center_reference_timestamp_s
+    )
+    assert after_target.center_release_age_s == (
+        scan.release_timestamp_s - before_target.fast_center_release_timestamp_s
+    )
+    assert after_target.fwhm_age_s == (
+        scan.release_timestamp_s - scan.public_reference_timestamp_s
+    )
+    assert after_target.fwhm_release_age_s == 0.0
+    assert after.completed_sparse_scans == 1
+    assert after.fast_pairs_since_scan == 0
+    assert after.sparse_scan_history[-1] is scan
+    assert after_target.latest_sparse_scan is scan
+    assert after_target.completed_sparse_scans == 1
+    assert after.incomplete_sparse_scan is None
+    assert after.pending_mode is None
+    assert after.pending_query is None
+    assert update.query is fifth
+    assert update.observation is fifth_observation
+    assert tracker._state is not None
+    assert tracker._state.reserved_sparse_queries is None
+    next_query = tracker.choose_next_query()
+    assert type(next_query) is TwoPointQuery
+    assert next_query.interrogation_center_hz == before_target.fast_center_hz
+
+
+def test_scientific_sparse_failure_is_completed_but_retains_both_sources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    reserved, observations = _accept_sparse_prefix(tracker)
+    before = tracker.estimate()
+    before_target = before.identities[0]
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    fifth_observation = _sparse_observation(fifth)
+    calls = 0
+
+    def failed_fit(source, configuration, queries, fit_observations):
+        nonlocal calls
+        calls += 1
+        assert source is calibration.source
+        assert configuration is tracker._configuration
+        return _synthetic_fit_result(
+            queries, fit_observations, success=False
+        )
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", failed_fit, raising=False
+    )
+
+    update = tracker.update(fifth_observation)
+
+    assert calls == 1
+    scan = update.completed_sparse_scan
+    assert type(scan) is SparseLinewidthScanResult
+    assert scan.status == "failure"
+    assert scan.failure_code == "model_evaluation_failed"
+    assert all(
+        actual is expected
+        for actual, expected in zip(
+            scan.observations, (*observations, fifth_observation), strict=True
+        )
+    )
+    after = update.estimate
+    after_target = after.identities[0]
+    assert (
+        after_target.fast_center_hz,
+        after_target.fast_center_source_kind,
+        after_target.fast_center_source_pair_index,
+        after_target.fast_center_reference_timestamp_s,
+        after_target.fast_center_release_sequence_index,
+        after_target.fast_center_release_timestamp_s,
+    ) == (
+        before_target.fast_center_hz,
+        before_target.fast_center_source_kind,
+        before_target.fast_center_source_pair_index,
+        before_target.fast_center_reference_timestamp_s,
+        before_target.fast_center_release_sequence_index,
+        before_target.fast_center_release_timestamp_s,
+    )
+    assert (
+        after_target.active_fwhm_hz,
+        after_target.fwhm_source_kind,
+        after_target.fwhm_source_scan_index,
+        after_target.fwhm_reference_timestamp_s,
+        after_target.fwhm_release_sequence_index,
+        after_target.fwhm_release_timestamp_s,
+    ) == (
+        before_target.active_fwhm_hz,
+        before_target.fwhm_source_kind,
+        before_target.fwhm_source_scan_index,
+        before_target.fwhm_reference_timestamp_s,
+        before_target.fwhm_release_sequence_index,
+        before_target.fwhm_release_timestamp_s,
+    )
+    assert after_target.live_q == before_target.live_q
+    assert after_target.center_age_s == (
+        scan.release_timestamp_s - before_target.fast_center_reference_timestamp_s
+    )
+    assert after_target.fwhm_age_s == (
+        scan.release_timestamp_s - before_target.fwhm_reference_timestamp_s
+    )
+    assert after_target.center_release_age_s == (
+        scan.release_timestamp_s - before_target.fast_center_release_timestamp_s
+    )
+    assert after_target.fwhm_release_age_s == (
+        scan.release_timestamp_s - before_target.fwhm_release_timestamp_s
+    )
+    assert after.completed_sparse_scans == before.completed_sparse_scans + 1
+    assert after.fast_pairs_since_scan == 0
+    assert after.sparse_scan_history[-1] is scan
+    assert after_target.latest_sparse_scan is scan
+    assert after_target.completed_sparse_scans == 1
+    assert update.estimate.accepted_observations == before.accepted_observations + 1
+
+
+@pytest.mark.parametrize("included", (False, True))
+@pytest.mark.parametrize("success", (False, True))
+def test_fifth_point_replays_every_resource_ledger_for_both_treatments(
+    monkeypatch: pytest.MonkeyPatch, included: bool, success: bool
+) -> None:
+    configuration = SparseLinewidthConfiguration(integration_time_s=0.007)
+    calibration = _calibration(included=included)
+    metadata = _metadata(calibration, included=included)
+    tracker = _reset_tracker(
+        configuration=configuration,
+        calibration=calibration,
+        metadata=metadata,
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+    point_index = 0
+
+    def observation_factory(query: SparseLinewidthQuery) -> EstimatorObservation:
+        nonlocal point_index
+        observation = _sparse_observation(
+            query,
+            fluorescence=0.87 + 0.01 * point_index,
+            realized_photons=None if point_index in {1, 4} else 41 + point_index,
+        )
+        point_index += 1
+        return observation
+
+    reserved, prefix = _accept_sparse_prefix(
+        tracker, observation_factory=observation_factory
+    )
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    fifth_observation = observation_factory(fifth)
+
+    def fit_result(source, fit_configuration, queries, fit_observations):
+        assert source is calibration.source
+        assert fit_configuration is tracker._configuration
+        return _synthetic_fit_result(
+            queries, fit_observations, success=success
+        )
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_result, raising=False
+    )
+    expected_sparse = before.sparse_tracking_resources
+    expected_tracking = before.tracking_resources
+    expected_charged = before.charged_resources
+    for observation in (*prefix, fifth_observation):
+        expected_sparse = _independent_resource_transition(
+            expected_sparse, observation, metadata
+        )
+        expected_tracking = _independent_resource_transition(
+            expected_tracking, observation, metadata
+        )
+        expected_charged = _independent_resource_transition(
+            expected_charged, observation, metadata
+        )
+
+    update = tracker.update(fifth_observation)
+
+    estimate = update.estimate
+    assert estimate.calibration_budget_treatment == calibration.budget_treatment
+    assert estimate.calibration_resources == before.calibration_resources
+    assert estimate.fast_tracking_resources == before.fast_tracking_resources
+    _assert_resource_fields(estimate.sparse_tracking_resources, expected_sparse)
+    _assert_resource_fields(estimate.tracking_resources, expected_tracking)
+    _assert_resource_fields(estimate.charged_resources, expected_charged)
+    assert estimate.sparse_tracking_resources.observations == 5
+    assert estimate.tracking_resources.observations == before.accepted_observations + 5
+    assert estimate.charged_resources != estimate.tracking_resources or not included
+
+
+def test_fifth_point_cpu_interval_and_mode_total_folds_are_independent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    reserved, _ = _accept_sparse_prefix(tracker)
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    fifth_observation = _sparse_observation(fifth)
+    state = tracker._state
+    assert state is not None
+    old_fast_cpu = float(2**53)
+    old_sparse_cpu = 2.0
+    old_total_cpu = float(2**53)
+    estimate = replace(
+        state.estimate,
+        fast_update_cpu_time_s=old_fast_cpu,
+        sparse_update_cpu_time_s=old_sparse_cpu,
+        total_update_cpu_time_s=old_total_cpu,
+    )
+    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+    events: list[str] = []
+    clock_values = iter((10_000_000_000, 11_000_000_000))
+
+    def clock() -> int:
+        events.append("clock")
+        return next(clock_values)
+
+    def fit_result(source, configuration, queries, observations):
+        del source, configuration
+        events.append("fit")
+        return _synthetic_fit_result(queries, observations, success=False)
+
+    identity_constructor = tracker_module.CompositeIdentityEstimate
+    resources_constructor = tracker_module.PublicAcquisitionResources
+
+    def construct_identity(*args, **kwargs):
+        events.append("identity")
+        return identity_constructor(*args, **kwargs)
+
+    def construct_resources(*args, **kwargs):
+        events.append("resource")
+        return resources_constructor(*args, **kwargs)
+
+    monkeypatch.setattr(tracker_module.time, "process_time_ns", clock)
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_result, raising=False
+    )
+    monkeypatch.setattr(tracker_module, "CompositeIdentityEstimate", construct_identity)
+    monkeypatch.setattr(
+        tracker_module, "PublicAcquisitionResources", construct_resources
+    )
+
+    update = tracker.update(fifth_observation)
+
+    assert update.update_cpu_time_s == 1.0
+    assert events[0:2] == ["clock", "fit"]
+    assert events.count("identity") == 8
+    assert events.count("resource") == 3
+    assert events[-1] == "clock"
+    assert events.index("fit") < events.index("identity")
+    assert events.index("identity") < events.index("resource")
+    assert update.estimate.fast_update_cpu_time_s == old_fast_cpu
+    assert update.estimate.sparse_update_cpu_time_s == old_sparse_cpu + 1.0
+    assert update.estimate.total_update_cpu_time_s == old_total_cpu + 1.0
+    assert update.estimate.total_update_cpu_time_s != (
+        update.estimate.fast_update_cpu_time_s
+        + update.estimate.sparse_update_cpu_time_s
+    )
+
+
+def test_nonrepresentable_live_q_rolls_back_as_aggregate_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    reserved, _ = _accept_sparse_prefix(tracker)
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    fifth_observation = _sparse_observation(fifth)
     before = tracker._state
+    calls = 0
 
-    with pytest.raises(NotImplementedError, match="Task 10"):
-        tracker.update(_sparse_observation(fifth))
+    def unrepresentable_live_q(source, configuration, queries, observations):
+        nonlocal calls
+        del source, configuration
+        calls += 1
+        return _synthetic_fit_result(
+            queries,
+            observations,
+            success=True,
+            fitted_fwhm_hz=np.nextafter(0.0, 1.0),
+            fitted_local_center_hz=0.0,
+        )
 
+    monkeypatch.setattr(
+        tracker_module,
+        "fit_sparse_linewidth",
+        unrepresentable_live_q,
+        raising=False,
+    )
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(fifth_observation)
+
+    assert calls == 1
+    assert raised.value.code == "aggregate_estimate_construction_failed"
     assert tracker._state == before

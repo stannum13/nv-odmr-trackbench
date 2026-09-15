@@ -16,6 +16,7 @@ from odmr_bench.estimators.sparse_linewidth_fit import (
     _SparseFitGeometry,
     _SparseGeometryConstructionError,
     _validate_calibration_sparse_geometry,
+    fit_sparse_linewidth,
 )
 from odmr_bench.estimators.sparse_linewidth_types import (
     CompositeIdentityEstimate,
@@ -26,6 +27,7 @@ from odmr_bench.estimators.sparse_linewidth_types import (
     SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
     SparseLinewidthResetError,
+    SparseLinewidthScanResult,
     SparseLinewidthUpdateConstructionError,
     SparsePartialScan,
 )
@@ -694,6 +696,81 @@ def _identity_after_fast_observation(
     )
 
 
+def _identity_after_sparse_observation(
+    identity: CompositeIdentityEstimate,
+    observation: EstimatorObservation,
+    *,
+    live_q: float,
+    completed_scan: SparseLinewidthScanResult | None = None,
+) -> CompositeIdentityEstimate:
+    successful_scan = completed_scan is not None and completed_scan.status == "success"
+    active_fwhm_hz = (
+        completed_scan.fitted_fwhm_hz
+        if successful_scan and completed_scan is not None
+        else identity.active_fwhm_hz
+    )
+    assert active_fwhm_hz is not None
+    fwhm_source_kind = "scan" if successful_scan else identity.fwhm_source_kind
+    fwhm_source_scan_index = (
+        completed_scan.scan_index
+        if successful_scan and completed_scan is not None
+        else identity.fwhm_source_scan_index
+    )
+    fwhm_reference_s = (
+        completed_scan.public_reference_timestamp_s
+        if successful_scan and completed_scan is not None
+        else identity.fwhm_reference_timestamp_s
+    )
+    fwhm_release_sequence_index = (
+        completed_scan.release_sequence_index
+        if successful_scan and completed_scan is not None
+        else identity.fwhm_release_sequence_index
+    )
+    fwhm_release_s = (
+        completed_scan.release_timestamp_s
+        if successful_scan and completed_scan is not None
+        else identity.fwhm_release_timestamp_s
+    )
+    return CompositeIdentityEstimate(
+        resonance_id=identity.resonance_id,
+        fast_center_hz=identity.fast_center_hz,
+        fast_center_source_kind=identity.fast_center_source_kind,
+        fast_center_source_pair_index=identity.fast_center_source_pair_index,
+        fast_center_reference_timestamp_s=(
+            identity.fast_center_reference_timestamp_s
+        ),
+        fast_center_release_sequence_index=(
+            identity.fast_center_release_sequence_index
+        ),
+        fast_center_release_timestamp_s=identity.fast_center_release_timestamp_s,
+        active_fwhm_hz=active_fwhm_hz,
+        fwhm_source_kind=fwhm_source_kind,
+        fwhm_source_scan_index=fwhm_source_scan_index,
+        fwhm_reference_timestamp_s=fwhm_reference_s,
+        fwhm_release_sequence_index=fwhm_release_sequence_index,
+        fwhm_release_timestamp_s=fwhm_release_s,
+        live_q=live_q,
+        center_age_s=(
+            observation.timestamp_s - identity.fast_center_reference_timestamp_s
+        ),
+        fwhm_age_s=observation.timestamp_s - fwhm_reference_s,
+        center_release_age_s=(
+            observation.timestamp_s - identity.fast_center_release_timestamp_s
+        ),
+        fwhm_release_age_s=observation.timestamp_s - fwhm_release_s,
+        completed_fast_pairs=identity.completed_fast_pairs,
+        completed_sparse_scans=(
+            identity.completed_sparse_scans + int(completed_scan is not None)
+        ),
+        latest_fast_pair=identity.latest_fast_pair,
+        latest_sparse_scan=(
+            completed_scan
+            if completed_scan is not None
+            else identity.latest_sparse_scan
+        ),
+    )
+
+
 def _raise_update_error(code: str, message: str, cause: Exception) -> None:
     raise SparseLinewidthUpdateConstructionError(  # type: ignore[arg-type]
         code, message
@@ -1283,7 +1360,192 @@ class SparseLinewidthCompositeTracker:
         if mode == "sparse_scan":
             assert type(query) is SparseLinewidthQuery
             if query.point_index == 4:
-                raise NotImplementedError("sparse scan completion begins in Task 10")
+                prior_partial = state.estimate.incomplete_sparse_scan
+                assert prior_partial is not None
+                complete_queries = (*prior_partial.queries, query)
+                complete_observations = (*prior_partial.observations, observation)
+                try:
+                    started_ns = time.process_time_ns()
+                    completed_scan = fit_sparse_linewidth(
+                        state.calibration.source,
+                        self._configuration,
+                        complete_queries,
+                        complete_observations,
+                    )
+                    if type(completed_scan) is not SparseLinewidthScanResult:
+                        raise TypeError(
+                            "fit_sparse_linewidth must return an exact "
+                            "SparseLinewidthScanResult"
+                        )
+                except Exception as error:
+                    _raise_update_error(
+                        "sparse_scan_result_construction_failed",
+                        f"sparse scan result construction failed: {error}",
+                        error,
+                    )
+
+                target_index = state.estimate.completed_sparse_scans % len(
+                    state.estimate.identities
+                )
+                try:
+                    active_fwhm_values = tuple(
+                        (
+                            completed_scan.fitted_fwhm_hz
+                            if index == target_index
+                            and completed_scan.status == "success"
+                            else identity.active_fwhm_hz
+                        )
+                        for index, identity in enumerate(
+                            state.estimate.identities
+                        )
+                    )
+                    assert all(value is not None for value in active_fwhm_values)
+                    live_q_values = tuple(
+                        identity.fast_center_hz / active_fwhm_hz
+                        for identity, active_fwhm_hz in zip(
+                            state.estimate.identities,
+                            active_fwhm_values,
+                            strict=True,
+                        )
+                    )
+                    if not all(math.isfinite(value) for value in live_q_values):
+                        raise ValueError(
+                            "live Q must remain finite after sparse completion"
+                        )
+                except Exception as error:
+                    _raise_update_error(
+                        "aggregate_estimate_construction_failed",
+                        f"aggregate estimate construction failed: {error}",
+                        error,
+                    )
+
+                try:
+                    identities = tuple(
+                        _identity_after_sparse_observation(
+                            identity,
+                            observation,
+                            live_q=live_q_values[index],
+                            completed_scan=(
+                                completed_scan if index == target_index else None
+                            ),
+                        )
+                        for index, identity in enumerate(
+                            state.estimate.identities
+                        )
+                    )
+                except Exception as error:
+                    _raise_update_error(
+                        "sparse_identity_estimate_construction_failed",
+                        f"sparse identity construction failed: {error}",
+                        error,
+                    )
+
+                try:
+                    sparse_resources = _advance_observation_resources(
+                        state.estimate.sparse_tracking_resources,
+                        observation,
+                        state.metadata,
+                    )
+                    tracking_resources = _advance_observation_resources(
+                        state.estimate.tracking_resources,
+                        observation,
+                        state.metadata,
+                    )
+                    charged_resources = _advance_observation_resources(
+                        state.estimate.charged_resources,
+                        observation,
+                        state.metadata,
+                    )
+                except Exception as error:
+                    _raise_update_error(
+                        "resource_construction_failed",
+                        f"resource construction failed: {error}",
+                        error,
+                    )
+
+                try:
+                    finished_ns = time.process_time_ns()
+                    update_cpu_time_s = (
+                        finished_ns - started_ns
+                    ) / 1_000_000_000.0
+                    if not (
+                        math.isfinite(update_cpu_time_s)
+                        and update_cpu_time_s >= 0.0
+                    ):
+                        raise ValueError(
+                            "sparse update CPU time must be finite and nonnegative"
+                        )
+                    sparse_history = (
+                        *state.estimate.sparse_scan_history,
+                        completed_scan,
+                    )
+                    estimate = _replace_estimate(
+                        state.estimate,
+                        identities=identities,
+                        pending_mode=None,
+                        pending_query=None,
+                        incomplete_sparse_scan=None,
+                        sparse_scan_history=sparse_history,
+                        accepted_observations=(
+                            state.estimate.accepted_observations + 1
+                        ),
+                        completed_sparse_scans=len(sparse_history),
+                        fast_pairs_since_scan=0,
+                        current_sequence_index=observation.sequence_index,
+                        current_timestamp_s=observation.timestamp_s,
+                        sparse_tracking_resources=sparse_resources,
+                        tracking_resources=tracking_resources,
+                        charged_resources=charged_resources,
+                        sparse_update_cpu_time_s=(
+                            state.estimate.sparse_update_cpu_time_s
+                            + update_cpu_time_s
+                        ),
+                        total_update_cpu_time_s=(
+                            state.estimate.total_update_cpu_time_s
+                            + update_cpu_time_s
+                        ),
+                    )
+                    metadata = TwoPointRunMetadata(
+                        tracker_clock_id=state.metadata.tracker_clock_id,
+                        current_sequence_index=observation.sequence_index,
+                        current_timestamp_s=observation.timestamp_s,
+                        nominal_photon_rate_hz=(
+                            state.metadata.nominal_photon_rate_hz
+                        ),
+                        frequency_overhead_s=state.metadata.frequency_overhead_s,
+                        fluorescence_quantity=state.metadata.fluorescence_quantity,
+                    )
+                except Exception as error:
+                    _raise_update_error(
+                        "aggregate_estimate_construction_failed",
+                        f"aggregate estimate construction failed: {error}",
+                        error,
+                    )
+
+                try:
+                    update = SparseLinewidthCompositeUpdate(
+                        query=query,
+                        observation=observation,
+                        completed_fast_pair=None,
+                        completed_sparse_scan=completed_scan,
+                        estimate=estimate,
+                        update_cpu_time_s=update_cpu_time_s,
+                    )
+                    prospective_state = _CompositeTrackerState(
+                        calibration=state.calibration,
+                        metadata=metadata,
+                        reserved_fast_queries=None,
+                        reserved_sparse_queries=None,
+                        estimate=estimate,
+                    )
+                except Exception as error:
+                    _raise_update_error(
+                        "update_construction_failed",
+                        f"composite update construction failed: {error}",
+                        error,
+                    )
+                self._state = prospective_state
+                return update
 
             prior_partial = state.estimate.incomplete_sparse_scan
             try:

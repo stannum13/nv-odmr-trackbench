@@ -154,6 +154,26 @@ def test_scan_public_reference_uses_exact_ordered_mean_not_sum() -> None:
     assert _scan_with_midpoints(midpoints).public_reference_timestamp_s == expected
 
 
+def test_scan_public_reference_rejects_both_neighboring_ulps() -> None:
+    midpoints = (
+        float.fromhex("0x1.71ac192603038p+27"),
+        float.fromhex("0x1.7b1f2de93f4dcp+28"),
+        float.fromhex("0x1.604ff56fc7d1dp+29"),
+        float.fromhex("0x1.807d78016510cp+29"),
+        float.fromhex("0x1.d3df4c4d16825p+29"),
+    )
+    result = _scan_with_midpoints(midpoints)
+
+    for direction in (-np.inf, np.inf):
+        with pytest.raises(ValueError, match="five public midpoints"):
+            replace(
+                result,
+                public_reference_timestamp_s=np.nextafter(
+                    result.public_reference_timestamp_s, direction
+                ),
+            )
+
+
 def test_optimizer_failure_accepts_negative_scipy_status() -> None:
     result = make_scan_result(
         status="failure",
@@ -645,6 +665,23 @@ def test_scan_q_preserves_repository_signed_convention() -> None:
     )
     assert result.fitted_q == -0.5
     assert type(result.fitted_q) is float
+
+
+@pytest.mark.parametrize(
+    ("fast_center_hz", "expected_live_q"),
+    ((-2.0, -1.0), (0.0, 0.0), (2.0, 1.0)),
+)
+def test_live_q_accepts_finite_signed_and_zero_results(
+    fast_center_hz: float, expected_live_q: float
+) -> None:
+    identity = make_composite_identity(
+        fast_center_hz=fast_center_hz,
+        active_fwhm_hz=2.0,
+        live_q=expected_live_q,
+    )
+
+    assert identity.live_q == expected_live_q
+    assert type(identity.live_q) is float
 
 
 def test_sparse_record_surface_and_tuple_boundaries_are_exact() -> None:

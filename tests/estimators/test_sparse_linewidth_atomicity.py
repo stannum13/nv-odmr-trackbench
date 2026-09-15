@@ -15,6 +15,7 @@ from odmr_bench.estimators import (
     SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
     SparseLinewidthResetError,
+    SparseLinewidthScanResult,
     SparseLinewidthUpdateConstructionError,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
@@ -368,6 +369,75 @@ def _pending_sparse_observation(
         query.integration_time_s,
         query.expected_nominal_exposure_photons,
         17,
+    )
+
+
+def _completed_sparse_result(
+    tracker: SparseLinewidthCompositeTracker,
+    final_observation: EstimatorObservation,
+) -> SparseLinewidthScanResult:
+    state = tracker._state
+    assert state is not None
+    queries = state.reserved_sparse_queries
+    partial = state.estimate.incomplete_sparse_scan
+    assert queries is not None
+    assert partial is not None
+    assert len(partial.observations) == 4
+    observations = (*partial.observations, final_observation)
+    first = queries[0]
+    reference_s = (
+        observations[0].timestamp_s - observations[0].integration_time_s / 2.0
+    )
+    for count, observation in enumerate(observations[1:], start=2):
+        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
+        reference_s = reference_s + (midpoint_s - reference_s) / count
+    return SparseLinewidthScanResult(
+        scan_index=first.scan_index,
+        identity_scan_index=first.identity_scan_index,
+        resonance_id=first.resonance_id,
+        frozen_fast_center_hz=first.frozen_fast_center_hz,
+        frozen_fast_center_source_kind=first.frozen_fast_center_source_kind,
+        frozen_fast_center_source_pair_index=(
+            first.frozen_fast_center_source_pair_index
+        ),
+        frozen_fast_center_reference_timestamp_s=(
+            first.frozen_fast_center_reference_timestamp_s
+        ),
+        frozen_fast_center_release_sequence_index=(
+            first.frozen_fast_center_release_sequence_index
+        ),
+        frozen_fast_center_release_timestamp_s=(
+            first.frozen_fast_center_release_timestamp_s
+        ),
+        frozen_prior_fwhm_hz=first.frozen_prior_fwhm_hz,
+        frozen_fwhm_source_kind=first.frozen_fwhm_source_kind,
+        frozen_fwhm_source_scan_index=first.frozen_fwhm_source_scan_index,
+        frozen_fwhm_reference_timestamp_s=first.frozen_fwhm_reference_timestamp_s,
+        frozen_fwhm_release_sequence_index=(
+            first.frozen_fwhm_release_sequence_index
+        ),
+        frozen_fwhm_release_timestamp_s=first.frozen_fwhm_release_timestamp_s,
+        queries=queries,
+        observations=observations,
+        public_reference_timestamp_s=reference_s,
+        release_sequence_index=final_observation.sequence_index,
+        release_timestamp_s=final_observation.timestamp_s,
+        status="failure",
+        failure_code="model_evaluation_failed",
+        fitted_center_correction_hz=None,
+        fitted_local_center_hz=None,
+        fitted_fwhm_hz=None,
+        fitted_amplitude=None,
+        fitted_baseline_offset=None,
+        fitted_q=None,
+        rmse=None,
+        amplitude_normalized_rmse=None,
+        scaled_jacobian_rank=None,
+        scaled_jacobian_condition=None,
+        scipy_status=None,
+        scipy_message=None,
+        nfev=None,
+        fit_cpu_time_s=0.001,
     )
 
 
@@ -758,7 +828,7 @@ def _install_sparse_validation_defect(
     raise AssertionError(f"unknown sparse validation case: {case}")
 
 
-@pytest.mark.parametrize("accepted_prefix_length", range(4))
+@pytest.mark.parametrize("accepted_prefix_length", range(5))
 @pytest.mark.parametrize(
     ("case", "expected_code"),
     (
@@ -873,6 +943,168 @@ def test_every_sparse_partial_stage_preserves_identical_base_exception(
         raise injected
 
     monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        tracker.update(observation)
+
+    assert raised.value is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "expected_code"),
+    (
+        ("fit_sparse_linewidth", "sparse_scan_result_construction_failed"),
+        ("CompositeIdentityEstimate", "sparse_identity_estimate_construction_failed"),
+        ("PublicAcquisitionResources", "resource_construction_failed"),
+        (
+            "SparseLinewidthCompositeEstimate",
+            "aggregate_estimate_construction_failed",
+        ),
+        ("SparseLinewidthCompositeUpdate", "update_construction_failed"),
+    ),
+)
+def test_fifth_sparse_construction_codes_and_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = RuntimeError(f"injected fifth {constructor_name}")
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise injected
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_success, raising=False
+    )
+    monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    "constructor_name",
+    (
+        "fit_sparse_linewidth",
+        "CompositeIdentityEstimate",
+        "PublicAcquisitionResources",
+        "SparseLinewidthCompositeEstimate",
+        "SparseLinewidthCompositeUpdate",
+    ),
+)
+def test_every_fifth_sparse_stage_preserves_identical_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = KeyboardInterrupt(f"injected fifth {constructor_name}")
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise injected
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_success, raising=False
+    )
+    monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        tracker.update(observation)
+
+    assert raised.value is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("failing_clock_call", "expected_code"),
+    (
+        (1, "sparse_scan_result_construction_failed"),
+        (2, "aggregate_estimate_construction_failed"),
+    ),
+)
+def test_fifth_sparse_cpu_clock_failures_are_typed_and_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+    failing_clock_call: int,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = RuntimeError(f"injected clock {failing_clock_call}")
+    clock_calls = 0
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def clock() -> int:
+        nonlocal clock_calls
+        clock_calls += 1
+        if clock_calls == failing_clock_call:
+            raise injected
+        return clock_calls * 1_000_000_000
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_success, raising=False
+    )
+    monkeypatch.setattr(tracker_module.time, "process_time_ns", clock)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize("failing_clock_call", (1, 2))
+def test_fifth_sparse_cpu_clock_preserves_identical_base_exception(
+    monkeypatch: pytest.MonkeyPatch, failing_clock_call: int
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = KeyboardInterrupt(f"injected clock {failing_clock_call}")
+    clock_calls = 0
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def clock() -> int:
+        nonlocal clock_calls
+        clock_calls += 1
+        if clock_calls == failing_clock_call:
+            raise injected
+        return clock_calls * 1_000_000_000
+
+    monkeypatch.setattr(
+        tracker_module, "fit_sparse_linewidth", fit_success, raising=False
+    )
+    monkeypatch.setattr(tracker_module.time, "process_time_ns", clock)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         tracker.update(observation)

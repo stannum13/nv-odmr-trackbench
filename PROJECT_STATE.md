@@ -6,13 +6,14 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–9 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–10 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
-and sparse partial transitions through point four. Sparse completion and fit
-application remain deferred to Task 10. Pure fit geometry remains separate from scheduler-owned query
-clocks, and evaluator value types still precede the sparse runner class that
-enables exact calibration authority.
+and complete sparse transitions through point five, including scientific fit
+application, live projection, independent epochs, resources, and update CPU.
+Pure fit geometry remains separate from scheduler-owned query clocks, and
+evaluator value types still precede the sparse runner class that enables exact
+calibration authority.
 Calibration/start, initial resources, accepted resource integration, and
 terminal behavior then form a forward-only runner chain. Production truth
 lookup and public linewidth-dynamics additions remain absent: release-gated
@@ -25,6 +26,25 @@ public evaluator resources begin only after successful tracking start, and
 `None` is exclusive to an unavailable terminal resource join. Timing isolation
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
+
+Task 10 accepts the fifth and only the fifth already-reserved sparse query,
+passes the exact frozen five-query/five-observation tuples to the isolated
+fitter once, and treats both success and scientific failure as completed,
+charged scans. Completion appends the exact returned scan object, advances the
+global and per-ID scan counters/parity, clears the partial reservation, resets
+the fast-pair cadence, and preserves every fast-center value/source field.
+Success alone refreshes active FWHM and its public/reference release epochs;
+failure retains the prior FWHM source while all identities age to the fifth
+endpoint. Live Q remains the finite signed/zero asynchronous fast-center/FWHM
+projection, with nonrepresentable division translated transactionally as
+`aggregate_estimate_construction_failed`. Calibration, fast, sparse,
+interleaved tracking, and charged resources retain independent arrival-order
+folds for both budget treatments. Accepted process CPU starts before fitting,
+ends after identity/resource construction, and updates the sparse subtotal and
+global total independently. Exact fifth-point validation, every construction
+and clock boundary, ordinary-exception rollback, and identical process-control
+propagation are regression-pinned. Evaluator/runner behavior and Stage 6.5
+claims remain deferred.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -48,6 +68,8 @@ twelve frozen center/FWHM source fields to query one, and all five reserved
 queries retain that snapshot. Resource expectations now come from an
 independent field-by-field arrival recurrence with distinct point atoms and an
 included-calibration charged prefix rather than the production helper.
+The pushed Task 9 head `4945fff` passed the complete native GitHub Linux x86
+matrix on Python 3.11 and Python 3.12 (run 35019024941).
 
 Task 7 adds the exact public `SparseLinewidthCompositeTracker` shell. Reset
 enforces declaration-order typed precedence, validates the tracker-held sparse
@@ -930,6 +952,11 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 10 focused types/tracker/atomicity gate: 288 passed.
+- Stage 6.4 Task 10 complete sparse estimator gate: 416 passed.
+- Stage 6.4 Task 10 estimator/evaluation/emulator gate: 1,537 passed.
+- Stage 6.4 Task 10 full repository gate: 1,638 passed.
+- Stage 6.4 Task 10 Ruff gate: All checks passed.
 - Stage 6.4 Task 9 review-fix focused tracker/atomicity files: 161 passed.
 - Stage 6.4 Task 9 review-fix plus complete Stage 6.3 tracker/atomicity gate:
   230 passed.
@@ -1037,7 +1064,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 10's fifth-point sparse completion, fit result,
-   live projection, epoch, resource, and CPU transitions.
+1. Continue Stage 6.4 with Task 11's evaluator value contracts and outcome
+   types without adding runner behavior early.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
