@@ -25,6 +25,9 @@ once a package version is introduced.
 
 ### Fixed
 
+- Added a late-identity prospective sparse-geometry regression, ensuring
+  calibration validation traverses all eight seeds rather than only the first;
+  corrected the Stage 6.4 next-task state to Task 5.
 - Hardened the private Stage 6.4 bound-source model seam: supplied target
   center/FWHM/amplitude and baseline offset now require finite real scalars
   before model arithmetic, target FWHM remains strictly positive, and target

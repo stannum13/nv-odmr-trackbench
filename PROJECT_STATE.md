@@ -40,7 +40,7 @@ offset, and subtracts the immutable source tuple in order; only the target
 resonance's center, FWHM, and amplitude may vary. The legacy target-center
 helper delegates to the same scalar core without a public surface or arithmetic
 change. Lorentzian/pseudo-Voigt, affine/quadratic, scalar/vector, boundary, and
-source-order regressions pin that differential. Task 4 remains next.
+source-order regressions pin that differential. Task 5 remains next.
 The bound-only entry point now rejects non-finite and non-scalar supplied target
 parameters before source access or arithmetic, preserves canonical built-in
 float values, requires positive FWHM and non-negative amplitude, and leaves the
@@ -870,7 +870,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 4 after Task 3's canonical bound-source model
-   extraction and Stage 6.3 differential protection.
+1. Continue Stage 6.4 with Task 5 after Task 4's pure geometry and prospective
+   calibration validation.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

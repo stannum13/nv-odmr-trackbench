@@ -88,6 +88,31 @@ def test_calibration_validation_constructs_every_seeded_identity() -> None:
         assert geometry.frozen_source_amplitude == seeded.calibration_amplitude
 
 
+def test_calibration_validation_rejects_late_identity_sparse_geometry() -> None:
+    calibration = _calibration()
+    late_seed = calibration.identities[7]
+    narrow_late_cell = replace(
+        late_seed,
+        calibration_cell_lower_hz=late_seed.calibration_center_hz - 600_000.0,
+        calibration_cell_upper_hz=late_seed.calibration_center_hz + 600_000.0,
+    )
+    calibration = replace(
+        calibration,
+        identities=(*calibration.identities[:7], narrow_late_cell),
+    )
+
+    with pytest.raises(SparseLinewidthResetError) as raised:
+        _validate_calibration_sparse_geometry(
+            calibration, SparseLinewidthConfiguration()
+        )
+
+    assert raised.value.code == "invalid_base_sparse_geometry"
+    assert raised.value.geometry_failure_code == "calibration_cell_violation"
+    assert (
+        raised.value.proposed_frequency_min_hz < raised.value.proposed_frequency_max_hz
+    )
+
+
 def test_geometry_keeps_the_exact_five_frequency_design_and_time_balance() -> None:
     calibration = _calibration()
     identity = _seeded_identity(calibration)
