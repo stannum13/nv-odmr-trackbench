@@ -8,6 +8,7 @@ import pytest
 
 from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
+    CompositeIdentityEstimate,
     CompositeMode,
     CompositeStopReason,
     SparseGeometryFailureCode,
@@ -19,18 +20,240 @@ from odmr_bench.estimators import (
     SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
     SparseLinewidthResetError,
+    SparseLinewidthScanResult,
     SparseLinewidthSourceKind,
     SparseLinewidthUpdateConstructionError,
     SparseObservationValidationCode,
+    SparsePartialScan,
     SparseResetFailureCode,
     SparseUpdateConstructionCode,
 )
+from odmr_bench.estimators.two_point_types import PublicAcquisitionResources
 from tests.sparse_linewidth_helpers import (
     make_composite_estimate,
+    make_composite_identity,
     make_partial_scan,
     make_scan_result,
     make_sparse_query,
 )
+from tests.two_point_helpers import make_legal_pair_result
+
+
+def _ordered_mean(values: tuple[float, ...]) -> float:
+    mean = values[0]
+    for count, value in enumerate(values[1:], start=2):
+        mean = mean + (value - mean) / count
+    return mean
+
+
+def _scan_with_midpoints(
+    midpoints: tuple[float, float, float, float, float],
+) -> SparseLinewidthScanResult:
+    offsets = (0.5, -1.0, 0.0, 1.0, -0.5)
+    queries = tuple(
+        make_sparse_query(
+            acquisition_index=index,
+            point_index=index,
+            offset_multiplier=offsets[index],
+            frequency_hz=2.87e9 + offsets[index] * 1.0e6,
+            integration_time_s=2.0,
+            expected_sequence_index=index,
+            expected_end_timestamp_s=midpoint + 1.0,
+        )
+        for index, midpoint in enumerate(midpoints)
+    )
+    observations = tuple(
+        EstimatorObservation(
+            query.expected_sequence_index,
+            query.expected_end_timestamp_s,
+            query.frequency_hz,
+            1.0,
+            query.integration_time_s,
+            query.expected_nominal_exposure_photons,
+        )
+        for query in queries
+    )
+    return make_scan_result(
+        queries=queries,
+        observations=observations,
+        public_reference_timestamp_s=_ordered_mean(midpoints),
+        release_sequence_index=queries[-1].expected_sequence_index,
+        release_timestamp_s=queries[-1].expected_end_timestamp_s,
+    )
+
+
+def _one_observation_resources() -> PublicAcquisitionResources:
+    return PublicAcquisitionResources(1, 0.005, 1.0, 0, 1, 0.005)
+
+
+def _completed_fast_estimate() -> tuple[object, object]:
+    pair = make_legal_pair_result()
+    current_timestamp_s = pair.release_timestamp_s
+    first = make_composite_identity(
+        resonance_id="r0",
+        fast_center_hz=pair.candidate_center_hz,
+        fast_center_source_kind="pair",
+        fast_center_source_pair_index=pair.pair_index,
+        fast_center_reference_timestamp_s=pair.pair_reference_timestamp_s,
+        fast_center_release_sequence_index=pair.release_sequence_index,
+        fast_center_release_timestamp_s=pair.release_timestamp_s,
+        active_fwhm_hz=1.0e6,
+        live_q=pair.candidate_center_hz / 1.0e6,
+        center_age_s=current_timestamp_s - pair.pair_reference_timestamp_s,
+        fwhm_age_s=current_timestamp_s,
+        center_release_age_s=0.0,
+        fwhm_release_age_s=current_timestamp_s,
+        completed_fast_pairs=1,
+        latest_fast_pair=pair,
+    )
+    identities = (
+        first,
+        *(
+            make_composite_identity(
+                resonance_id=f"r{index}",
+                center_age_s=current_timestamp_s,
+                fwhm_age_s=current_timestamp_s,
+                center_release_age_s=current_timestamp_s,
+                fwhm_release_age_s=current_timestamp_s,
+            )
+            for index in range(1, 8)
+        ),
+    )
+    resources = PublicAcquisitionResources(2, 0.01, 25_000.0, 24_625, 0, 0.01)
+    estimate = make_composite_estimate(
+        identities=identities,
+        fast_pair_history=(pair,),
+        accepted_observations=2,
+        completed_fast_pairs=1,
+        fast_pairs_since_scan=1,
+        current_sequence_index=pair.release_sequence_index,
+        current_timestamp_s=current_timestamp_s,
+        fast_tracking_resources=resources,
+        tracking_resources=resources,
+        charged_resources=resources,
+    )
+    return pair, estimate
+
+
+def test_scan_public_reference_uses_exact_ordered_mean_not_sum() -> None:
+    midpoints = (
+        float.fromhex("0x1.71ac192603038p+27"),
+        float.fromhex("0x1.7b1f2de93f4dcp+28"),
+        float.fromhex("0x1.604ff56fc7d1dp+29"),
+        float.fromhex("0x1.807d78016510cp+29"),
+        float.fromhex("0x1.d3df4c4d16825p+29"),
+    )
+    expected = _ordered_mean(midpoints)
+    regrouped = sum(midpoints) / 5.0
+    assert expected != regrouped
+    assert _scan_with_midpoints(midpoints).public_reference_timestamp_s == expected
+
+
+def test_optimizer_failure_accepts_negative_scipy_status() -> None:
+    result = make_scan_result(
+        status="failure",
+        failure_code="optimizer_failed",
+        fitted_center_correction_hz=None,
+        fitted_local_center_hz=None,
+        fitted_fwhm_hz=None,
+        fitted_amplitude=None,
+        fitted_baseline_offset=None,
+        fitted_q=None,
+        rmse=None,
+        amplitude_normalized_rmse=None,
+        scaled_jacobian_rank=None,
+        scaled_jacobian_condition=None,
+        scipy_status=-1,
+    )
+    assert result.scipy_status == -1
+
+
+def test_composite_replays_resources_and_ties_them_to_accepted_count() -> None:
+    one = _one_observation_resources()
+    with pytest.raises(ValueError):
+        make_composite_estimate(
+            fast_tracking_resources=one,
+            tracking_resources=one,
+            charged_resources=one,
+        )
+
+
+def test_composite_rejects_pending_sparse_query_that_repeats_partial_point() -> None:
+    partial = make_partial_scan()
+    one = _one_observation_resources()
+    with pytest.raises(ValueError):
+        make_composite_estimate(
+            pending_mode="sparse_scan",
+            pending_query=partial.queries[0],
+            incomplete_sparse_scan=partial,
+            accepted_observations=1,
+            sparse_tracking_resources=one,
+            tracking_resources=one,
+            charged_resources=one,
+        )
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"current_sequence_index": 0},
+        {"fast_pairs_since_scan": 1},
+        {"fast_update_cpu_time_s": 1.0, "total_update_cpu_time_s": 0.5},
+        {"sparse_update_cpu_time_s": 1.0, "total_update_cpu_time_s": 0.5},
+    ),
+)
+def test_composite_rejects_unprovable_endpoint_schedule_and_cpu_state(
+    overrides: dict[str, object],
+) -> None:
+    with pytest.raises(ValueError):
+        make_composite_estimate(**overrides)
+
+
+def test_identity_retains_last_successful_fast_source_after_later_failure() -> None:
+    successful = make_legal_pair_result()
+    failed = make_legal_pair_result(
+        pair_index=8,
+        identity_pair_index=1,
+        resonance_id="r0",
+        lock_state="lost",
+        failure_code="invalid_pair_normalization",
+    )
+    identity = make_composite_identity(
+        fast_center_hz=successful.candidate_center_hz,
+        fast_center_source_kind="pair",
+        fast_center_source_pair_index=successful.pair_index,
+        fast_center_reference_timestamp_s=successful.pair_reference_timestamp_s,
+        fast_center_release_sequence_index=successful.release_sequence_index,
+        fast_center_release_timestamp_s=successful.release_timestamp_s,
+        center_age_s=1.0,
+        center_release_age_s=1.0,
+        live_q=successful.candidate_center_hz / 1.0e6,
+        completed_fast_pairs=2,
+        latest_fast_pair=failed,
+    )
+    assert identity.fast_center_source_pair_index == successful.pair_index
+
+
+def test_completed_fast_update_rejects_mismatched_query_or_observation() -> None:
+    pair, estimate = _completed_fast_estimate()
+    with pytest.raises(ValueError):
+        SparseLinewidthCompositeUpdate(
+            pair.minus_query,
+            pair.minus_observation,
+            pair,
+            None,
+            estimate,
+            0.0,
+        )
+    with pytest.raises(ValueError):
+        SparseLinewidthCompositeUpdate(
+            pair.plus_query,
+            replace(pair.plus_observation, fluorescence=0.0),
+            pair,
+            None,
+            estimate,
+            0.0,
+        )
 
 
 def test_scan_q_preserves_repository_signed_convention() -> None:
@@ -72,6 +295,115 @@ def test_sparse_record_surface_and_tuple_boundaries_are_exact() -> None:
     ]
     partial = make_partial_scan(queries=list(make_partial_scan().queries))
     assert type(partial.queries) is tuple
+
+
+def test_all_task_two_records_have_exact_documented_field_surfaces() -> None:
+    assert [field.name for field in fields(SparsePartialScan)] == [
+        "scan_index",
+        "identity_scan_index",
+        "resonance_id",
+        "frozen_fast_center_hz",
+        "frozen_fast_center_source_kind",
+        "frozen_fast_center_source_pair_index",
+        "frozen_fast_center_reference_timestamp_s",
+        "frozen_fast_center_release_sequence_index",
+        "frozen_fast_center_release_timestamp_s",
+        "frozen_prior_fwhm_hz",
+        "frozen_fwhm_source_kind",
+        "frozen_fwhm_source_scan_index",
+        "frozen_fwhm_reference_timestamp_s",
+        "frozen_fwhm_release_sequence_index",
+        "frozen_fwhm_release_timestamp_s",
+        "queries",
+        "observations",
+    ]
+    assert [field.name for field in fields(SparseLinewidthScanResult)] == [
+        *[field.name for field in fields(SparsePartialScan)[:-2]],
+        "queries",
+        "observations",
+        "public_reference_timestamp_s",
+        "release_sequence_index",
+        "release_timestamp_s",
+        "status",
+        "failure_code",
+        "fitted_center_correction_hz",
+        "fitted_local_center_hz",
+        "fitted_fwhm_hz",
+        "fitted_amplitude",
+        "fitted_baseline_offset",
+        "fitted_q",
+        "rmse",
+        "amplitude_normalized_rmse",
+        "scaled_jacobian_rank",
+        "scaled_jacobian_condition",
+        "scipy_status",
+        "scipy_message",
+        "nfev",
+        "fit_cpu_time_s",
+    ]
+    assert [field.name for field in fields(CompositeIdentityEstimate)] == [
+        "resonance_id",
+        "fast_center_hz",
+        "fast_center_source_kind",
+        "fast_center_source_pair_index",
+        "fast_center_reference_timestamp_s",
+        "fast_center_release_sequence_index",
+        "fast_center_release_timestamp_s",
+        "active_fwhm_hz",
+        "fwhm_source_kind",
+        "fwhm_source_scan_index",
+        "fwhm_reference_timestamp_s",
+        "fwhm_release_sequence_index",
+        "fwhm_release_timestamp_s",
+        "live_q",
+        "center_age_s",
+        "fwhm_age_s",
+        "center_release_age_s",
+        "fwhm_release_age_s",
+        "completed_fast_pairs",
+        "completed_sparse_scans",
+        "latest_fast_pair",
+        "latest_sparse_scan",
+    ]
+    assert [field.name for field in fields(SparseLinewidthCompositeEstimate)] == [
+        "configuration",
+        "identities",
+        "calibration_source_id",
+        "calibration_source_provenance",
+        "calibration_budget_treatment",
+        "pending_mode",
+        "pending_query",
+        "incomplete_fast_pair",
+        "incomplete_sparse_scan",
+        "fast_pair_history",
+        "sparse_scan_history",
+        "accepted_observations",
+        "completed_fast_pairs",
+        "completed_sparse_scans",
+        "fast_pairs_since_scan",
+        "current_sequence_index",
+        "current_timestamp_s",
+        "fast_tracking_resources",
+        "sparse_tracking_resources",
+        "tracking_resources",
+        "calibration_resources",
+        "charged_resources",
+        "budget_ceiling",
+        "stopped_reason",
+        "sparse_geometry_diagnostic",
+        "fast_update_cpu_time_s",
+        "sparse_update_cpu_time_s",
+        "total_update_cpu_time_s",
+        "seed",
+    ]
+    assert [field.name for field in fields(SparseLinewidthCompositeUpdate)] == [
+        "query",
+        "observation",
+        "completed_fast_pair",
+        "completed_sparse_scan",
+        "estimate",
+        "update_cpu_time_s",
+    ]
 
 
 @pytest.mark.parametrize("length", (1, 2, 3, 4))
@@ -140,12 +472,15 @@ def test_aggregate_enforces_one_incomplete_block_and_history_counter_equations()
 def test_update_requires_exact_query_and_estimate_echo() -> None:
     query = make_sparse_query()
     observation = EstimatorObservation(0, 0.005, query.frequency_hz, 1.0, 0.005, 1.0)
-    estimate = make_composite_estimate(
-        pending_mode="sparse_scan",
-        pending_query=query,
-    )
     with pytest.raises(ValueError):
-        SparseLinewidthCompositeUpdate(query, observation, None, None, estimate, 0.0)
+        SparseLinewidthCompositeUpdate(
+            query,
+            observation,
+            None,
+            None,
+            make_composite_estimate(),
+            0.0,
+        )
 
 
 def _diagnostic(**overrides: object) -> SparseGeometryUnavailableDiagnostic:

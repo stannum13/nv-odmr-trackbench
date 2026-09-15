@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from itertools import pairwise
 from numbers import Integral, Real
 from typing import Literal, TypeAlias
 
@@ -642,7 +643,6 @@ class SparseGeometryUnavailableDiagnostic:
 
 
 _SPARSE_OFFSETS = ((0.5, -1.0, 0.0, 1.0, -0.5), (-0.5, 1.0, 0.0, -1.0, 0.5))
-_FIT_FAILURE_CODES = frozenset(_GEOMETRY_FAILURE_CODES)  # Rebound below after aliases.
 
 
 @dataclass(frozen=True, slots=True)
@@ -985,12 +985,10 @@ class SparseLinewidthScanResult:
             for observation in observations
         )
         expected_reference = midpoints[0]
-        for midpoint in midpoints[1:]:
+        for count, midpoint in enumerate(midpoints[1:], start=2):
             expected_reference = (
-                expected_reference + (midpoint - expected_reference) / 2.0
+                expected_reference + (midpoint - expected_reference) / count
             )
-        # Five point ordered mean is deliberately the ordinary left fold, not np.mean.
-        expected_reference = sum(midpoints) / 5.0
         if public_reference_timestamp_s != expected_reference:
             raise ValueError("public reference must equal the five public midpoints")
         release_sequence_index = _nonnegative_int(
@@ -1054,11 +1052,14 @@ class SparseLinewidthScanResult:
         )
         if condition is not None and condition <= 0.0:
             raise ValueError("scaled_jacobian_condition must be positive")
-        scipy_status = (
-            None
-            if self.scipy_status is None
-            else _nonnegative_int(self.scipy_status, "scipy_status")
-        )
+        if self.scipy_status is None:
+            scipy_status = None
+        elif isinstance(self.scipy_status, (bool, np.bool_)) or not isinstance(
+            self.scipy_status, (Integral, np.integer)
+        ):
+            raise TypeError("scipy_status must be an integer")
+        else:
+            scipy_status = int(self.scipy_status)
         scipy_message = (
             None
             if self.scipy_message is None
@@ -1255,27 +1256,6 @@ class CompositeIdentityEstimate:
                 raise ValueError("latest_sparse_scan must agree with identity history")
         elif completed_sparse_scans:
             raise ValueError("completed sparse scans require latest_sparse_scan")
-        if source_fields[0] == "pair" and (
-            self.latest_fast_pair is None
-            or source_fields[1] != self.latest_fast_pair.pair_index
-            or fast_center_hz != self.latest_fast_pair.candidate_center_hz
-            or source_fields[2] != self.latest_fast_pair.pair_reference_timestamp_s
-            or source_fields[3] != self.latest_fast_pair.release_sequence_index
-            or source_fields[4] != self.latest_fast_pair.release_timestamp_s
-        ):
-            raise ValueError(
-                "pair fast-center source must equal latest successful pair"
-            )
-        if source_fields[5] == "scan" and (
-            self.latest_sparse_scan is None
-            or self.latest_sparse_scan.status != "success"
-            or source_fields[6] != self.latest_sparse_scan.scan_index
-            or active_fwhm_hz != self.latest_sparse_scan.fitted_fwhm_hz
-            or source_fields[7] != self.latest_sparse_scan.public_reference_timestamp_s
-            or source_fields[8] != self.latest_sparse_scan.release_sequence_index
-            or source_fields[9] != self.latest_sparse_scan.release_timestamp_s
-        ):
-            raise ValueError("scan FWHM source must equal latest successful scan")
         for name, value in (
             ("resonance_id", resonance_id),
             ("fast_center_hz", fast_center_hz),
@@ -1308,18 +1288,84 @@ class CompositeIdentityEstimate:
             object.__setattr__(self, name, value)
 
 
-def _resource_sum(
-    first: PublicAcquisitionResources, second: PublicAcquisitionResources
-) -> tuple[int, float, float, int, int, float]:
-    return (
-        first.observations + second.observations,
-        first.integration_time_s + second.integration_time_s,
-        first.nominal_exposure_photons + second.nominal_exposure_photons,
-        first.realized_photons + second.realized_photons,
-        first.observations_without_realized_counts
-        + second.observations_without_realized_counts,
-        first.virtual_elapsed_time_s + second.virtual_elapsed_time_s,
+def _pair_observations_in_arrival_order(
+    pair: TwoPointPairResult,
+) -> tuple[EstimatorObservation, EstimatorObservation]:
+    if pair.first_side == "minus":
+        return pair.minus_observation, pair.plus_observation
+    return pair.plus_observation, pair.minus_observation
+
+
+def _replay_resources(
+    observations: tuple[EstimatorObservation, ...],
+    *,
+    initial: PublicAcquisitionResources | None = None,
+) -> PublicAcquisitionResources:
+    if initial is None:
+        observations_count = 0
+        integration_time_s = 0.0
+        nominal_exposure_photons = 0.0
+        realized_photons = 0
+        missing_counts = 0
+        virtual_elapsed_time_s = 0.0
+    else:
+        observations_count = initial.observations
+        integration_time_s = initial.integration_time_s
+        nominal_exposure_photons = initial.nominal_exposure_photons
+        realized_photons = initial.realized_photons
+        missing_counts = initial.observations_without_realized_counts
+        virtual_elapsed_time_s = initial.virtual_elapsed_time_s
+    for observation in observations:
+        observations_count += 1
+        integration_time_s = integration_time_s + observation.integration_time_s
+        nominal_exposure_photons = (
+            nominal_exposure_photons + observation.nominal_exposure_photons
+        )
+        realized_photons += (
+            0 if observation.realized_photons is None else observation.realized_photons
+        )
+        missing_counts += int(observation.realized_photons is None)
+        virtual_elapsed_time_s = virtual_elapsed_time_s + observation.integration_time_s
+    return PublicAcquisitionResources(
+        observations_count,
+        integration_time_s,
+        nominal_exposure_photons,
+        realized_photons,
+        missing_counts,
+        virtual_elapsed_time_s,
     )
+
+
+def _composite_observation_traces(
+    fast_history: tuple[TwoPointPairResult, ...],
+    sparse_history: tuple[SparseLinewidthScanResult, ...],
+    incomplete_fast_pair: TwoPointPartialPair | None,
+    incomplete_sparse_scan: SparsePartialScan | None,
+) -> tuple[
+    tuple[EstimatorObservation, ...],
+    tuple[EstimatorObservation, ...],
+    tuple[EstimatorObservation, ...],
+]:
+    fast = tuple(
+        observation
+        for pair in fast_history
+        for observation in _pair_observations_in_arrival_order(pair)
+    ) + (
+        ()
+        if incomplete_fast_pair is None
+        else (incomplete_fast_pair.first_observation,)
+    )
+    sparse = tuple(
+        observation for scan in sparse_history for observation in scan.observations
+    ) + (() if incomplete_sparse_scan is None else incomplete_sparse_scan.observations)
+    tracking = tuple(sorted((*fast, *sparse), key=lambda item: item.sequence_index))
+    for previous, current in pairwise(tracking):
+        if (
+            current.sequence_index != previous.sequence_index + 1
+            or current.timestamp_s <= previous.timestamp_s
+        ):
+            raise ValueError("accepted trace must be contiguous in arrival order")
+    return fast, sparse, tracking
 
 
 @dataclass(frozen=True, slots=True)
@@ -1451,8 +1497,15 @@ class SparseLinewidthCompositeEstimate:
         fast_pairs_since_scan = _nonnegative_int(
             self.fast_pairs_since_scan, "fast_pairs_since_scan"
         )
-        if fast_pairs_since_scan >= self.configuration.scan_period_fast_pairs:
-            raise ValueError("fast_pairs_since_scan must be below the scan period")
+        expected_pairs_since_scan = completed_fast_pairs - (
+            self.configuration.scan_period_fast_pairs * completed_sparse_scans
+        )
+        if fast_pairs_since_scan != expected_pairs_since_scan:
+            raise ValueError("fast_pairs_since_scan must equal retained block history")
+        if fast_pairs_since_scan < 0 or fast_pairs_since_scan > (
+            self.configuration.scan_period_fast_pairs
+        ):
+            raise ValueError("fast_pairs_since_scan must be within one scan period")
         expected_accepted = 2 * completed_fast_pairs + 5 * completed_sparse_scans
         if self.incomplete_fast_pair is not None:
             expected_accepted += 1
@@ -1480,31 +1533,41 @@ class SparseLinewidthCompositeEstimate:
         ):
             if type(getattr(self, name)) is not PublicAcquisitionResources:
                 raise TypeError(f"{name} must be an exact PublicAcquisitionResources")
-        if _resource_sum(
-            self.fast_tracking_resources, self.sparse_tracking_resources
-        ) != (
-            self.tracking_resources.observations,
-            self.tracking_resources.integration_time_s,
-            self.tracking_resources.nominal_exposure_photons,
-            self.tracking_resources.realized_photons,
-            self.tracking_resources.observations_without_realized_counts,
-            self.tracking_resources.virtual_elapsed_time_s,
-        ):
-            raise ValueError("tracking resources must equal fast plus sparse resources")
+        fast_trace, sparse_trace, tracking_trace = _composite_observation_traces(
+            fast_history,
+            sparse_history,
+            self.incomplete_fast_pair,
+            self.incomplete_sparse_scan,
+        )
+        if len(tracking_trace) != accepted_observations:
+            raise ValueError(
+                "accepted observations must equal the retained trace length"
+            )
+        if tracking_trace:
+            if (
+                current_sequence_index != tracking_trace[-1].sequence_index
+                or current_timestamp_s != tracking_trace[-1].timestamp_s
+            ):
+                raise ValueError("current endpoint must equal the accepted trace tail")
+        elif current_sequence_index is not None:
+            raise ValueError("an empty accepted trace has no current sequence index")
+        if self.fast_tracking_resources != _replay_resources(fast_trace):
+            raise ValueError("fast tracking resources must replay the fast trace")
+        if self.sparse_tracking_resources != _replay_resources(sparse_trace):
+            raise ValueError("sparse tracking resources must replay the sparse trace")
+        if self.tracking_resources != _replay_resources(tracking_trace):
+            raise ValueError("tracking resources must replay interleaved arrivals")
         if treatment == "conditional_free_precalibration":
             if self.charged_resources != self.tracking_resources:
                 raise ValueError(
                     "conditional treatment charges tracking resources only"
                 )
-        elif _resource_sum(self.calibration_resources, self.tracking_resources) != (
-            self.charged_resources.observations,
-            self.charged_resources.integration_time_s,
-            self.charged_resources.nominal_exposure_photons,
-            self.charged_resources.realized_photons,
-            self.charged_resources.observations_without_realized_counts,
-            self.charged_resources.virtual_elapsed_time_s,
+        elif self.charged_resources != _replay_resources(
+            tracking_trace, initial=self.calibration_resources
         ):
-            raise ValueError("included treatment charges calibration plus tracking")
+            raise ValueError(
+                "included treatment must replay source then tracking atoms"
+            )
         if type(self.budget_ceiling) is not TwoPointBudgetCeiling:
             raise TypeError("budget_ceiling must be an exact TwoPointBudgetCeiling")
         stopped_reason = _optional_closed_literal_string(
@@ -1528,6 +1591,51 @@ class SparseLinewidthCompositeEstimate:
             or self.incomplete_sparse_scan is not None
         ):
             raise ValueError("stopped estimates must be at a block boundary")
+        if pending_mode == "sparse_scan":
+            pending_sparse = self.pending_query
+            if self.incomplete_sparse_scan is not None:
+                partial = self.incomplete_sparse_scan
+                if (
+                    pending_sparse.scan_index != partial.scan_index
+                    or pending_sparse.point_index != len(partial.queries)
+                    or _query_snapshot(pending_sparse)
+                    != _query_snapshot(partial.queries[0])
+                ):
+                    raise ValueError(
+                        "pending sparse query must extend its partial scan"
+                    )
+            elif (
+                pending_sparse.scan_index != completed_sparse_scans
+                or pending_sparse.point_index != 0
+                or fast_pairs_since_scan != self.configuration.scan_period_fast_pairs
+            ):
+                raise ValueError("first sparse query must be the due next scan")
+        elif pending_mode == "fast_pair":
+            pending_fast = self.pending_query
+            if self.incomplete_fast_pair is not None:
+                partial = self.incomplete_fast_pair
+                if (
+                    pending_fast.pair_index != partial.pair_index
+                    or pending_fast.query_index != partial.first_query.query_index + 1
+                    or pending_fast.side == partial.first_side
+                ):
+                    raise ValueError(
+                        "pending fast query must complete its partial pair"
+                    )
+            elif (
+                pending_fast.pair_index != completed_fast_pairs
+                or fast_pairs_since_scan == self.configuration.scan_period_fast_pairs
+            ):
+                raise ValueError("first fast query must be the next non-due pair")
+        if self.pending_query is not None:
+            expected_sequence_index = (
+                0 if current_sequence_index is None else current_sequence_index + 1
+            )
+            if (
+                self.pending_query.expected_sequence_index != expected_sequence_index
+                or self.pending_query.expected_end_timestamp_s <= current_timestamp_s
+            ):
+                raise ValueError("pending query must follow the current endpoint")
         for index, pair in enumerate(fast_history):
             if (
                 pair.pair_index != index
@@ -1560,6 +1668,40 @@ class SparseLinewidthCompositeEstimate:
                 raise ValueError(
                     "identity histories and counters must equal aggregate histories"
                 )
+            successful_pairs = tuple(
+                pair
+                for pair in own_pairs
+                if pair.lock_state in {"tracking", "step_limited"}
+            )
+            if identity.fast_center_source_kind == "pair":
+                source_pair = successful_pairs[-1] if successful_pairs else None
+                if source_pair is None or (
+                    identity.fast_center_source_pair_index != source_pair.pair_index
+                    or identity.fast_center_hz != source_pair.candidate_center_hz
+                    or identity.fast_center_reference_timestamp_s
+                    != source_pair.pair_reference_timestamp_s
+                    or identity.fast_center_release_sequence_index
+                    != source_pair.release_sequence_index
+                    or identity.fast_center_release_timestamp_s
+                    != source_pair.release_timestamp_s
+                ):
+                    raise ValueError("fast source must equal the last successful pair")
+            successful_scans = tuple(
+                scan for scan in own_scans if scan.status == "success"
+            )
+            if identity.fwhm_source_kind == "scan":
+                source_scan = successful_scans[-1] if successful_scans else None
+                if source_scan is None or (
+                    identity.fwhm_source_scan_index != source_scan.scan_index
+                    or identity.active_fwhm_hz != source_scan.fitted_fwhm_hz
+                    or identity.fwhm_reference_timestamp_s
+                    != source_scan.public_reference_timestamp_s
+                    or identity.fwhm_release_sequence_index
+                    != source_scan.release_sequence_index
+                    or identity.fwhm_release_timestamp_s
+                    != source_scan.release_timestamp_s
+                ):
+                    raise ValueError("FWHM source must equal the last successful scan")
             if (
                 identity.center_age_s
                 != current_timestamp_s - identity.fast_center_reference_timestamp_s
@@ -1579,6 +1721,10 @@ class SparseLinewidthCompositeEstimate:
                 ("total_update_cpu_time_s", self.total_update_cpu_time_s),
             )
         )
+        if cpu[2] < cpu[0] or cpu[2] < cpu[1]:
+            raise ValueError(
+                "total update CPU time cannot be below either mode subtotal"
+            )
         seed = _nonnegative_int(self.seed, "seed")
         for name, value in (
             ("identities", identities),
@@ -1615,26 +1761,15 @@ class SparseLinewidthCompositeUpdate:
     def __post_init__(self) -> None:
         if type(self.query) not in {TwoPointQuery, SparseLinewidthQuery}:
             raise TypeError("query must be an exact public query")
-        if type(self.query) is TwoPointQuery:
-            _validate_observation_echo(
-                frequency_hz=self.query.frequency_hz,
-                integration_time_s=self.query.integration_time_s,
-                expected_sequence_index=self.query.expected_sequence_index,
-                expected_end_timestamp_s=self.query.expected_end_timestamp_s,
-                expected_nominal_exposure_photons=self.query.expected_nominal_exposure_photons,
-                observation=self.observation,
-                name="observation",
-            )
-        else:
-            _validate_observation_echo(
-                frequency_hz=self.query.frequency_hz,
-                integration_time_s=self.query.integration_time_s,
-                expected_sequence_index=self.query.expected_sequence_index,
-                expected_end_timestamp_s=self.query.expected_end_timestamp_s,
-                expected_nominal_exposure_photons=self.query.expected_nominal_exposure_photons,
-                observation=self.observation,
-                name="observation",
-            )
+        _validate_observation_echo(
+            frequency_hz=self.query.frequency_hz,
+            integration_time_s=self.query.integration_time_s,
+            expected_sequence_index=self.query.expected_sequence_index,
+            expected_end_timestamp_s=self.query.expected_end_timestamp_s,
+            expected_nominal_exposure_photons=self.query.expected_nominal_exposure_photons,
+            observation=self.observation,
+            name="observation",
+        )
         if (
             self.completed_fast_pair is not None
             and type(self.completed_fast_pair) is not TwoPointPairResult
@@ -1696,6 +1831,20 @@ class SparseLinewidthCompositeUpdate:
                 or self.estimate.fast_pair_history[-1] != self.completed_fast_pair
             ):
                 raise ValueError("completed fast update must echo the history tail")
+            else:
+                second_query, second_observation = (
+                    (
+                        self.completed_fast_pair.plus_query,
+                        self.completed_fast_pair.plus_observation,
+                    )
+                    if self.completed_fast_pair.first_side == "minus"
+                    else (
+                        self.completed_fast_pair.minus_query,
+                        self.completed_fast_pair.minus_observation,
+                    )
+                )
+                if self.query != second_query or self.observation != second_observation:
+                    raise ValueError("completed fast update must echo the pair tail")
         object.__setattr__(
             self,
             "update_cpu_time_s",

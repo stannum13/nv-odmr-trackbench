@@ -17,6 +17,16 @@ once a package version is introduced.
   finite signed Q conventions, immutable history/resource boundaries, and
   independent fast/sparse/total CPU ledgers; no fitter, scheduler, tracker,
   or evaluator behavior is added.
+
+### Fixed
+
+- Hardened Stage 6.4 sparse record validation after review: five-point public
+  epochs now retain the exact ordered mean; optimizer failures retain signed
+  SciPy statuses; retained observation traces replay each resource ledger in
+  arrival order; aggregate pending, endpoint, schedule, CPU, and active-source
+  joins reject inconsistent state while allowing a source to survive later
+  scientific failures; and completed fast updates echo their exact second
+  query and observation.
 - Added Stage 6.4's first estimator contract layer: closed sparse-linewidth
   failure, mode, source, stop, geometry, reset, observation, and construction
   aliases; typed reset/observation/update errors; validated frozen/slotted
