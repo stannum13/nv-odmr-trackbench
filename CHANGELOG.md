@@ -10,6 +10,12 @@ once a package version is introduced.
 
 ### Added
 
+- Closed the revised Stage 6.4 Task 11 resource-cardinality finding. Sparse
+  evaluator resources now require fast and sparse incomplete counts to equal
+  their accepted tuple remainders modulo two and five, respectively, and the
+  unaccepted count to equal its tuple length, while preserving type/range and
+  incomplete-block precedence. Broader resource replay, stream partitioning,
+  and trace/timing joins remain deferred to Tasks 14–15.
 - Added Stage 6.4's sparse evaluator value layer: exact closed phase, abort,
   preflight, and start-code aliases plus frozen/slotted acquisition,
   query-failure, abort, five-point timing, full-resource, runner-state, and

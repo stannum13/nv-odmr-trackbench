@@ -660,6 +660,18 @@ class SparseLinewidthEvaluatorResources:
         unaccepted = _bounded_count(
             self.unaccepted_observations, "unaccepted_observations", 1
         )
+        if incomplete_fast != len(self.accepted_fast_observations) % 2:
+            raise ValueError(
+                "incomplete fast-pair count must match accepted fast observations"
+            )
+        if incomplete_sparse != len(self.accepted_sparse_observations) % 5:
+            raise ValueError(
+                "incomplete sparse-scan count must match accepted sparse observations"
+            )
+        if unaccepted != len(self.unaccepted_tracking_observations):
+            raise ValueError(
+                "unaccepted count must match unaccepted tracking observations"
+            )
         object.__setattr__(self, "calibration_budget_treatment", treatment)
         object.__setattr__(
             self, "incomplete_fast_pair_observations", incomplete_fast

@@ -218,7 +218,7 @@ def _resources_arguments() -> dict[str, object]:
     zero = ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0)
     return {
         "calibration_observations": [full],
-        "accepted_fast_observations": [full],
+        "accepted_fast_observations": [],
         "accepted_sparse_observations": [],
         "accepted_tracking_observations": [full],
         "unaccepted_tracking_observations": [],
@@ -624,6 +624,7 @@ def test_resources_defensively_copy_all_observation_tuples_and_count_matrix() ->
     arguments = _resources_arguments()
     calibration = arguments["calibration_observations"]
     assert isinstance(calibration, list)
+    full_observation = calibration[0]
     resources = SparseLinewidthEvaluatorResources(
         **arguments  # type: ignore[arg-type]
     )
@@ -644,6 +645,12 @@ def test_resources_defensively_copy_all_observation_tuples_and_count_matrix() ->
             for unaccepted in (0, 1):
                 value = replace(
                     resources,
+                    accepted_fast_observations=(full_observation,)
+                    * incomplete_fast,
+                    accepted_sparse_observations=(full_observation,)
+                    * incomplete_sparse,
+                    unaccepted_tracking_observations=(full_observation,)
+                    * unaccepted,
                     incomplete_fast_pair_observations=incomplete_fast,
                     incomplete_sparse_scan_observations=incomplete_sparse,
                     unaccepted_observations=unaccepted,
@@ -665,8 +672,52 @@ def test_resources_defensively_copy_all_observation_tuples_and_count_matrix() ->
     with pytest.raises(ValueError, match="only one incomplete block"):
         replace(
             resources,
+            accepted_fast_observations=(full_observation,),
+            accepted_sparse_observations=(full_observation,),
             incomplete_fast_pair_observations=1,
             incomplete_sparse_scan_observations=1,
+        )
+
+
+def test_resource_fast_incomplete_count_matches_fast_tuple_remainder() -> None:
+    from odmr_bench.evaluation.sparse_linewidth import (
+        SparseLinewidthEvaluatorResources,
+    )
+
+    arguments = _resources_arguments()
+    full_observation = arguments["calibration_observations"][0]  # type: ignore[index]
+    arguments["accepted_fast_observations"] = (full_observation,)
+    with pytest.raises(ValueError, match="incomplete fast-pair count"):
+        SparseLinewidthEvaluatorResources(
+            **arguments  # type: ignore[arg-type]
+        )
+
+
+def test_resource_sparse_incomplete_count_matches_sparse_tuple_remainder() -> None:
+    from odmr_bench.evaluation.sparse_linewidth import (
+        SparseLinewidthEvaluatorResources,
+    )
+
+    arguments = _resources_arguments()
+    full_observation = arguments["calibration_observations"][0]  # type: ignore[index]
+    arguments["accepted_sparse_observations"] = (full_observation,) * 3
+    with pytest.raises(ValueError, match="incomplete sparse-scan count"):
+        SparseLinewidthEvaluatorResources(
+            **arguments  # type: ignore[arg-type]
+        )
+
+
+def test_resource_unaccepted_count_matches_unaccepted_tuple_length() -> None:
+    from odmr_bench.evaluation.sparse_linewidth import (
+        SparseLinewidthEvaluatorResources,
+    )
+
+    arguments = _resources_arguments()
+    full_observation = arguments["calibration_observations"][0]  # type: ignore[index]
+    arguments["unaccepted_tracking_observations"] = (full_observation,)
+    with pytest.raises(ValueError, match="unaccepted count"):
+        SparseLinewidthEvaluatorResources(
+            **arguments  # type: ignore[arg-type]
         )
 
 

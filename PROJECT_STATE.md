@@ -68,6 +68,14 @@ and outcome-kind matrices, and require evaluator CPU totals to equal the
 tracker snapshot's independent fast, sparse, and interleaved totals. The
 package exports only this approved value surface: it defines no runner class,
 resource builder, provenance authority, or state transition behavior.
+Task 11's revised independent review withdrew broader replay and state-history
+findings as Task 14–15 responsibilities and identified one intrinsic
+resource-cardinality gap. Evaluator resources now require the incomplete fast
+count to equal the accepted-fast tuple remainder modulo two, the incomplete
+sparse count to equal the accepted-sparse tuple remainder modulo five, and the
+unaccepted count to equal the unaccepted tuple length. Exact tuple-type, count-
+range, and mutual-exclusion precedence is preserved; resource replay,
+accepted-stream partitioning, and trace/timing joins remain deferred.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -975,6 +983,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 11 revised-review focused evaluator contract gate: 24 passed.
+- Stage 6.4 Task 11 revised-review compatibility contract gate: 185 passed.
+- Stage 6.4 Task 11 revised-review estimator/evaluation/emulator gate: 1,599
+  passed.
+- Stage 6.4 Task 11 revised-review full repository gate: 1,700 passed.
+- Stage 6.4 Task 11 revised-review Ruff gate: All checks passed.
 - Stage 6.4 Task 11 focused evaluator value-contract gate: 21 passed.
 - Stage 6.4 Task 11 sparse/Stage 6.3 evaluator and estimator contract gate: 182
   passed.
