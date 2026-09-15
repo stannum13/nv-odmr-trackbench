@@ -28,13 +28,13 @@ from odmr_bench.estimators import (
     SparseResetFailureCode,
     SparseUpdateConstructionCode,
 )
-from odmr_bench.estimators.sparse_linewidth_types import _composite_observation_traces
 from odmr_bench.estimators.two_point_types import PublicAcquisitionResources
 from tests.sparse_linewidth_helpers import (
     make_composite_estimate,
     make_composite_identity,
     make_partial_scan,
     make_scan_result,
+    make_scan_source_retention_estimate,
     make_sparse_query,
 )
 from tests.two_point_helpers import (
@@ -508,10 +508,48 @@ def test_incomplete_sparse_scan_cannot_start_before_due_cadence() -> None:
 
 
 def test_composite_trace_rejects_malformed_fast_history_tuple_order() -> None:
-    first = make_legal_pair_result(pair_index=0, resonance_id="r0")
-    second = make_legal_pair_result(pair_index=1, resonance_id="r1")
+    estimate = make_scan_source_retention_estimate()
+    malformed_history = (
+        estimate.fast_pair_history[1],
+        estimate.fast_pair_history[0],
+        *estimate.fast_pair_history[2:],
+    )
     with pytest.raises(ValueError, match="contiguous"):
-        _composite_observation_traces((second, first), (), None, None)
+        replace(estimate, fast_pair_history=malformed_history)
+
+
+def test_aggregate_retains_successful_scan_source_after_later_failure() -> None:
+    estimate = make_scan_source_retention_estimate()
+    identity = estimate.identities[0]
+    successful = estimate.sparse_scan_history[0]
+    failed = estimate.sparse_scan_history[-1]
+
+    assert (
+        successful.resonance_id
+        == failed.resonance_id
+        == identity.resonance_id
+        == "r0"
+    )
+    assert successful.status == "success"
+    assert identity.latest_sparse_scan is failed
+    assert failed.status == "failure"
+    assert identity.fwhm_source_scan_index == successful.scan_index
+    assert identity.active_fwhm_hz == successful.fitted_fwhm_hz
+
+
+def test_aggregate_rejects_later_failed_scan_as_active_source() -> None:
+    estimate = make_scan_source_retention_estimate()
+    failed = estimate.sparse_scan_history[-1]
+    failed_claim = replace(
+        estimate.identities[0],
+        fwhm_source_scan_index=failed.scan_index,
+        fwhm_reference_timestamp_s=failed.public_reference_timestamp_s,
+        fwhm_release_sequence_index=failed.release_sequence_index,
+        fwhm_release_timestamp_s=failed.release_timestamp_s,
+    )
+
+    with pytest.raises(ValueError, match="last successful scan"):
+        replace(estimate, identities=(failed_claim, *estimate.identities[1:]))
 
 
 @pytest.mark.parametrize("pending", (False, True))

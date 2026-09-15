@@ -771,9 +771,11 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 2 final test-closure sparse record contracts: 90 passed.
-- Stage 6.4 Task 2 final test-closure estimator/evaluator/emulator gate: 1,202 passed.
-- Stage 6.4 Task 2 final test-closure full repository gate: 1,303 passed.
+- Stage 6.4 Task 2 sparse-source regression-closure record contracts: 92 passed.
+- Stage 6.4 Task 2 sparse-source regression-closure
+  estimator/evaluator/emulator gate: 1,204 passed.
+- Stage 6.4 Task 2 sparse-source regression-closure full repository gate:
+  1,305 passed.
 - Stage 6.4 Task 1 focused sparse primitive contracts: 50 passed.
 - Stage 6.4 Task 1 estimator/evaluator/emulator gate: 1,162 passed.
 - Stage 6.4 Task 1 full repository gate: 1,263 passed.

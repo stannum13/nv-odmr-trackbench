@@ -20,6 +20,12 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed the remaining Stage 6.4 Task 2 sparse-source regression matrix with a
+  deterministic public period-1 aggregate fixture: a successful `r0` scan
+  followed one identity round later by a failed `r0` scan retains the earlier
+  successful FWHM source, while declaring the failed attempt as active is
+  rejected. The malformed-history regression now also exercises the public
+  aggregate constructor instead of a private validator.
 - Added Stage 6.4 Task 2 regression coverage proving malformed retained fast
   history order is rejected rather than sorted or repaired.
 - Completed the Stage 6.4 Task 2 cadence review: incomplete fast blocks cannot
