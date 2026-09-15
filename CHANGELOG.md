@@ -10,6 +10,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's sparse partial-scan transitions for accepted points one
+  through four. Each normal composite update retains the exact reserved query
+  and frozen center/FWHM sources, publishes an immutable partial of length one
+  through four, advances global clocks and identity ages, and charges sparse,
+  interleaved, and charged resources in arrival order without changing fast
+  resources, fit/history/FWHM/parity/completion state. Exact sparse validation,
+  typed ordinary-exception translation, commit-last rollback, and identical
+  process-control propagation are regression-pinned. Selection exposes the
+  next identical reserved query, including point five, while fifth-point
+  acceptance and fitting remain deferred to Task 10.
 - Added Stage 6.4's exact fast-pair branch and due sparse-scan selection. The
   composite now matches Stage 6.3 pair queries, numerical gates, source refresh,
   lost-pair behavior, per-ID alternation, immutable histories, and arrival-order

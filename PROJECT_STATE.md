@@ -6,11 +6,11 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–8 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–9 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
-outcomes, exact fast-pair transitions, and the first due-scan scheduler
-boundary. Sparse observation transitions and fit application remain deferred
-to Tasks 9–10. Pure fit geometry remains separate from scheduler-owned query
+outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
+and sparse partial transitions through point four. Sparse completion and fit
+application remain deferred to Task 10. Pure fit geometry remains separate from scheduler-owned query
 clocks, and evaluator value types still precede the sparse runner class that
 enables exact calibration authority.
 Calibration/start, initial resources, accepted resource integration, and
@@ -25,6 +25,20 @@ public evaluator resources begin only after successful tracking start, and
 `None` is exclusive to an unavailable terminal resource join. Timing isolation
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
+
+Task 9 accepts only sparse points one through four. Each accepted query becomes
+the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
+advances the global sequence/endpoint and every identity age, and applies one
+arrival-order atom independently to sparse, interleaved, and charged resource
+ledgers. Fast resources, pair/scan histories, completed counters, scan parity,
+active FWHM, live Q, and all frozen source facts remain unchanged. The next
+selection exposes the identical already-reserved query object, including point
+five after the fourth partial transition; point five remains unaccepted and no
+fit runs before Task 10. Sparse validation retains exact type/pending/mode/echo/
+sequence/frequency/integration/endpoint/exposure/value precedence. Ordinary
+partial/resource/aggregate/update construction failures translate to the exact
+Stage 6.4 typed code with commit-last value rollback, while process-control
+exceptions propagate as the identical object.
 
 Task 7 adds the exact public `SparseLinewidthCompositeTracker` shell. Reset
 enforces declaration-order typed precedence, validates the tracker-held sparse
@@ -103,8 +117,9 @@ pseudo-Voigt primitive as vector/acquisition evaluation while retaining
 baseline-first, optional-offset, literal-source-order, and target-only
 semantics. Exact test oracles use the canonical one-element NumPy spectrum;
 independent analytic depth/derivative tests remain closed-form. Independent
-review is clean. macOS and exact-version Linux container gates pass; native
-GitHub x86 Python 3.11 CI remains the final external confirmation after push.
+review is clean. macOS and exact-version Linux container gates pass; the pushed
+head `7a6c849` passed the complete native GitHub Linux x86 matrix on Python 3.11
+and Python 3.12 (run 35015603657).
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
@@ -906,6 +921,10 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 9 focused tracker/atomicity files: 106 passed.
+- Stage 6.4 Task 9 plus complete Stage 6.3 tracker/atomicity gate: 175 passed.
+- Stage 6.4 Task 9 estimator/evaluator/emulator gate: 1,447 passed.
+- Stage 6.4 Task 9 full repository gate: 1,548 passed.
 - Stage 6.4 Task 8 focused tracker/atomicity files: 86 passed.
 - Stage 6.4 Task 8 plus complete Stage 6.3 tracker/atomicity gate: 155 passed.
 - Stage 6.4 Task 8 estimator/evaluator/emulator gate: 1,427 passed.
@@ -1004,7 +1023,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 9's sparse first-through-fourth observation
-   transitions.
+1. Continue Stage 6.4 with Task 10's fifth-point sparse completion, fit result,
+   live projection, epoch, resource, and CPU transitions.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

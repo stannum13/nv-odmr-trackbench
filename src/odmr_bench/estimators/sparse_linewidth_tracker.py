@@ -27,6 +27,7 @@ from odmr_bench.estimators.sparse_linewidth_types import (
     SparseLinewidthQuery,
     SparseLinewidthResetError,
     SparseLinewidthUpdateConstructionError,
+    SparsePartialScan,
 )
 from odmr_bench.estimators.two_point_calibration import (
     _validate_two_point_calibration_source_integrity,
@@ -996,7 +997,25 @@ class SparseLinewidthCompositeTracker:
             )
             return second_query
         if state.estimate.incomplete_sparse_scan is not None:
-            raise RuntimeError("partial sparse scheduling begins in Task 9")
+            if state.reserved_sparse_queries is None:
+                raise RuntimeError("incomplete sparse scan lacks its reserved block")
+            point_index = len(state.estimate.incomplete_sparse_scan.queries)
+            if point_index >= len(state.reserved_sparse_queries):
+                raise RuntimeError("incomplete sparse scan exhausted its reservation")
+            query = state.reserved_sparse_queries[point_index]
+            estimate = _replace_estimate(
+                state.estimate,
+                pending_mode="sparse_scan",
+                pending_query=query,
+            )
+            self._state = _CompositeTrackerState(
+                calibration=state.calibration,
+                metadata=state.metadata,
+                reserved_fast_queries=None,
+                reserved_sparse_queries=state.reserved_sparse_queries,
+                estimate=estimate,
+            )
+            return query
 
         if (
             state.estimate.fast_pairs_since_scan
@@ -1196,9 +1215,18 @@ class SparseLinewidthCompositeTracker:
                 and query.point_index == expected_point_index
             )
             if partial_sparse is not None:
-                echo_matches = echo_matches and (
-                    partial_sparse.queries[0] is reserved_sparse_queries[0]
-                    and query.scan_index == partial_sparse.scan_index
+                partial_queries_match = (
+                    reserved_sparse_queries is not None
+                    and len(partial_sparse.queries) < len(reserved_sparse_queries)
+                    and all(
+                        partial_query is reserved_sparse_queries[index]
+                        for index, partial_query in enumerate(
+                            partial_sparse.queries
+                        )
+                    )
+                )
+                echo_matches = echo_matches and partial_queries_match and (
+                    query.scan_index == partial_sparse.scan_index
                     and query.identity_scan_index
                     == partial_sparse.identity_scan_index
                     and query.resonance_id == partial_sparse.resonance_id
@@ -1253,7 +1281,160 @@ class SparseLinewidthCompositeTracker:
                 "observation values must preserve their constructor invariants",
             )
         if mode == "sparse_scan":
-            raise NotImplementedError("sparse observation updates begin in Task 9")
+            assert type(query) is SparseLinewidthQuery
+            if query.point_index == 4:
+                raise NotImplementedError("sparse scan completion begins in Task 10")
+
+            prior_partial = state.estimate.incomplete_sparse_scan
+            try:
+                started_ns = time.process_time_ns()
+                partial_queries = (
+                    (query,)
+                    if prior_partial is None
+                    else (*prior_partial.queries, query)
+                )
+                partial_observations = (
+                    (observation,)
+                    if prior_partial is None
+                    else (*prior_partial.observations, observation)
+                )
+                first_query = partial_queries[0]
+                partial_scan = SparsePartialScan(
+                    scan_index=first_query.scan_index,
+                    identity_scan_index=first_query.identity_scan_index,
+                    resonance_id=first_query.resonance_id,
+                    frozen_fast_center_hz=first_query.frozen_fast_center_hz,
+                    frozen_fast_center_source_kind=(
+                        first_query.frozen_fast_center_source_kind
+                    ),
+                    frozen_fast_center_source_pair_index=(
+                        first_query.frozen_fast_center_source_pair_index
+                    ),
+                    frozen_fast_center_reference_timestamp_s=(
+                        first_query.frozen_fast_center_reference_timestamp_s
+                    ),
+                    frozen_fast_center_release_sequence_index=(
+                        first_query.frozen_fast_center_release_sequence_index
+                    ),
+                    frozen_fast_center_release_timestamp_s=(
+                        first_query.frozen_fast_center_release_timestamp_s
+                    ),
+                    frozen_prior_fwhm_hz=first_query.frozen_prior_fwhm_hz,
+                    frozen_fwhm_source_kind=first_query.frozen_fwhm_source_kind,
+                    frozen_fwhm_source_scan_index=(
+                        first_query.frozen_fwhm_source_scan_index
+                    ),
+                    frozen_fwhm_reference_timestamp_s=(
+                        first_query.frozen_fwhm_reference_timestamp_s
+                    ),
+                    frozen_fwhm_release_sequence_index=(
+                        first_query.frozen_fwhm_release_sequence_index
+                    ),
+                    frozen_fwhm_release_timestamp_s=(
+                        first_query.frozen_fwhm_release_timestamp_s
+                    ),
+                    queries=partial_queries,
+                    observations=partial_observations,
+                )
+            except Exception as error:
+                _raise_update_error(
+                    "sparse_partial_scan_construction_failed",
+                    f"sparse partial scan construction failed: {error}",
+                    error,
+                )
+
+            try:
+                sparse_resources = _advance_observation_resources(
+                    state.estimate.sparse_tracking_resources,
+                    observation,
+                    state.metadata,
+                )
+                tracking_resources = _advance_observation_resources(
+                    state.estimate.tracking_resources,
+                    observation,
+                    state.metadata,
+                )
+                charged_resources = _advance_observation_resources(
+                    state.estimate.charged_resources,
+                    observation,
+                    state.metadata,
+                )
+            except Exception as error:
+                _raise_update_error(
+                    "resource_construction_failed",
+                    f"resource construction failed: {error}",
+                    error,
+                )
+
+            try:
+                finished_ns = time.process_time_ns()
+                update_cpu_time_s = (finished_ns - started_ns) / 1_000_000_000.0
+                identities = tuple(
+                    _identity_after_fast_observation(identity, observation)
+                    for identity in state.estimate.identities
+                )
+                estimate = _replace_estimate(
+                    state.estimate,
+                    identities=identities,
+                    pending_mode=None,
+                    pending_query=None,
+                    incomplete_sparse_scan=partial_scan,
+                    accepted_observations=(
+                        state.estimate.accepted_observations + 1
+                    ),
+                    current_sequence_index=observation.sequence_index,
+                    current_timestamp_s=observation.timestamp_s,
+                    sparse_tracking_resources=sparse_resources,
+                    tracking_resources=tracking_resources,
+                    charged_resources=charged_resources,
+                    sparse_update_cpu_time_s=(
+                        state.estimate.sparse_update_cpu_time_s
+                        + update_cpu_time_s
+                    ),
+                    total_update_cpu_time_s=(
+                        state.estimate.total_update_cpu_time_s
+                        + update_cpu_time_s
+                    ),
+                )
+                metadata = TwoPointRunMetadata(
+                    tracker_clock_id=state.metadata.tracker_clock_id,
+                    current_sequence_index=observation.sequence_index,
+                    current_timestamp_s=observation.timestamp_s,
+                    nominal_photon_rate_hz=state.metadata.nominal_photon_rate_hz,
+                    frequency_overhead_s=state.metadata.frequency_overhead_s,
+                    fluorescence_quantity=state.metadata.fluorescence_quantity,
+                )
+            except Exception as error:
+                _raise_update_error(
+                    "aggregate_estimate_construction_failed",
+                    f"aggregate estimate construction failed: {error}",
+                    error,
+                )
+
+            try:
+                update = SparseLinewidthCompositeUpdate(
+                    query=query,
+                    observation=observation,
+                    completed_fast_pair=None,
+                    completed_sparse_scan=None,
+                    estimate=estimate,
+                    update_cpu_time_s=update_cpu_time_s,
+                )
+                prospective_state = _CompositeTrackerState(
+                    calibration=state.calibration,
+                    metadata=metadata,
+                    reserved_fast_queries=None,
+                    reserved_sparse_queries=state.reserved_sparse_queries,
+                    estimate=estimate,
+                )
+            except Exception as error:
+                _raise_update_error(
+                    "update_construction_failed",
+                    f"composite update construction failed: {error}",
+                    error,
+                )
+            self._state = prospective_state
+            return update
 
         assert type(query) is TwoPointQuery
         first_side = state.estimate.incomplete_fast_pair is None

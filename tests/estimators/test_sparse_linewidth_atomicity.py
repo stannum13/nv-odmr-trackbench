@@ -13,6 +13,7 @@ from odmr_bench.estimators import (
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
     SparseLinewidthObservationValidationError,
+    SparseLinewidthQuery,
     SparseLinewidthResetError,
     SparseLinewidthUpdateConstructionError,
     TwoPointBudgetCeiling,
@@ -336,6 +337,24 @@ def _pending_fast_observation(
     )
 
 
+def _pending_sparse_observation(
+    tracker: SparseLinewidthCompositeTracker,
+) -> EstimatorObservation:
+    for _ in range(16):
+        tracker.update(_pending_fast_observation(tracker))
+    query = tracker.choose_next_query()
+    assert type(query) is SparseLinewidthQuery
+    return EstimatorObservation(
+        query.expected_sequence_index,
+        query.expected_end_timestamp_s,
+        query.frequency_hz,
+        0.9,
+        query.integration_time_s,
+        query.expected_nominal_exposure_photons,
+        17,
+    )
+
+
 @pytest.mark.parametrize(
     ("mutation", "expected_code"),
     (
@@ -638,6 +657,190 @@ def test_every_fast_construction_stage_preserves_identical_base_exception(
         raise injected
 
     monkeypatch.setattr(tracker_module, constructor_name, fail)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        tracker.update(observation)
+
+    assert raised.value is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        (lambda observation: object(), "invalid_observation_type"),
+        (
+            lambda observation: replace(
+                observation,
+                sequence_index=observation.sequence_index + 1,
+                frequency_hz=observation.frequency_hz + 1.0,
+            ),
+            "sequence_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                frequency_hz=observation.frequency_hz + 1.0,
+                integration_time_s=observation.integration_time_s * 2.0,
+            ),
+            "frequency_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                integration_time_s=observation.integration_time_s * 2.0,
+                timestamp_s=observation.timestamp_s + 1.0,
+            ),
+            "integration_time_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                timestamp_s=observation.timestamp_s + 1.0,
+                nominal_exposure_photons=(
+                    observation.nominal_exposure_photons + 1.0
+                ),
+            ),
+            "endpoint_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                nominal_exposure_photons=(
+                    observation.nominal_exposure_photons + 1.0
+                ),
+            ),
+            "nominal_exposure_mismatch",
+        ),
+    ),
+)
+def test_sparse_validation_precedence_is_exact_and_atomic(
+    mutation, expected_code: str
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(mutation(observation))
+
+    assert raised.value.code == expected_code
+    assert _snapshot(tracker) == before
+
+
+def test_sparse_echo_precedes_sequence_and_value_validation() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    state = tracker._state
+    assert state is not None
+    estimate = replace(
+        state.estimate,
+        pending_query=replace(state.estimate.pending_query),
+    )
+    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+    observation = replace(
+        observation,
+        sequence_index=observation.sequence_index + 1,
+    )
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "sparse_query_echo_mismatch"
+    assert _snapshot(tracker) == before
+
+
+def test_sparse_nominal_exposure_precedes_invalid_value_and_rolls_back() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    observation = replace(
+        observation,
+        nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
+    )
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "nominal_exposure_mismatch"
+    assert _snapshot(tracker) == before
+
+
+def test_invalid_sparse_value_is_last_validation_code_and_atomic() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    object.__setattr__(observation, "realized_photons", -1)
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "invalid_observation_value"
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "expected_code"),
+    (
+        ("SparsePartialScan", "sparse_partial_scan_construction_failed"),
+        ("PublicAcquisitionResources", "resource_construction_failed"),
+        (
+            "SparseLinewidthCompositeEstimate",
+            "aggregate_estimate_construction_failed",
+        ),
+        ("SparseLinewidthCompositeUpdate", "update_construction_failed"),
+    ),
+)
+def test_sparse_partial_construction_codes_and_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    before = _snapshot(tracker)
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise RuntimeError(f"injected {constructor_name}")
+
+    monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is not None
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    "constructor_name",
+    (
+        "SparsePartialScan",
+        "PublicAcquisitionResources",
+        "SparseLinewidthCompositeEstimate",
+        "SparseLinewidthCompositeUpdate",
+    ),
+)
+def test_every_sparse_partial_stage_preserves_identical_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker)
+    before = _snapshot(tracker)
+    injected = KeyboardInterrupt(f"injected sparse {constructor_name}")
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise injected
+
+    monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         tracker.update(observation)

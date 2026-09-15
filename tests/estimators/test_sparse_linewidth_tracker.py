@@ -23,6 +23,7 @@ from odmr_bench.estimators import (
     SparseLinewidthQuery,
     SparseLinewidthResetError,
     SparseLinewidthScanResult,
+    SparsePartialScan,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
     TwoPointEstimate,
@@ -583,6 +584,45 @@ def _fast_observation(
         integration_time_s=query.integration_time_s,
         nominal_exposure_photons=query.expected_nominal_exposure_photons,
         realized_photons=realized_photons,
+    )
+
+
+def _sparse_observation(
+    query: SparseLinewidthQuery,
+    *,
+    fluorescence: float = 0.9,
+    realized_photons: int | None = None,
+) -> EstimatorObservation:
+    return EstimatorObservation(
+        sequence_index=query.expected_sequence_index,
+        timestamp_s=query.expected_end_timestamp_s,
+        frequency_hz=query.frequency_hz,
+        fluorescence=fluorescence,
+        integration_time_s=query.integration_time_s,
+        nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        realized_photons=realized_photons,
+    )
+
+
+def _identity_source_snapshot(identity) -> tuple[object, ...]:
+    return (
+        identity.fast_center_hz,
+        identity.fast_center_source_kind,
+        identity.fast_center_source_pair_index,
+        identity.fast_center_reference_timestamp_s,
+        identity.fast_center_release_sequence_index,
+        identity.fast_center_release_timestamp_s,
+        identity.active_fwhm_hz,
+        identity.fwhm_source_kind,
+        identity.fwhm_source_scan_index,
+        identity.fwhm_reference_timestamp_s,
+        identity.fwhm_release_sequence_index,
+        identity.fwhm_release_timestamp_s,
+        identity.live_q,
+        identity.completed_fast_pairs,
+        identity.completed_sparse_scans,
+        identity.latest_fast_pair,
+        identity.latest_sparse_scan,
     )
 
 
@@ -1456,4 +1496,173 @@ def test_sparse_pending_query_rejects_stale_fast_state_before_sequence(
         tracker.update(observation)
 
     assert raised.value.code == "sparse_query_echo_mismatch"
+    assert tracker._state == before
+
+
+def test_first_four_sparse_points_are_frozen_partial_transitions() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+    first = tracker.choose_next_query()
+    assert type(first) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    reserved = state.reserved_sparse_queries
+    assert reserved is not None
+    source_snapshots = tuple(
+        _identity_source_snapshot(identity) for identity in before.identities
+    )
+    observations: list[EstimatorObservation] = []
+    updates = []
+    expected_sparse_cpu = before.sparse_update_cpu_time_s
+    expected_total_cpu = before.total_update_cpu_time_s
+
+    for point_index in range(4):
+        query = tracker.choose_next_query()
+        assert query is reserved[point_index]
+        assert tracker.choose_next_query() is query
+        observation = _sparse_observation(
+            query,
+            fluorescence=0.91 + 0.01 * point_index,
+            realized_photons=None if point_index % 2 else point_index + 3,
+        )
+        observations.append(observation)
+
+        update = tracker.update(observation)
+        updates.append(update)
+        partial = update.estimate.incomplete_sparse_scan
+        assert type(partial) is SparsePartialScan
+        assert len(partial.queries) == point_index + 1
+        assert all(
+            actual is expected
+            for actual, expected in zip(
+                partial.queries, reserved[: point_index + 1], strict=True
+            )
+        )
+        assert all(
+            actual is expected
+            for actual, expected in zip(
+                partial.observations, observations, strict=True
+            )
+        )
+        assert update.query is query
+        assert update.observation is observation
+        assert update.completed_fast_pair is None
+        assert update.completed_sparse_scan is None
+        assert update.estimate.pending_mode is None
+        assert update.estimate.pending_query is None
+        assert update.estimate.sparse_scan_history == before.sparse_scan_history
+        assert update.estimate.completed_sparse_scans == 0
+        assert update.estimate.completed_fast_pairs == before.completed_fast_pairs
+        assert update.estimate.fast_pairs_since_scan == before.fast_pairs_since_scan
+        assert update.estimate.accepted_observations == (
+            before.accepted_observations + point_index + 1
+        )
+        assert update.estimate.current_sequence_index == observation.sequence_index
+        assert update.estimate.current_timestamp_s == observation.timestamp_s
+        assert tuple(
+            _identity_source_snapshot(identity)
+            for identity in update.estimate.identities
+        ) == source_snapshots
+        expected_sparse_cpu = expected_sparse_cpu + update.update_cpu_time_s
+        expected_total_cpu = expected_total_cpu + update.update_cpu_time_s
+        assert update.estimate.sparse_update_cpu_time_s == expected_sparse_cpu
+        assert update.estimate.total_update_cpu_time_s == expected_total_cpu
+
+    assert tuple(update.completed_sparse_scan for update in updates) == (None,) * 4
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    assert tracker.estimate().pending_query is fifth
+    assert (
+        tracker.estimate().incomplete_sparse_scan
+        is updates[-1].estimate.incomplete_sparse_scan
+    )
+    assert all(
+        _identity_source_snapshot(tracker.estimate().identities[index])
+        == source_snapshots[index]
+        for index in range(8)
+    )
+    frozen_query_facts = tuple(
+        (
+            query.frozen_fast_center_hz,
+            query.frozen_fast_center_source_kind,
+            query.frozen_fast_center_source_pair_index,
+            query.frozen_fast_center_reference_timestamp_s,
+            query.frozen_fast_center_release_sequence_index,
+            query.frozen_fast_center_release_timestamp_s,
+            query.frozen_prior_fwhm_hz,
+            query.frozen_fwhm_source_kind,
+            query.frozen_fwhm_source_scan_index,
+            query.frozen_fwhm_reference_timestamp_s,
+            query.frozen_fwhm_release_sequence_index,
+            query.frozen_fwhm_release_timestamp_s,
+        )
+        for query in reserved
+    )
+    assert len(set(frozen_query_facts)) == 1
+
+
+def test_sparse_partial_resource_ledgers_follow_exact_arrival_order() -> None:
+    configuration = SparseLinewidthConfiguration(integration_time_s=0.007)
+    calibration = _calibration()
+    metadata = _metadata(calibration, frequency_overhead_s=0.003)
+    tracker = _reset_tracker(
+        configuration=configuration,
+        calibration=calibration,
+        metadata=metadata,
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+    expected_sparse = before.sparse_tracking_resources
+    expected_tracking = before.tracking_resources
+    expected_charged = before.charged_resources
+
+    for point_index in range(4):
+        query = tracker.choose_next_query()
+        assert type(query) is SparseLinewidthQuery
+        observation = _sparse_observation(
+            query,
+            realized_photons=None if point_index in {1, 3} else 10 + point_index,
+        )
+        expected_sparse = tracker_module._advance_observation_resources(
+            expected_sparse, observation, metadata
+        )
+        expected_tracking = tracker_module._advance_observation_resources(
+            expected_tracking, observation, metadata
+        )
+        expected_charged = tracker_module._advance_observation_resources(
+            expected_charged, observation, metadata
+        )
+
+        update = tracker.update(observation)
+
+        assert update.estimate.fast_tracking_resources == before.fast_tracking_resources
+        assert update.estimate.sparse_tracking_resources == expected_sparse
+        assert update.estimate.tracking_resources == expected_tracking
+        assert update.estimate.charged_resources == expected_charged
+        assert (
+            update.estimate.sparse_tracking_resources.observations
+            == point_index + 1
+        )
+        assert update.estimate.tracking_resources.observations == (
+            before.tracking_resources.observations + point_index + 1
+        )
+
+
+def test_fifth_sparse_point_remains_reserved_and_unaccepted_in_task_nine() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    for _ in range(4):
+        query = tracker.choose_next_query()
+        assert type(query) is SparseLinewidthQuery
+        tracker.update(_sparse_observation(query))
+    fifth = tracker.choose_next_query()
+    assert type(fifth) is SparseLinewidthQuery
+    before = tracker._state
+
+    with pytest.raises(NotImplementedError, match="Task 10"):
+        tracker.update(_sparse_observation(fifth))
+
     assert tracker._state == before
