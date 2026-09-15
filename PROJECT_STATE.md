@@ -4,16 +4,18 @@ Last updated: 2026-09-15
 
 ## Current stage
 
-Stage 6.4 sparse five-point linewidth/Q tracking design has completed its second
-review-fix pass and is ready for final independent re-review. The additive
-architecture preserves Stage 6.3 pair semantics while extracting a private,
-exact-allowlisted verified-calibration core. The second pass fixes exact runner
-method/phase/outcome and tracker error interfaces, geometry failure codes and
-presence, the repository's signed-Q convention, arrival-order fast/sparse/total
-CPU ledgers, and exact fast-pair timing joins alongside scan timings. Earlier
-block reservation, fit gates, source snapshots, public/truth timing, resources,
-rollback, limitations, tests, and non-goals remain explicit. No Stage 6.4 code
-or Stage 6.5 claim has been added.
+Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
+twenty-task detailed TDD implementation plan pending independent plan review.
+The plan decomposes estimator contracts, canonical source-model extraction,
+fit geometry and gates, composite fast/sparse scheduling, provenance, evaluator
+resources and runner transitions, deterministic linewidth dynamics, closed
+scientific acceptance, documentation/package smoke, and integrated closeout.
+Every independently reviewable task names exact files and interfaces, observes
+a focused RED before minimal GREEN, runs repository gates, records evidence,
+and commits atomically. Global constraints preserve Stage 6.3 semantics,
+truth isolation, exact arrival-order accounting, signed-Q conventions, and the
+Stage 6.5/6.6 scope boundary. No Stage 6.4 production code or Stage 6.5 claim
+has been added.
 
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated

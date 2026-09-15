@@ -10,6 +10,12 @@ once a package version is introduced.
 
 ### Changed
 
+- Wrote the detailed twenty-task TDD implementation plan for Stage 6.4 sparse
+  five-point linewidth/Q tracking. The plan assigns exact files and interfaces,
+  focused RED/GREEN evidence, atomic task commits, Stage 6.3 differential
+  protection, numerical and state-machine gates, evaluator provenance and
+  resources, deterministic scientific acceptance, installed-wheel smoke, and
+  final integrated review while retaining the Stage 6.5/6.6 scope boundary.
 - Completed a second Stage 6.4 design correction pass. Public composite runner
   signatures now close every operation, phase, outcome, and typed tracker error;
   sparse geometry diagnostics have ordered closed codes and exact optional
