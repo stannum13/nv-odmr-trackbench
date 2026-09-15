@@ -10,7 +10,8 @@ re-review are on `origin/main`; synchronized CI passed all 797 tests. The Stage
 6.3 calibrated two-point tracker design passed its final adversarial re-review
 with zero Critical, Important, or Minor findings. Its separate twenty-task,
 86-test implementation plan also passed final adversarial re-review with zero
-Critical, Important, or Minor findings. Stage 6.3 implementation is active.
+Critical, Important, or Minor findings. Stage 6.3 implementation is complete
+and locally release-gated; Stage 6.5 comparative claims remain out of scope.
 Task 1 passed its per-task spec and quality re-review and supplies the
 frozen/slotted public resource, budget,
 identity, fluorescence-provenance, clock, configuration, metadata, and typed
@@ -444,6 +445,17 @@ values. The public caller-asserted binding and subsequent calibration/reset
 therefore cannot retain callbacks carried by string subclasses. The focused
 gate passes 4 tests, affected suites pass 249 tests, and the complete repository
 passes 1,213 tests.
+The final integrated review range was exactly `9f829ed..1c7fc67` (24 commits).
+After three atomic fix waves, independent scientific and software re-reviews
+both reported zero Critical and zero Important findings. The final deterministic
+gates passed twice: 1,112 estimator/evaluator/emulator tests and 1,213 full
+repository tests on each run, with Ruff and diff checks clean. A fresh build
+produced exactly one sdist and one wheel; an isolated environment imported the
+complete public estimator/evaluator surface under `-I` and ran the public
+two-point example from an unrelated working directory. Stage 6.3 therefore
+closes the calibrated realtime center-tracking protocol and its fixed synthetic
+acceptance boundary, not sparse linewidth/Q estimation or a matched-budget
+superiority result.
 
 ## Completed work
 
@@ -805,5 +817,6 @@ passes 1,213 tests.
 
 ## Next actions
 
-1. Re-review Task 20's integrated scientific/software fixes and closeout.
-2. Run the final deterministic test, lint, build, and repository-hygiene gates.
+1. Design and plan Stage 6.4 sparse local linewidth/FWHM/Q estimation.
+2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
+   linewidth estimator exists.

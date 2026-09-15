@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed Stage 6.3 after an exact `9f829ed..1c7fc67` integrated scientific and
+  software review, three atomic fix waves, and clean final re-reviews. The
+  deterministic focused and full suites passed twice, Ruff and diff checks are
+  clean, and a fresh isolated wheel exposes the complete public API and runs
+  the public two-point example out of tree. This closes calibrated causal
+  center tracking and fixed synthetic acceptance only; sparse linewidth/Q and
+  matched-budget comparative evidence remain Stage 6.4 and Stage 6.5 work.
 - Closed the third Stage 6.3 integrated-review wave. Combined resource and live-
   clock corruption now remains a resource-first unavailable terminal abort, and
   Stage 6.3 source snapshots canonicalize all nested fit/configuration/
