@@ -15,12 +15,16 @@ from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators.sparse_linewidth_tracker import (
     SparseLinewidthCompositeTracker,
 )
+from odmr_bench.estimators.sparse_linewidth_types import (
+    SparseLinewidthQuery,
+)
 from odmr_bench.estimators.two_point_types import (
     TwoPointBudgetCeiling,
     TwoPointCalibration,
     TwoPointCalibrationSource,
     TwoPointClockMapping,
     TwoPointIdentityBinding,
+    TwoPointQuery,
     TwoPointRunMetadata,
 )
 from odmr_bench.estimators.types import FitConfiguration
@@ -35,11 +39,14 @@ from odmr_bench.evaluation.two_point.provenance import (
     _RunTokenBinding,
 )
 from odmr_bench.evaluation.two_point.resource_accounting import (
+    _advance_full_resources,
+    _resource_mismatch_fields,
     _zero_full_resources,
 )
 from odmr_bench.evaluation.two_point.types import (
     TwoPointCalibrationPreflightError,
     TwoPointEvaluatorInstrumentConfiguration,
+    TwoPointEvaluatorPairTiming,
     TwoPointEvaluatorRunnerState,
     VerifiedTwoPointCalibrationOutcome,
     VerifiedTwoPointCalibrationSuccess,
@@ -47,12 +54,17 @@ from odmr_bench.evaluation.two_point.types import (
 
 from .types import (
     SparseEvaluatorRunnerState,
+    SparseInstrumentQueryFailure,
+    SparseLinewidthEvaluatorScanTiming,
     SparsePreflightError,
+    SparseRunnerAccepted,
     SparseRunnerExternallyStopped,
+    SparseRunnerInstrumentFailure,
     SparseRunnerRunOutcome,
     SparseRunnerStateError,
     SparseRunnerStepOutcome,
     SparseStartError,
+    SparseTrackingAcquisition,
 )
 
 
@@ -248,8 +260,176 @@ class SparseLinewidthEvaluatorRunner:
         return state_after
 
     def step(self) -> SparseRunnerStepOutcome:
-        """Reject steps until a later task installs tracking transitions."""
-        raise SparseRunnerStateError("step requires a runner in the tracking phase")
+        """Acquire and accept one pending composite-tracker observation."""
+        state_before = self._state
+        tracker = self._tracker
+        if state_before.phase != "tracking" or tracker is None:
+            raise SparseRunnerStateError("step requires a runner in the tracking phase")
+
+        tracker_slots = _capture_tracker_slots(tracker)
+        try:
+            query = tracker.choose_next_query()
+            if query is None:
+                raise RuntimeError("terminal sparse evaluator steps are not installed")
+            estimate_before = tracker.estimate()
+            if estimate_before.pending_query is not query:
+                raise RuntimeError("tracker estimate must retain the issued query")
+            mode = _query_mode(query)
+            resources_before = self._instrument.resources
+            virtual_time_before = self._instrument.virtual_time_s
+            expected_midpoint_s = (
+                virtual_time_before
+                + state_before.instrument_configuration.frequency_overhead_s
+                + query.integration_time_s / 2.0
+            )
+        except BaseException:
+            object.__setattr__(self, "_state", state_before)
+            _restore_tracker_slots(tracker, tracker_slots)
+            raise
+
+        try:
+            full_observation = self._instrument.query(
+                query.frequency_hz,
+                query.integration_time_s,
+            )
+        except Exception as error:
+            try:
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                resources_after = self._instrument.resources
+                virtual_time_after = self._instrument.virtual_time_s
+                exception_type, exception_message = _safe_exception_strings(error)
+                failure = SparseInstrumentQueryFailure(
+                    mode=mode,
+                    query=query,
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    instrument_resources_before=resources_before,
+                    instrument_resources_after=resources_after,
+                )
+                state_after = replace(
+                    state_before,
+                    tracker_estimate=estimate_before,
+                    instrument_resources_current=resources_after,
+                    current_virtual_time_s=virtual_time_after,
+                    last_instrument_failure=failure,
+                )
+                outcome = SparseRunnerInstrumentFailure(
+                    kind="instrument_failure",
+                    failure=failure,
+                    state=state_after,
+                )
+            except BaseException:
+                _restore_tracker_slots(tracker, tracker_slots)
+                raise
+            object.__setattr__(self, "_state", state_after)
+            return outcome
+        except BaseException:
+            _restore_tracker_slots(tracker, tracker_slots)
+            raise
+
+        update_slots = _capture_tracker_slots(tracker)
+        try:
+            resources_after = self._instrument.resources
+            virtual_time_after = self._instrument.virtual_time_s
+            acquisition = _build_tracking_acquisition(
+                mode=mode,
+                query=query,
+                expected_midpoint_s=expected_midpoint_s,
+                full_observation=full_observation,
+                resources_before=resources_before,
+                resources_after=resources_after,
+                virtual_time_after=virtual_time_after,
+                overhead_s=state_before.instrument_configuration.frequency_overhead_s,
+            )
+            if acquisition.measurement_midpoint_s is None:
+                raise RuntimeError("returned observation does not match pending query")
+            update = tracker.update(acquisition.safe_observation)
+            pair_timings = state_before.pair_timings
+            if update.completed_fast_pair is not None:
+                first_acquisition = state_before.normal_tracking_trace[-1]
+                first_midpoint_s = first_acquisition.measurement_midpoint_s
+                second_midpoint_s = acquisition.measurement_midpoint_s
+                if first_midpoint_s is None:
+                    raise RuntimeError("accepted pair must retain both midpoints")
+                pair = update.completed_fast_pair
+                pair_timings = (
+                    *pair_timings,
+                    TwoPointEvaluatorPairTiming(
+                        pair_index=pair.pair_index,
+                        resonance_id=pair.resonance_id,
+                        first_measurement_midpoint_s=first_midpoint_s,
+                        second_measurement_midpoint_s=second_midpoint_s,
+                        truth_reference_timestamp_s=(
+                            first_midpoint_s
+                            + (second_midpoint_s - first_midpoint_s) / 2.0
+                        ),
+                        public_reference_timestamp_s=(
+                            pair.pair_reference_timestamp_s
+                        ),
+                        release_sequence_index=pair.release_sequence_index,
+                        release_timestamp_s=pair.release_timestamp_s,
+                    ),
+                )
+            scan_timings = state_before.scan_timings
+            if update.completed_sparse_scan is not None:
+                scan_acquisitions = (
+                    *state_before.normal_tracking_trace[-4:],
+                    acquisition,
+                )
+                midpoints = tuple(
+                    item.measurement_midpoint_s for item in scan_acquisitions
+                )
+                if len(midpoints) != 5 or any(value is None for value in midpoints):
+                    raise RuntimeError("accepted scan must retain five midpoints")
+                exact_midpoints = tuple(float(value) for value in midpoints)
+                scan = update.completed_sparse_scan
+                scan_timings = (
+                    *scan_timings,
+                    SparseLinewidthEvaluatorScanTiming(
+                        scan_index=scan.scan_index,
+                        resonance_id=scan.resonance_id,
+                        measurement_midpoints_s=exact_midpoints,  # type: ignore[arg-type]
+                        truth_reference_timestamp_s=_ordered_mean(exact_midpoints),
+                        public_reference_timestamp_s=(
+                            scan.public_reference_timestamp_s
+                        ),
+                        release_sequence_index=scan.release_sequence_index,
+                        release_timestamp_s=scan.release_timestamp_s,
+                    ),
+                )
+            estimate = update.estimate
+            state_after = replace(
+                state_before,
+                tracker_estimate=estimate,
+                normal_tracking_trace=(
+                    *state_before.normal_tracking_trace,
+                    acquisition,
+                ),
+                pair_timings=pair_timings,
+                scan_timings=scan_timings,
+                instrument_resources_current=resources_after,
+                instrument_current_sequence_index=full_observation.sequence_index,
+                current_virtual_time_s=virtual_time_after,
+                last_instrument_failure=None,
+                fast_update_cpu_time_s=estimate.fast_update_cpu_time_s,
+                sparse_update_cpu_time_s=estimate.sparse_update_cpu_time_s,
+                total_update_cpu_time_s=estimate.total_update_cpu_time_s,
+            )
+            outcome = SparseRunnerAccepted(
+                kind="accepted",
+                acquisition=acquisition,
+                update=update,
+                state=state_after,
+            )
+        except BaseException:
+            object.__setattr__(self, "_state", state_before)
+            _restore_tracker_slots(tracker, update_slots)
+            raise
+        object.__setattr__(self, "_state", state_after)
+        return outcome
 
     def run_until_event(self) -> SparseRunnerRunOutcome:
         """Reject runs until a later task installs tracking transitions."""
@@ -532,3 +712,88 @@ def _capture_tracking_boundary(
         )
     except (TypeError, ValueError) as error:
         raise SparseStartError("resource_boundary_mismatch") from error
+
+
+def _query_mode(query: TwoPointQuery | SparseLinewidthQuery) -> Literal[
+    "fast_pair", "sparse_scan"
+]:
+    if type(query) is TwoPointQuery:
+        return "fast_pair"
+    if type(query) is SparseLinewidthQuery:
+        return "sparse_scan"
+    raise TypeError("pending query must be an exact composite query")
+
+
+def _build_tracking_acquisition(
+    *,
+    mode: Literal["fast_pair", "sparse_scan"],
+    query: TwoPointQuery | SparseLinewidthQuery,
+    expected_midpoint_s: float,
+    full_observation: object,
+    resources_before: ResourceSnapshot,
+    resources_after: ResourceSnapshot,
+    virtual_time_after: float,
+    overhead_s: float,
+) -> SparseTrackingAcquisition:
+    from odmr_bench.emulator.observations import InstrumentObservation
+
+    if type(full_observation) is not InstrumentObservation:
+        raise TypeError("instrument query must return an InstrumentObservation")
+    safe_observation = full_observation.estimator_view()
+    resource_delta = _advance_full_resources(
+        _zero_full_resources(), full_observation, overhead_s
+    )
+    expected_resources_after = _advance_full_resources(
+        resources_before, full_observation, overhead_s
+    )
+    mismatch_fields = _resource_mismatch_fields(
+        expected_resources_after, resources_after
+    )
+    if mismatch_fields:
+        raise RuntimeError("returned observation resource join is unavailable")
+    timing_matches = (
+        full_observation.sequence_index == query.expected_sequence_index
+        and full_observation.frequency_hz == query.frequency_hz
+        and full_observation.integration_time_s == query.integration_time_s
+        and full_observation.timestamp_s == query.expected_end_timestamp_s
+        and virtual_time_after == query.expected_end_timestamp_s
+    )
+    return SparseTrackingAcquisition(
+        resource_join_status="authenticated",
+        mode=mode,
+        query=query,
+        expected_measurement_midpoint_s=expected_midpoint_s,
+        measurement_midpoint_s=(expected_midpoint_s if timing_matches else None),
+        full_observation=full_observation,
+        safe_observation=safe_observation,
+        instrument_resources_before=resources_before,
+        instrument_resources_after=resources_after,
+        instrument_resource_delta=resource_delta,
+    )
+
+
+def _capture_tracker_slots(
+    tracker: SparseLinewidthCompositeTracker,
+) -> tuple[object, object, object]:
+    return (
+        tracker._configuration,
+        tracker._configuration_snapshot,
+        tracker._state,
+    )
+
+
+def _restore_tracker_slots(
+    tracker: SparseLinewidthCompositeTracker,
+    slots: tuple[object, object, object],
+) -> None:
+    configuration, configuration_snapshot, state = slots
+    object.__setattr__(tracker, "_configuration", configuration)
+    object.__setattr__(tracker, "_configuration_snapshot", configuration_snapshot)
+    object.__setattr__(tracker, "_state", state)
+
+
+def _ordered_mean(values: tuple[float, ...]) -> float:
+    result = values[0]
+    for count, value in enumerate(values[1:], start=2):
+        result = result + (value - result) / count
+    return result

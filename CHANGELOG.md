@@ -10,6 +10,15 @@ once a package version is introduced.
 
 ### Added
 
+- Integrated Stage 6.4 accepted evaluator steps and retryable instrument
+  failures. The runner now retains exact full/safe acquisition joins, causal
+  midpoint and release timing, pair and five-point scan timing records, and
+  estimator CPU totals without any evaluator truth lookup. The full-resource
+  builder independently replays fast, sparse, interleaved, and charged atoms
+  in arrival order—including expected/realized photons, partial and
+  scientifically failed scans, and both calibration treatments. Returned-
+  observation aborts and clean terminal transitions remain deferred to Task
+  16.
 - Added Stage 6.4's initial sparse evaluator resource builder. Before tracking,
   all runner phases fail through the public state error without inspecting
   resource inputs. At a successful start, the builder reauthenticates the

@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import pytest
 
 from odmr_bench.dynamics import SpectralSnapshot, StationaryDynamics
-from odmr_bench.emulator import GaussianNoise, InstrumentObservation, ResourceSnapshot
+from odmr_bench.emulator import (
+    GaussianNoise,
+    InstrumentObservation,
+    PoissonNoise,
+    ResourceSnapshot,
+)
 from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.estimators import (
     CalibratedTwoPointTracker,
@@ -118,6 +124,8 @@ def _acquire_success(
 
 def _start_included(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    configuration: SparseLinewidthConfiguration | None = None,
 ) -> tuple[
     SparseLinewidthEvaluatorRunner,
     ODMRInstrument,
@@ -130,7 +138,9 @@ def _start_included(
         budget_treatment="included_same_run",
     )
     runner.start_tracking(
-        SparseLinewidthCompositeTracker(SparseLinewidthConfiguration()),
+        SparseLinewidthCompositeTracker(
+            configuration or SparseLinewidthConfiguration()
+        ),
         calibration,
         success,
         TwoPointRunMetadata(
@@ -149,6 +159,8 @@ def _start_included(
 
 def _start_conditional(
     monkeypatch: pytest.MonkeyPatch,
+    *,
+    configuration: SparseLinewidthConfiguration | None = None,
 ) -> tuple[
     SparseLinewidthEvaluatorRunner,
     ODMRInstrument,
@@ -160,11 +172,13 @@ def _start_conditional(
         tracker_clock_id="tracker-clock",
         source_to_tracker_offset_s=-0.012,
     )
-    return _start_conditional_from_success(success)
+    return _start_conditional_from_success(success, configuration=configuration)
 
 
 def _start_conditional_from_success(
     success: VerifiedTwoPointCalibrationSuccess,
+    *,
+    configuration: SparseLinewidthConfiguration | None = None,
 ) -> tuple[
     SparseLinewidthEvaluatorRunner,
     ODMRInstrument,
@@ -178,7 +192,9 @@ def _start_conditional_from_success(
     instrument = _instrument()
     runner = SparseLinewidthEvaluatorRunner.bind(instrument)
     runner.start_tracking(
-        SparseLinewidthCompositeTracker(SparseLinewidthConfiguration()),
+        SparseLinewidthCompositeTracker(
+            configuration or SparseLinewidthConfiguration()
+        ),
         calibration,
         success,
         TwoPointRunMetadata(
@@ -244,8 +260,7 @@ def _replay(
             result.observations_without_realized_counts
             + int(observation.realized_photons is None),
             result.virtual_elapsed_time_s
-            + overhead_s
-            + observation.integration_time_s,
+            + (overhead_s + observation.integration_time_s),
         )
     return result
 
@@ -577,3 +592,191 @@ def test_started_builder_rejects_coordinated_nonzero_cpu_totals(
 def test_resource_builder_requires_exact_runner_type() -> None:
     with pytest.raises(TypeError, match="exact SparseLinewidthEvaluatorRunner"):
         build_sparse_linewidth_evaluator_resources(object())  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize("treatment", ["included", "conditional"])
+def test_tracking_resources_replay_fast_sparse_and_interleaved_arrival_atoms(
+    treatment: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    configuration = SparseLinewidthConfiguration(scan_period_fast_pairs=1)
+    runner, _, success = (
+        _start_included(monkeypatch, configuration=configuration)
+        if treatment == "included"
+        else _start_conditional(monkeypatch, configuration=configuration)
+    )
+
+    outcomes = [runner.step() for _ in range(5)]
+    assert all(outcome.kind == "accepted" for outcome in outcomes)
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+    assert resources is not None
+    trace = runner.state.normal_tracking_trace
+    assert tuple(acquisition.mode for acquisition in trace) == (
+        "fast_pair",
+        "fast_pair",
+        "sparse_scan",
+        "sparse_scan",
+        "sparse_scan",
+    )
+    assert tuple(
+        acquisition.full_observation.sequence_index for acquisition in trace
+    ) == tuple(
+        range(
+            trace[0].full_observation.sequence_index,
+            trace[0].full_observation.sequence_index + 5,
+        )
+    )
+    assert len(trace) == 5
+    fast = tuple(
+        acquisition.full_observation
+        for acquisition in trace
+        if acquisition.mode == "fast_pair"
+    )
+    sparse = tuple(
+        acquisition.full_observation
+        for acquisition in trace
+        if acquisition.mode == "sparse_scan"
+    )
+    interleaved = tuple(acquisition.full_observation for acquisition in trace)
+    overhead_s = runner.state.instrument_configuration.frequency_overhead_s
+    assert resources.accepted_fast_observations == fast
+    assert resources.accepted_sparse_observations == sparse
+    assert resources.accepted_tracking_observations == interleaved
+    assert resources.fast_tracking_resources == _replay(fast, overhead_s)
+    assert resources.sparse_tracking_resources == _replay(sparse, overhead_s)
+    assert resources.tracking_resources == _replay(interleaved, overhead_s)
+    assert resources.incomplete_fast_pair_observations == 0
+    assert resources.incomplete_sparse_scan_observations == 3
+    assert resources.unaccepted_observations == 0
+    replayed_interleaved = _replay(interleaved, overhead_s)
+    assert (
+        resources.tracking_resources.expected_photons
+        == replayed_interleaved.expected_photons
+    )
+    assert (
+        resources.tracking_resources.realized_photons
+        == replayed_interleaved.realized_photons
+    )
+    calibration_resources = _replay(
+        success.full_observations, success.source.source_frequency_overhead_s
+    )
+    charged_start = (
+        calibration_resources
+        if treatment == "included"
+        else ResourceSnapshot(0, 0.0, 0.0, 0.0, 0, 0, 0.0)
+    )
+    charged = charged_start
+    for observation in interleaved:
+        atom = _replay((observation,), overhead_s)
+        charged = ResourceSnapshot(
+            charged.observations + atom.observations,
+            charged.integration_time_s + atom.integration_time_s,
+            charged.nominal_exposure_photons + atom.nominal_exposure_photons,
+            charged.expected_photons + atom.expected_photons,
+            charged.realized_photons + atom.realized_photons,
+            charged.observations_without_realized_counts
+            + atom.observations_without_realized_counts,
+            charged.virtual_elapsed_time_s + atom.virtual_elapsed_time_s,
+        )
+    assert resources.accepted_charged_resources == charged
+    assert resources.charged_resources == charged
+
+
+def test_tracking_resources_count_one_incomplete_fast_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_included(monkeypatch)
+    outcome = runner.step()
+    assert outcome.kind == "accepted"
+
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+
+    assert resources is not None
+    assert len(resources.accepted_fast_observations) == 1
+    assert resources.accepted_sparse_observations == ()
+    assert resources.incomplete_fast_pair_observations == 1
+    assert resources.incomplete_sparse_scan_observations == 0
+
+
+@pytest.mark.parametrize("partial_count", [1, 2, 3, 4])
+def test_tracking_resources_retain_each_partial_sparse_prefix(
+    partial_count: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_conditional(
+        monkeypatch,
+        configuration=SparseLinewidthConfiguration(scan_period_fast_pairs=1),
+    )
+    for _ in range(2 + partial_count):
+        assert runner.step().kind == "accepted"
+
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+
+    assert resources is not None
+    assert len(resources.accepted_fast_observations) == 2
+    assert len(resources.accepted_sparse_observations) == partial_count
+    assert resources.incomplete_fast_pair_observations == 0
+    assert resources.incomplete_sparse_scan_observations == partial_count
+
+
+def test_accepted_atom_retains_expected_and_realized_photon_ledgers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, _ = _start_conditional(monkeypatch)
+    object.__setattr__(instrument, "_noise", PoissonNoise())
+
+    outcome = runner.step()
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+
+    assert outcome.kind == "accepted"
+    full = outcome.acquisition.full_observation
+    assert full.realized_photons is not None
+    assert resources is not None
+    assert resources.tracking_resources.expected_photons == full.expected_photons
+    assert resources.tracking_resources.realized_photons == full.realized_photons
+    assert resources.tracking_resources.observations_without_realized_counts == 0
+
+
+def test_scientifically_failed_scan_is_fully_accepted_and_charged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
+
+    original_fit = tracker_module.fit_sparse_linewidth
+
+    def scientific_failure(*args: object, **kwargs: object):
+        result = original_fit(*args, **kwargs)  # type: ignore[arg-type]
+        return replace(
+            result,
+            status="failure",
+            failure_code="model_evaluation_failed",
+            fitted_center_correction_hz=None,
+            fitted_local_center_hz=None,
+            fitted_fwhm_hz=None,
+            fitted_amplitude=None,
+            fitted_baseline_offset=None,
+            fitted_q=None,
+            rmse=None,
+            amplitude_normalized_rmse=None,
+            scaled_jacobian_rank=None,
+            scaled_jacobian_condition=None,
+            scipy_status=None,
+            scipy_message=None,
+            nfev=None,
+        )
+
+    monkeypatch.setattr(tracker_module, "fit_sparse_linewidth", scientific_failure)
+    runner, _, _ = _start_included(
+        monkeypatch,
+        configuration=SparseLinewidthConfiguration(scan_period_fast_pairs=1),
+    )
+
+    outcomes = [runner.step() for _ in range(7)]
+
+    assert outcomes[-1].update.completed_sparse_scan.status == "failure"
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+    assert resources is not None
+    assert len(resources.accepted_fast_observations) == 2
+    assert len(resources.accepted_sparse_observations) == 5
+    assert len(resources.accepted_tracking_observations) == 7
+    assert resources.incomplete_fast_pair_observations == 0
+    assert resources.incomplete_sparse_scan_observations == 0

@@ -6,7 +6,7 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–13 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–15 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -157,6 +157,26 @@ issuer as the sole calibration owner. Finally, the initial runner and estimate
 fast, sparse, and total CPU ledgers must each be exactly `0.0` as well as equal;
 coordinated nonzero mutations no longer pass. These fixes do not add accepted
 tracking atoms or terminal behavior and do not modify Stage 6.3 production.
+The pushed Task 14 review head `3f3ac01` passed the complete native GitHub
+Linux x86 matrix on Python 3.11 and Python 3.12 (run 35033455166).
+
+Task 15 integrates accepted fast and sparse acquisitions through one causal
+query-to-instrument-to-safe-observation-to-tracker transaction. Ordinary
+pre-return instrument exceptions remain retryable, retain the exact pending
+query, and charge no acquisition resource. Accepted atoms preserve full/safe
+identity, expected and actual midpoint joins, exact physical resource
+boundaries, the global trace, and the tracker update echo; runner CPU totals
+are the exact estimator fast, sparse, and global arrival-order totals. Completed
+fast pairs append the existing pair timing, while completed sparse scans append
+one five-midpoint ordered-mean timing whose release is the fifth acquisition.
+No evaluator truth snapshot or spectral value is requested: a query-scoped
+dynamics spy proves every post-start signal evaluation remains inside the exact
+instrument query. The evaluator resource builder independently authenticates
+and replays accepted fast, sparse, interleaved, and charged full-observation
+ledgers, including expected/realized photons, both calibration treatments,
+partial blocks of every legal length, and scientifically failed completed
+scans. Returned-observation aborts and clean terminal transitions remain solely
+Task 16 behavior.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1064,6 +1084,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 15 focused sparse runner/resource gate: 69 passed.
+- Stage 6.4 Task 15 sparse/Stage 6.3 runner-resource compatibility gate: 229
+  passed.
+- Stage 6.4 Task 15 estimator/evaluation/emulator affected gate: 1,674 passed.
+- Stage 6.4 Task 15 full repository gate: 1,775 passed.
+- Stage 6.4 Task 15 Ruff and diff-check gates: All checks passed.
 - Stage 6.4 Task 14 review-fix focused resource-builder gate: 13 passed.
 - Stage 6.4 Task 14 review-fix sparse/two-point runner-resource compatibility
   gate: 240 passed.
@@ -1217,14 +1243,14 @@ superiority result.
   over/under-validation branch, or equal-but-distinct outcome identity join;
   independent review found the production contracts conformant.
 - The Stage 6.4 sparse evaluator runner now implements clean bind, verified
-  calibration acquisition, authenticated tracking start, and exact initial
-  evaluator resource construction. Accepted acquisition/resource integration
-  and terminal transitions remain Tasks 15–16; the complete package export
-  remains Task 19.
+  calibration acquisition, authenticated tracking start, accepted/retryable
+  acquisition transitions, timing retention, and full accepted-resource
+  construction. Returned-observation aborts and clean terminal transitions
+  remain Task 16; the complete package export remains Task 19.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 15's accepted fast/sparse steps, retry/timing
-   retention, and full-resource integration.
+1. Continue Stage 6.4 with Task 16's clean budget/geometry/external stops,
+   returned-observation aborts, and run-loop behavior.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
