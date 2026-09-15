@@ -21,6 +21,9 @@ from odmr_bench.estimators.sparse_linewidth_types import (
     SparseLinewidthQuery,
     SparseLinewidthResetError,
 )
+from odmr_bench.estimators.two_point_calibration import (
+    _validate_two_point_calibration_source_integrity,
+)
 from odmr_bench.estimators.two_point_resources import _zero_public_resources
 from odmr_bench.estimators.two_point_types import (
     PublicAcquisitionResources,
@@ -256,6 +259,7 @@ def _validate_calibration_integrity(calibration: TwoPointCalibration) -> None:
         )
     ):
         raise TypeError("calibration graph must retain exact public record types")
+    _validate_two_point_calibration_source_integrity(source)
     rebuilt = TwoPointCalibration(
         source=source,
         configuration=calibration.configuration,
@@ -420,11 +424,7 @@ class SparseLinewidthCompositeTracker:
                 if calibration.budget_treatment == "included_same_run"
                 else None
             )
-            release_timestamp_s = (
-                mapped_availability_s
-                if calibration.budget_treatment == "included_same_run"
-                else 0.0
-            )
+            release_timestamp_s = mapped_availability_s
             identities = tuple(
                 CompositeIdentityEstimate(
                     resonance_id=cell.resonance_id,

@@ -8,6 +8,7 @@ from dataclasses import replace
 import pytest
 
 from odmr_bench.estimators import (
+    PublicAcquisitionResources,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
     SparseLinewidthResetError,
@@ -26,6 +27,15 @@ from tests.two_point_helpers import (
 def _calibration(*, included: bool = False) -> TwoPointCalibration:
     source = make_legal_caller_asserted_source()
     if included:
+        source = replace(
+            source,
+            fluorescence_provenance=replace(
+                source.fluorescence_provenance,
+                normalization_rule=(
+                    "odmr_instrument_normalized_fluorescence_v1"
+                ),
+            ),
+        )
         object.__setattr__(source, "provenance", "verified_factory_acquisition")
     return calibrate_two_point(
         source,
@@ -77,6 +87,25 @@ def _snapshot(tracker: SparseLinewidthCompositeTracker) -> tuple[object, ...]:
 def _corrupt_calibration(calibration: TwoPointCalibration) -> TwoPointCalibration:
     corrupted = copy(calibration)
     object.__setattr__(corrupted, "identities", tuple(reversed(calibration.identities)))
+    return corrupted
+
+
+def _corrupt_nested_source(
+    calibration: TwoPointCalibration, corruption: str
+) -> TwoPointCalibration:
+    source = copy(calibration.source)
+    if corruption == "resource_trace":
+        object.__setattr__(
+            source,
+            "safe_resources",
+            PublicAcquisitionResources(0, 0.0, 0.0, 0, 0, 0.0),
+        )
+    elif corruption == "availability_trace":
+        object.__setattr__(source, "availability_timestamp_s", 0.009)
+    else:  # pragma: no cover - test helper is closed over the parametrization
+        raise AssertionError(f"unsupported corruption: {corruption}")
+    corrupted = copy(calibration)
+    object.__setattr__(corrupted, "source", source)
     return corrupted
 
 
@@ -141,6 +170,26 @@ def test_calibration_mismatch_precedes_metadata_geometry_and_budget() -> None:
             replace(_metadata(calibration), tracker_clock_id="wrong-clock"),
             calibration,
             TwoPointBudgetCeiling(0, None, None, None),
+            seed=11,
+        )
+
+    assert raised.value.code == "calibration_mismatch"
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize("corruption", ("resource_trace", "availability_trace"))
+def test_nested_calibration_source_corruption_rolls_back(
+    corruption: str,
+) -> None:
+    tracker = _valid_tracker()
+    before = _snapshot(tracker)
+    calibration = _corrupt_nested_source(_calibration(), corruption)
+
+    with pytest.raises(SparseLinewidthResetError) as raised:
+        tracker.reset(
+            _metadata(calibration),
+            calibration,
+            TwoPointBudgetCeiling(100, None, None, None),
             seed=11,
         )
 

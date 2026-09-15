@@ -886,6 +886,123 @@ def _validate_availability_and_clock(
     return clock_mapping
 
 
+def _validate_two_point_calibration_source_integrity(
+    source: TwoPointCalibrationSource,
+) -> None:
+    """Validate one complete source graph without minting or consuming authority."""
+    if type(source) is not TwoPointCalibrationSource:
+        raise TypeError("source must be an exact TwoPointCalibrationSource")
+    _trusted_value_fingerprint(source)
+    if type(source.provenance) is not str or source.provenance not in {
+        "verified_factory_acquisition",
+        "caller_asserted",
+    }:
+        raise ValueError("source provenance must retain its closed public value")
+
+    _validate_argument_types(
+        source.source_fit,
+        source.fit_configuration,
+        source.source_observations,
+        source.identity_binding,
+        source.fluorescence_provenance,
+        source.source_id,
+        source.source_frequency_overhead_s,
+        source.source_start_timestamp_s,
+        source.physical_fit_epoch_s,
+        source.availability_sequence_index,
+        source.availability_timestamp_s,
+        source.clock_mapping,
+    )
+    _validate_argument_values(
+        source_id=source.source_id,
+        source_frequency_overhead_s=source.source_frequency_overhead_s,
+        source_start_timestamp_s=source.source_start_timestamp_s,
+        physical_fit_epoch_s=source.physical_fit_epoch_s,
+        availability_sequence_index=source.availability_sequence_index,
+        availability_timestamp_s=source.availability_timestamp_s,
+    )
+    fluorescence_provenance = _validate_fluorescence_provenance(
+        source.fluorescence_provenance
+    )
+    if (
+        source.provenance == "verified_factory_acquisition"
+        and fluorescence_provenance.normalization_rule
+        != "odmr_instrument_normalized_fluorescence_v1"
+    ):
+        raise ValueError(
+            "verified sources must retain the instrument normalization rule"
+        )
+    observations = _validate_source_trace(
+        source.source_observations,
+        source.source_frequency_overhead_s,
+        source.source_start_timestamp_s,
+    )
+    _validate_source_resources(observations, fluorescence_provenance)
+    resources = _replay_public_resources(
+        observations, source.source_frequency_overhead_s
+    )
+    _construct_fit_input(observations, resources)
+    fit_configuration = _validate_fit_input_provenance(
+        source.source_fit, source.fit_configuration
+    )
+    source_fit, resolved_resonance_ids = _validated_source_fit(source.source_fit)
+    if fit_configuration.resonance_ids != resolved_resonance_ids:
+        raise ValueError(
+            "source fit identities must match the fit configuration"
+        )
+    identity_binding = _validate_source_identity(
+        source.identity_binding, resolved_resonance_ids
+    )
+    if source.provenance == "verified_factory_acquisition":
+        _validate_verified_source_epoch(
+            observations,
+            source.source_frequency_overhead_s,
+            source.source_start_timestamp_s,
+            source.physical_fit_epoch_s,
+        )
+    else:
+        _validate_source_epoch(observations, source.physical_fit_epoch_s)
+    clock_mapping = _validate_availability_and_clock(
+        observations,
+        source.availability_sequence_index,
+        source.availability_timestamp_s,
+        source.clock_mapping,
+    )
+
+    first_observation = observations[0]
+    last_observation = observations[-1]
+    expected_values = {
+        "source_id": source.source_id,
+        "provenance": source.provenance,
+        "source_fit": source_fit,
+        "fit_configuration": fit_configuration,
+        "identity_binding": identity_binding,
+        "resolved_resonance_ids": resolved_resonance_ids,
+        "source_observations": observations,
+        "fluorescence_provenance": fluorescence_provenance,
+        "source_frequency_overhead_s": source.source_frequency_overhead_s,
+        "source_frequency_min_hz": first_observation.frequency_hz,
+        "source_frequency_max_hz": last_observation.frequency_hz,
+        "source_first_sequence_index": first_observation.sequence_index,
+        "source_last_sequence_index": last_observation.sequence_index,
+        "source_start_timestamp_s": source.source_start_timestamp_s,
+        "source_first_timestamp_s": first_observation.timestamp_s,
+        "source_last_timestamp_s": last_observation.timestamp_s,
+        "physical_fit_epoch_s": source.physical_fit_epoch_s,
+        "availability_sequence_index": last_observation.sequence_index,
+        "availability_timestamp_s": last_observation.timestamp_s,
+        "safe_resources": resources,
+        "clock_mapping": clock_mapping,
+    }
+    for field_name, expected_value in expected_values.items():
+        if _trusted_value_fingerprint(
+            getattr(source, field_name)
+        ) != _trusted_value_fingerprint(expected_value):
+            raise ValueError(
+                f"source field {field_name!r} differs from its validated value"
+            )
+
+
 def _bind_verified_two_point_calibration_source(
     source_fit: SpectrumFitResult,
     fit_configuration: FitConfiguration,

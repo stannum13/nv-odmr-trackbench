@@ -24,6 +24,7 @@ from odmr_bench.estimators import (
     calibrate_two_point,
 )
 from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
+from odmr_bench.estimators import two_point_calibration as calibration_module
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_tracker_configuration,
@@ -35,6 +36,15 @@ def _calibration(
 ) -> TwoPointCalibration:
     source = make_legal_caller_asserted_source()
     if included:
+        source = replace(
+            source,
+            fluorescence_provenance=replace(
+                source.fluorescence_provenance,
+                normalization_rule=(
+                    "odmr_instrument_normalized_fluorescence_v1"
+                ),
+            ),
+        )
         object.__setattr__(source, "provenance", "verified_factory_acquisition")
     if offset_s:
         mapping = replace(
@@ -182,6 +192,25 @@ def test_reset_seeds_all_identity_values_and_independent_epochs() -> None:
         assert identity.latest_sparse_scan is None
 
 
+def test_conditional_free_reset_retains_mapped_calibration_availability() -> None:
+    calibration = _calibration(offset_s=-0.005)
+    metadata = _metadata(calibration, current_timestamp_s=0.020)
+    tracker = _reset_tracker(calibration=calibration, metadata=metadata)
+
+    mapped_availability_s = (
+        calibration.source.availability_timestamp_s
+        + calibration.source.clock_mapping.offset_s
+    )
+    assert mapped_availability_s == 0.005
+    for identity in tracker.estimate().identities:
+        assert identity.fast_center_release_sequence_index is None
+        assert identity.fast_center_release_timestamp_s == mapped_availability_s
+        assert identity.fwhm_release_sequence_index is None
+        assert identity.fwhm_release_timestamp_s == mapped_availability_s
+        assert identity.center_release_age_s == 0.015
+        assert identity.fwhm_release_age_s == 0.015
+
+
 def test_included_reset_seeds_source_cost_and_availability_epochs() -> None:
     calibration = _calibration(included=True)
     metadata = _metadata(calibration, included=True)
@@ -220,6 +249,44 @@ def test_included_reset_seeds_source_cost_and_availability_epochs() -> None:
         )
         assert identity.center_release_age_s == 0.0
         assert identity.fwhm_release_age_s == 0.0
+
+
+def test_reset_does_not_consume_verified_source_construction_authority() -> None:
+    template = make_legal_caller_asserted_source()
+    fluorescence_provenance = replace(
+        template.fluorescence_provenance,
+        normalization_rule="odmr_instrument_normalized_fluorescence_v1",
+    )
+    source = calibration_module._bind_verified_two_point_calibration_source(
+        template.source_fit,
+        template.fit_configuration,
+        template.source_observations,
+        template.identity_binding,
+        fluorescence_provenance,
+        source_id=template.source_id,
+        source_frequency_overhead_s=template.source_frequency_overhead_s,
+        source_start_timestamp_s=template.source_start_timestamp_s,
+        physical_fit_epoch_s=template.physical_fit_epoch_s,
+        availability_sequence_index=template.availability_sequence_index,
+        availability_timestamp_s=template.availability_timestamp_s,
+        clock_mapping=template.clock_mapping,
+        construction_key=calibration_module._VERIFIED_SOURCE_CONSTRUCTION_KEY,
+    )
+    calibration = calibrate_two_point(
+        source,
+        make_legal_tracker_configuration(),
+        budget_treatment="included_same_run",
+    )
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+
+    tracker.reset(
+        _metadata(calibration, included=True),
+        calibration,
+        TwoPointBudgetCeiling(100, None, None, None),
+        seed=23,
+    )
+
+    assert calibration_module._consume_verified_source_construction_identity(source)
 
 
 def test_reset_prospectively_checks_the_late_identity_geometry() -> None:
