@@ -26,7 +26,23 @@ public evaluator resources begin only after successful tracking start, and
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
 
-Task 5 now performs one isolated four-parameter TRF fit in exact dimensionless
+Task 6 completes the sparse fit's eight first-applicable scientific gates and
+exact diagnostic-presence rows. Only returned nonpositive solver status or a
+returned evaluation count at the configured, including non-default, limit is
+`optimizer_failed`; malformed or non-finite returned solutions are distinct
+from raised programming exceptions. Bound margin, rank cutoff, condition,
+resolved amplitude, and normalized-RMSE equality all pass at their closed
+limits, with neighboring failing ULPs pinned. One scaled-Jacobian SVD supplies
+rank and condition, RMSE retains five-element arrival-order binary64
+arithmetic, and successful scan Q preserves finite signed and zero values while
+nonrepresentable Q is `nonfinite_solution`. Every completed scientific result
+has exact nonnegative process CPU measured from before preparation through its
+last applicable gate/Q derivation and sampled before public-record
+construction. Raised ordinary exceptions and process-control `BaseException`
+values escape unchanged for later transactional translation; no programming
+exception is relabeled as a scientific failure.
+
+Task 5 performs one isolated four-parameter TRF fit in exact dimensionless
 center-correction/FWHM/amplitude/baseline-offset coordinates. The canonical
 source-bound model retains baseline shape, target eta, and every non-target
 line in immutable source order while fitting only the target's local center,
@@ -34,7 +50,7 @@ FWHM, amplitude, and constant offset. The solver receives the public initial
 guess and intersected bounds once, residuals retain model-minus-observation
 arrival order, and validated success results publish the local center, signed
 scan Q, RMSE, and scaled-Jacobian diagnostics without mutating source/query/
-observation inputs. Scientific failure gates remain deferred to Task 6.
+observation inputs.
 
 Task 4 constructs pure frozen sparse fit geometry and validates every
 calibration-seeded identity prospectively. It fixes the exact even five-point
@@ -801,6 +817,9 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 6 focused sparse fit file: 74 passed.
+- Stage 6.4 Task 6 estimator/evaluator/emulator integration gate: 1,332 passed.
+- Stage 6.4 Task 6 full repository gate: 1,433 passed.
 - Stage 6.4 Task 5 focused sparse fit file: 21 passed.
 - Stage 6.4 Task 5 success/model slice: 3 passed, 18 deselected.
 - Stage 6.4 Task 5 estimator/evaluator/emulator integration gate: 1,279 passed.
@@ -884,7 +903,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 6's ordered sparse-fit failure gates and exact
-   diagnostic/exception/CPU semantics.
+1. Continue Stage 6.4 with Task 7's composite tracker reset, initial fast-block
+   reservation, and estimator exports.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

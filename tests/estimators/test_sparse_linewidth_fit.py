@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+import odmr_bench.estimators.sparse_linewidth_fit as sparse_fit
 from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
     SparseLinewidthConfiguration,
@@ -150,6 +151,45 @@ def _fit_inputs(
         for query, value in zip(queries, fluorescence, strict=True)
     )
     return queries, observations
+
+
+def _solver_result(
+    *,
+    x: object = (0.0, 1.0, 1.0, 0.0),
+    fun: object = (0.0, 0.0, 0.0, 0.0, 0.0),
+    jac: object | None = None,
+    cost: object = 0.0,
+    status: object = 1,
+    message: object = "controlled convergence",
+    nfev: object = 1,
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        x=np.asarray(x, dtype=np.float64),
+        fun=np.asarray(fun, dtype=np.float64),
+        jac=(
+            np.vstack((np.eye(4, dtype=np.float64), np.zeros(4)))
+            if jac is None
+            else np.asarray(jac, dtype=np.float64)
+        ),
+        cost=cost,
+        status=status,
+        message=message,
+        nfev=nfev,
+    )
+
+
+def _controlled_fit_inputs(*, q0_hz: float | None = None):
+    source = _fit_source(model_kind="pseudo_voigt", quadratic=True)
+    queries, observations = _fit_inputs(source, q0_hz=q0_hz)
+    return source, SparseLinewidthConfiguration(), queries, observations
+
+
+def _patch_solver(
+    monkeypatch: pytest.MonkeyPatch, optimization: SimpleNamespace
+) -> None:
+    monkeypatch.setattr(
+        sparse_fit, "least_squares", lambda *args, **kwargs: optimization
+    )
 
 
 @pytest.mark.parametrize(
@@ -727,3 +767,588 @@ def test_success_uses_one_scaled_solver_call_and_preserves_arrival_order(
     assert result.fitted_baseline_offset == expected[3]
     assert result.fitted_q == result.fitted_local_center_hz / expected[1]
     assert result.fitted_q < 0.0
+
+
+@pytest.mark.parametrize(
+    ("scenario", "expected_code", "expected_presence"),
+    (
+        ("model", "model_evaluation_failed", (False, False, False, False, False)),
+        ("optimizer", "optimizer_failed", (True, False, False, False, False)),
+        ("nonfinite", "nonfinite_solution", (True, False, False, False, False)),
+        ("bounds", "bounds_active", (True, True, True, False, False)),
+        ("rank", "rank_deficient", (True, True, True, True, False)),
+        ("condition", "ill_conditioned", (True, True, True, True, True)),
+        ("amplitude", "amplitude_unresolved", (True, True, True, True, True)),
+        ("rmse", "residual_quality_failed", (True, True, True, True, True)),
+        ("success", None, (True, True, True, True, True)),
+    ),
+)
+def test_first_applicable_gate_and_exact_diagnostic_presence_matrix(
+    monkeypatch: pytest.MonkeyPatch,
+    scenario: str,
+    expected_code: str | None,
+    expected_presence: tuple[bool, bool, bool, bool, bool],
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    solution = np.asarray((0.0, 1.0, 1.0, 0.0), dtype=np.float64)
+    residual = np.zeros(5, dtype=np.float64)
+    status = 1
+    singular_values = np.ones(4, dtype=np.float64)
+
+    if scenario == "model":
+        monkeypatch.setattr(
+            sparse_fit,
+            "_evaluate_bound_source_model",
+            lambda *args, **kwargs: np.full(5, np.nan),
+        )
+        monkeypatch.setattr(
+            sparse_fit,
+            "least_squares",
+            lambda *args, **kwargs: pytest.fail("solver called after initial failure"),
+        )
+    else:
+        if scenario == "optimizer":
+            status = 0
+            solution[0] = np.nan
+            residual[:] = np.inf
+        elif scenario == "nonfinite":
+            solution[0] = np.nan
+            residual[:] = np.inf
+        elif scenario == "bounds":
+            solution[:] = (0.5, 1.0, 0.20, 0.0)
+            residual[:] = math.nextafter(0.002, math.inf)
+            singular_values[-1] = 0.0
+        elif scenario == "rank":
+            solution[2] = 0.20
+            residual[:] = math.nextafter(0.002, math.inf)
+            singular_values[-1] = 0.0
+        elif scenario == "condition":
+            solution[2] = 0.20
+            residual[:] = math.nextafter(0.002, math.inf)
+            singular_values[-1] = math.nextafter(1.0e-8, 0.0)
+        elif scenario == "amplitude":
+            solution[2] = 0.20
+            residual[:] = math.nextafter(0.002, math.inf)
+        elif scenario == "rmse":
+            residual[:] = math.nextafter(0.002, math.inf)
+        _patch_solver(
+            monkeypatch,
+            _solver_result(x=solution, fun=residual, status=status),
+        )
+    svd_calls = 0
+
+    def controlled_svd(*args: object, **kwargs: object) -> np.ndarray:
+        nonlocal svd_calls
+        svd_calls += 1
+        return singular_values.copy()
+
+    monkeypatch.setattr(sparse_fit.np.linalg, "svd", controlled_svd)
+    clock_values = iter((100, 400))
+    monkeypatch.setattr(
+        sparse_fit.time, "process_time_ns", lambda: next(clock_values)
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.status == ("success" if expected_code is None else "failure")
+    assert result.failure_code == expected_code
+    fitted = (
+        result.fitted_center_correction_hz,
+        result.fitted_local_center_hz,
+        result.fitted_fwhm_hz,
+        result.fitted_amplitude,
+        result.fitted_baseline_offset,
+    )
+    actual_presence = (
+        all(
+            value is not None
+            for value in (result.scipy_status, result.scipy_message, result.nfev)
+        ),
+        all(value is not None for value in fitted),
+        result.rmse is not None and result.amplitude_normalized_rmse is not None,
+        result.scaled_jacobian_rank is not None,
+        result.scaled_jacobian_condition is not None,
+    )
+    assert actual_presence == expected_presence
+    assert (
+        result.fitted_q is not None
+        if expected_code is None
+        else result.fitted_q is None
+    )
+    assert result.fit_cpu_time_s == 300 / 1_000_000_000.0
+    assert math.isfinite(result.fit_cpu_time_s) and result.fit_cpu_time_s >= 0.0
+    assert svd_calls == (0 if scenario in {"model", "optimizer", "nonfinite"} else 1)
+
+
+def test_nonrepresentable_preparation_fails_before_model_or_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, configuration, ordinary_queries, ordinary_observations = (
+        _controlled_fit_inputs()
+    )
+    frozen_width = 5.0e-324
+    queries = tuple(
+        replace(
+            query,
+            frozen_prior_fwhm_hz=frozen_width,
+            frequency_hz=query.frozen_fast_center_hz,
+        )
+        for query in ordinary_queries
+    )
+    observations = tuple(
+        replace(observation, frequency_hz=query.frequency_hz)
+        for query, observation in zip(queries, ordinary_observations, strict=True)
+    )
+    monkeypatch.setattr(
+        sparse_fit,
+        "_evaluate_bound_source_model",
+        lambda *args, **kwargs: pytest.fail("model called after invalid preparation"),
+    )
+    monkeypatch.setattr(
+        sparse_fit,
+        "least_squares",
+        lambda *args, **kwargs: pytest.fail("solver called after invalid preparation"),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == (
+        "failure",
+        "model_evaluation_failed",
+    )
+    assert result.scipy_status is None
+
+
+@pytest.mark.parametrize("status", (0, -1))
+def test_nonpositive_solver_status_is_optimizer_failure(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    configuration = replace(configuration, max_nfev=17)
+    _patch_solver(
+        monkeypatch,
+        _solver_result(
+            x=(np.nan, 1.0, 1.0, 0.0),
+            fun=np.full(5, np.inf),
+            status=status,
+            nfev=1,
+        ),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == ("failure", "optimizer_failed")
+    assert result.scipy_status == status
+    assert result.nfev == 1
+
+
+@pytest.mark.parametrize(
+    ("nfev", "expected_code"), ((17, "optimizer_failed"), (16, None))
+)
+def test_optimizer_failure_uses_nondefault_configured_max_nfev(
+    monkeypatch: pytest.MonkeyPatch, nfev: int, expected_code: str | None
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    configuration = replace(configuration, max_nfev=17)
+    _patch_solver(monkeypatch, _solver_result(status=1, nfev=nfev))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == expected_code
+    assert result.scipy_status == 1
+    assert result.nfev == nfev
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    (
+        "wrong_x_shape",
+        "wrong_residual_shape",
+        "wrong_jacobian_shape",
+        "nonfinite_parameter",
+        "nonfinite_public_parameter",
+        "nonfinite_prediction",
+        "nonfinite_residual",
+        "nonfinite_cost",
+        "nonfinite_rmse",
+        "nonfinite_singular_value",
+    ),
+)
+def test_malformed_or_nonfinite_returned_solution_is_nonfinite_solution(
+    monkeypatch: pytest.MonkeyPatch, malformation: str
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    x: object = (0.0, 1.0, 1.0, 0.0)
+    fun: object = np.zeros(5, dtype=np.float64)
+    jac: object = np.vstack((np.eye(4), np.zeros(4)))
+    cost: object = 0.0
+    singular_values = np.ones(4, dtype=np.float64)
+    if malformation == "wrong_x_shape":
+        x = (0.0, 1.0, 1.0)
+    elif malformation == "wrong_residual_shape":
+        fun = np.zeros(4, dtype=np.float64)
+    elif malformation == "wrong_jacobian_shape":
+        jac = np.eye(4, dtype=np.float64)
+    elif malformation == "nonfinite_parameter":
+        x = (np.nan, 1.0, 1.0, 0.0)
+    elif malformation == "nonfinite_public_parameter":
+        x = (sys.float_info.max, 1.0, 1.0, 0.0)
+    elif malformation == "nonfinite_residual":
+        fun = (np.inf, 0.0, 0.0, 0.0, 0.0)
+    elif malformation == "nonfinite_cost":
+        cost = np.nan
+    elif malformation == "nonfinite_rmse":
+        fun = (sys.float_info.max, 0.0, 0.0, 0.0, 0.0)
+    elif malformation == "nonfinite_singular_value":
+        singular_values[-1] = np.nan
+    if malformation == "nonfinite_prediction":
+        original_model = sparse_fit._evaluate_bound_source_model
+        model_calls = 0
+
+        def nonfinite_final_model(*args: object, **kwargs: object) -> np.ndarray:
+            nonlocal model_calls
+            model_calls += 1
+            if model_calls == 1:
+                return original_model(*args, **kwargs)
+            return np.full(5, np.inf)
+
+        monkeypatch.setattr(
+            sparse_fit, "_evaluate_bound_source_model", nonfinite_final_model
+        )
+    _patch_solver(monkeypatch, _solver_result(x=x, fun=fun, jac=jac, cost=cost))
+    monkeypatch.setattr(
+        sparse_fit.np.linalg,
+        "svd",
+        lambda *args, **kwargs: singular_values.copy(),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == ("failure", "nonfinite_solution")
+    assert result.scipy_status == 1
+    assert result.fitted_center_correction_hz is None
+    assert result.rmse is None
+    assert result.scaled_jacobian_rank is None
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_code"),
+    (("equality", "amplitude_unresolved"), ("inward_ulp", "bounds_active")),
+)
+def test_scaled_bound_margin_equality_passes_and_inward_ulp_fails(
+    monkeypatch: pytest.MonkeyPatch, direction: str, expected_code: str
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    amplitude_scaled = 4.0 * configuration.min_interior_bound_fraction
+    assert amplitude_scaled / 4.0 == configuration.min_interior_bound_fraction
+    if direction == "inward_ulp":
+        amplitude_scaled = math.nextafter(amplitude_scaled, 0.0)
+    _patch_solver(monkeypatch, _solver_result(x=(0.0, 1.0, amplitude_scaled, 0.0)))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == expected_code
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_code", "expected_rank"),
+    (("equality", "rank_deficient", 3), ("outward_ulp", None, 4)),
+)
+def test_rank_cutoff_equality_is_discarded_and_outward_ulp_is_full_rank(
+    monkeypatch: pytest.MonkeyPatch,
+    direction: str,
+    expected_code: str | None,
+    expected_rank: int,
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    configuration = replace(configuration, max_scaled_jacobian_condition=1.0e12)
+    cutoff = 1.0 * configuration.rank_rtol
+    smallest = cutoff
+    if direction == "outward_ulp":
+        smallest = math.nextafter(cutoff, math.inf)
+    calls = 0
+
+    def controlled_svd(*args: object, **kwargs: object) -> np.ndarray:
+        nonlocal calls
+        calls += 1
+        return np.asarray((1.0, 1.0, 1.0, smallest), dtype=np.float64)
+
+    _patch_solver(monkeypatch, _solver_result())
+    monkeypatch.setattr(sparse_fit.np.linalg, "svd", controlled_svd)
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == expected_code
+    assert result.scaled_jacobian_rank == expected_rank
+    assert calls == 1
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_code"),
+    (("equality", None), ("outward_ulp", "ill_conditioned")),
+)
+def test_condition_limit_equality_passes_and_outward_ulp_fails(
+    monkeypatch: pytest.MonkeyPatch, direction: str, expected_code: str | None
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    smallest = 1.0e-8
+    if direction == "outward_ulp":
+        smallest = math.nextafter(smallest, 0.0)
+    _patch_solver(monkeypatch, _solver_result())
+    monkeypatch.setattr(
+        sparse_fit.np.linalg,
+        "svd",
+        lambda *args, **kwargs: np.asarray((1.0, 1.0, 1.0, smallest)),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == expected_code
+    assert result.scaled_jacobian_condition == 1.0 / smallest
+    if direction == "equality":
+        assert result.scaled_jacobian_condition == 1.0e8
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_code"),
+    (("equality", None), ("outward_ulp", "amplitude_unresolved")),
+)
+def test_resolved_amplitude_equality_passes_and_outward_ulp_fails(
+    monkeypatch: pytest.MonkeyPatch, direction: str, expected_code: str | None
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    amplitude_scaled = configuration.min_resolved_amplitude_source_ratio
+    if direction == "outward_ulp":
+        amplitude_scaled = math.nextafter(amplitude_scaled, 0.0)
+    _patch_solver(monkeypatch, _solver_result(x=(0.0, 1.0, amplitude_scaled, 0.0)))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    expected_threshold = max(
+        configuration.min_resolved_amplitude_source_ratio
+        * source.source_fit.resonance_estimates[0].amplitude,
+        source.fit_configuration.min_resolved_amplitude,
+    )
+    assert result.failure_code == expected_code
+    assert result.fitted_amplitude is not None
+    if direction == "equality":
+        assert result.fitted_amplitude == expected_threshold
+    else:
+        assert result.fitted_amplitude < expected_threshold
+
+
+@pytest.mark.parametrize(
+    ("direction", "expected_code"),
+    (("equality", None), ("outward_ulp", "residual_quality_failed")),
+)
+def test_normalized_rmse_equality_passes_and_outward_ulp_fails(
+    monkeypatch: pytest.MonkeyPatch, direction: str, expected_code: str | None
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    residual_value = 0.002
+    if direction == "outward_ulp":
+        residual_value = math.nextafter(residual_value, math.inf)
+    _patch_solver(monkeypatch, _solver_result(fun=np.full(5, residual_value)))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == expected_code
+    assert result.amplitude_normalized_rmse is not None
+    if direction == "equality":
+        assert result.amplitude_normalized_rmse == 0.10
+    else:
+        assert result.amplitude_normalized_rmse > 0.10
+
+
+def test_rmse_uses_optimizer_residual_in_fixed_arrival_order_binary64(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    residual = np.asarray(
+        tuple(
+            float.fromhex(value)
+            for value in (
+                "0x1.06a410420cd63p-85",
+                "0x1.f5b0003225350p+83",
+                "0x1.a602fe967b819p+94",
+                "0x1.b5c95b46562e8p+105",
+                "0x1.7ba191c8d1b75p+115",
+            )
+        ),
+        dtype=np.float64,
+    )
+    expected = float(np.sqrt(np.sum(residual**2) / 5.0))
+    regrouped = float(np.sqrt(np.sum((residual**2)[::-1]) / 5.0))
+    assert expected != regrouped
+    _patch_solver(monkeypatch, _solver_result(fun=residual))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.failure_code == "residual_quality_failed"
+    assert result.rmse == expected
+    assert result.rmse != regrouped
+
+
+@pytest.mark.parametrize(("q0_hz", "expected_sign"), ((-2.76e9, -1), (0.0, 0)))
+def test_success_preserves_signed_and_zero_scan_q(
+    monkeypatch: pytest.MonkeyPatch, q0_hz: float, expected_sign: int
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs(q0_hz=q0_hz)
+    _patch_solver(monkeypatch, _solver_result())
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert result.status == "success"
+    assert result.fitted_q == q0_hz / queries[0].frozen_prior_fwhm_hz
+    assert (result.fitted_q > 0.0) - (result.fitted_q < 0.0) == expected_sign
+
+
+def test_nonrepresentable_scan_q_is_nonfinite_solution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_configuration = replace(
+        make_legal_fit_configuration(), min_fwhm_hz=5.0e-324, max_fwhm_hz=1.0e-299
+    )
+    source_fit = make_legal_source_fit(source_configuration)
+    tiny_resonances = tuple(
+        replace(resonance, center_hz=index * 1.0e6, fwhm_hz=1.0e-300)
+        for index, resonance in enumerate(source_fit.resonance_estimates)
+    )
+    source_fit = replace(
+        source_fit,
+        resonance_estimates=tiny_resonances,
+        initial_guess=replace(source_fit.initial_guess, resonances=tiny_resonances),
+    )
+    source = make_legal_caller_asserted_source(
+        source_fit=source_fit, fit_configuration=source_configuration
+    )
+    q0_hz = sys.float_info.max
+    multipliers = (0.5, -1.0, 0.0, 1.0, -0.5)
+    queries = tuple(
+        make_sparse_query(
+            acquisition_index=10 + point_index,
+            point_index=point_index,
+            offset_multiplier=multiplier,
+            resonance_id="r0",
+            frozen_fast_center_hz=q0_hz,
+            frozen_prior_fwhm_hz=1.0e-300,
+            frequency_hz=q0_hz + multiplier * 1.0e-300,
+            expected_sequence_index=20 + point_index,
+            expected_end_timestamp_s=0.105 + 0.005 * point_index,
+        )
+        for point_index, multiplier in enumerate(multipliers)
+    )
+    observations = tuple(
+        EstimatorObservation(
+            sequence_index=query.expected_sequence_index,
+            timestamp_s=query.expected_end_timestamp_s,
+            frequency_hz=query.frequency_hz,
+            fluorescence=1.0,
+            integration_time_s=query.integration_time_s,
+            nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        )
+        for query in queries
+    )
+    monkeypatch.setattr(
+        sparse_fit,
+        "_evaluate_bound_source_model",
+        lambda *args, **kwargs: np.zeros(5, dtype=np.float64),
+    )
+    _patch_solver(monkeypatch, _solver_result())
+
+    result = fit_sparse_linewidth(
+        source, SparseLinewidthConfiguration(), queries, observations
+    )
+
+    assert (result.status, result.failure_code) == ("failure", "nonfinite_solution")
+    assert result.fitted_q is None
+    assert result.fitted_fwhm_hz is None
+
+
+class _FitControlFlow(BaseException):
+    pass
+
+
+@pytest.mark.parametrize(
+    "seam", ("model", "solver", "svd", "q", "clock_start", "clock_end", "record")
+)
+@pytest.mark.parametrize("exception_type", (RuntimeError, _FitControlFlow))
+def test_raised_collaborator_exceptions_escape_as_the_identical_object(
+    monkeypatch: pytest.MonkeyPatch,
+    seam: str,
+    exception_type: type[BaseException],
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    raised_exception = exception_type(f"raised by {seam}")
+
+    def raise_exact(*args: object, **kwargs: object) -> object:
+        raise raised_exception
+
+    _patch_solver(monkeypatch, _solver_result())
+    if seam == "model":
+        monkeypatch.setattr(sparse_fit, "_evaluate_bound_source_model", raise_exact)
+    elif seam == "solver":
+        monkeypatch.setattr(sparse_fit, "least_squares", raise_exact)
+    elif seam == "svd":
+        monkeypatch.setattr(sparse_fit.np.linalg, "svd", raise_exact)
+    elif seam == "q":
+        monkeypatch.setattr(sparse_fit, "_derive_fitted_q", raise_exact)
+    elif seam == "clock_start":
+        monkeypatch.setattr(sparse_fit.time, "process_time_ns", raise_exact)
+    elif seam == "clock_end":
+        clock_calls = iter((100, raised_exception))
+
+        def fail_second_clock() -> int:
+            value = next(clock_calls)
+            if isinstance(value, BaseException):
+                raise value
+            return value
+
+        monkeypatch.setattr(sparse_fit.time, "process_time_ns", fail_second_clock)
+    elif seam == "record":
+        monkeypatch.setattr(sparse_fit, "SparseLinewidthScanResult", raise_exact)
+
+    with pytest.raises(BaseException) as caught:
+        fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert caught.value is raised_exception
+
+
+def test_fit_cpu_clock_stops_before_public_result_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    _patch_solver(monkeypatch, _solver_result())
+    events: list[str] = []
+    clock_values = iter((1_000, 501_000, 9_000_000_000))
+
+    def controlled_clock() -> int:
+        value = next(clock_values)
+        events.append(f"clock:{value}")
+        return value
+
+    captured: dict[str, object] = {}
+
+    def slow_result_constructor(**kwargs: object) -> SimpleNamespace:
+        captured.update(kwargs)
+        events.append("constructor:start")
+        controlled_clock()
+        events.append("constructor:end")
+        return SimpleNamespace(**kwargs)
+
+    monkeypatch.setattr(sparse_fit.time, "process_time_ns", controlled_clock)
+    monkeypatch.setattr(
+        sparse_fit, "SparseLinewidthScanResult", slow_result_constructor
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert events == [
+        "clock:1000",
+        "clock:501000",
+        "constructor:start",
+        "clock:9000000000",
+        "constructor:end",
+    ]
+    assert captured["fit_cpu_time_s"] == 500_000 / 1_000_000_000.0
+    assert result.fit_cpu_time_s == captured["fit_cpu_time_s"]

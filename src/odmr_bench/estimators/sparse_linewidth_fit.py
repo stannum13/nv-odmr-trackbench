@@ -283,6 +283,125 @@ def _construct_sparse_fit_geometry(
     )
 
 
+def _public_reference_timestamp_s(
+    observations: tuple[EstimatorObservation, ...],
+) -> float:
+    reference_s = observations[0].timestamp_s - observations[0].integration_time_s / 2.0
+    for count, observation in enumerate(observations[1:], start=2):
+        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
+        reference_s = reference_s + (midpoint_s - reference_s) / count
+    return reference_s
+
+
+def _derive_fitted_q(fitted_local_center_hz: float, fitted_fwhm_hz: float) -> float:
+    return float(fitted_local_center_hz / fitted_fwhm_hz)
+
+
+def _finish_sparse_fit(
+    *,
+    started_ns: int,
+    queries: tuple[SparseLinewidthQuery, ...],
+    observations: tuple[EstimatorObservation, ...],
+    public_reference_timestamp_s: float,
+    status: str,
+    failure_code: str | None,
+    fitted_center_correction_hz: float | None = None,
+    fitted_local_center_hz: float | None = None,
+    fitted_fwhm_hz: float | None = None,
+    fitted_amplitude: float | None = None,
+    fitted_baseline_offset: float | None = None,
+    fitted_q: float | None = None,
+    rmse: float | None = None,
+    amplitude_normalized_rmse: float | None = None,
+    scaled_jacobian_rank: int | None = None,
+    scaled_jacobian_condition: float | None = None,
+    scipy_status: int | None = None,
+    scipy_message: str | None = None,
+    nfev: int | None = None,
+) -> SparseLinewidthScanResult:
+    first_query = queries[0]
+    finished_ns = time.process_time_ns()
+    fit_cpu_time_s = (finished_ns - started_ns) / 1_000_000_000.0
+    return SparseLinewidthScanResult(
+        scan_index=first_query.scan_index,
+        identity_scan_index=first_query.identity_scan_index,
+        resonance_id=first_query.resonance_id,
+        frozen_fast_center_hz=first_query.frozen_fast_center_hz,
+        frozen_fast_center_source_kind=first_query.frozen_fast_center_source_kind,
+        frozen_fast_center_source_pair_index=(
+            first_query.frozen_fast_center_source_pair_index
+        ),
+        frozen_fast_center_reference_timestamp_s=(
+            first_query.frozen_fast_center_reference_timestamp_s
+        ),
+        frozen_fast_center_release_sequence_index=(
+            first_query.frozen_fast_center_release_sequence_index
+        ),
+        frozen_fast_center_release_timestamp_s=(
+            first_query.frozen_fast_center_release_timestamp_s
+        ),
+        frozen_prior_fwhm_hz=first_query.frozen_prior_fwhm_hz,
+        frozen_fwhm_source_kind=first_query.frozen_fwhm_source_kind,
+        frozen_fwhm_source_scan_index=first_query.frozen_fwhm_source_scan_index,
+        frozen_fwhm_reference_timestamp_s=(
+            first_query.frozen_fwhm_reference_timestamp_s
+        ),
+        frozen_fwhm_release_sequence_index=(
+            first_query.frozen_fwhm_release_sequence_index
+        ),
+        frozen_fwhm_release_timestamp_s=(
+            first_query.frozen_fwhm_release_timestamp_s
+        ),
+        queries=queries,
+        observations=observations,
+        public_reference_timestamp_s=public_reference_timestamp_s,
+        release_sequence_index=observations[-1].sequence_index,
+        release_timestamp_s=observations[-1].timestamp_s,
+        status=status,
+        failure_code=failure_code,
+        fitted_center_correction_hz=fitted_center_correction_hz,
+        fitted_local_center_hz=fitted_local_center_hz,
+        fitted_fwhm_hz=fitted_fwhm_hz,
+        fitted_amplitude=fitted_amplitude,
+        fitted_baseline_offset=fitted_baseline_offset,
+        fitted_q=fitted_q,
+        rmse=rmse,
+        amplitude_normalized_rmse=amplitude_normalized_rmse,
+        scaled_jacobian_rank=scaled_jacobian_rank,
+        scaled_jacobian_condition=scaled_jacobian_condition,
+        scipy_status=scipy_status,
+        scipy_message=scipy_message,
+        nfev=nfev,
+        fit_cpu_time_s=fit_cpu_time_s,
+    )
+
+
+def _canonical_solver_diagnostics(
+    optimization: object,
+) -> tuple[int, str, int]:
+    raw_status = optimization.status  # type: ignore[attr-defined]
+    raw_message = optimization.message  # type: ignore[attr-defined]
+    raw_nfev = optimization.nfev  # type: ignore[attr-defined]
+    if isinstance(raw_status, (bool, np.bool_)) or not isinstance(
+        raw_status, (Integral, np.integer)
+    ):
+        raise TypeError("solver status must be an integer")
+    if not isinstance(raw_message, str):
+        raise TypeError("solver message must be a string")
+    if isinstance(raw_nfev, (bool, np.bool_)) or not isinstance(
+        raw_nfev, (Integral, np.integer)
+    ):
+        raise TypeError("solver nfev must be an integer")
+    status = int(raw_status)
+    message = str(raw_message)
+    nfev = int(raw_nfev)
+    if not message.strip():
+        raise ValueError("solver message must be nonblank")
+    if nfev <= 0:
+        raise ValueError("solver nfev must be positive")
+    return status, message, nfev
+
+
 def fit_sparse_linewidth(
     source: TwoPointCalibrationSource,
     configuration: SparseLinewidthConfiguration,
@@ -337,22 +456,71 @@ def fit_sparse_linewidth(
         dtype=np.float64,
     )
     initial_guess = np.asarray((0.0, 1.0, 1.0, 0.0), dtype=np.float64)
+    public_reference_timestamp_s = _public_reference_timestamp_s(frozen_observations)
+
+    def scaled_prediction(packed: np.ndarray) -> np.ndarray:
+        with np.errstate(over="ignore", invalid="ignore"):
+            dc_hz = packed[0] * w0_hz
+            fwhm_hz = packed[1] * w0_hz
+            amplitude = packed[2] * a0
+            baseline_offset = packed[3] * a0
+            center_hz = q0_hz + dc_hz
+        return np.asarray(
+            _evaluate_bound_source_model(
+                frequency_hz,
+                source,
+                first_query.resonance_id,
+                center_hz=center_hz,
+                fwhm_hz=fwhm_hz,
+                amplitude=amplitude,
+                baseline_offset=baseline_offset,
+            ),
+            dtype=np.float64,
+        )
 
     def scaled_residual(packed: np.ndarray) -> np.ndarray:
-        dc_hz = packed[0] * w0_hz
-        fwhm_hz = packed[1] * w0_hz
-        amplitude = packed[2] * a0
-        baseline_offset = packed[3] * a0
-        model = _evaluate_bound_source_model(
-            frequency_hz,
-            source,
-            first_query.resonance_id,
-            center_hz=q0_hz + dc_hz,
-            fwhm_hz=fwhm_hz,
-            amplitude=amplitude,
-            baseline_offset=baseline_offset,
-        )
+        model = scaled_prediction(packed)
         return np.asarray(model - observed, dtype=np.float64)
+
+    preparation_is_finite = (
+        lower_bounds.shape == (4,)
+        and upper_bounds.shape == (4,)
+        and initial_guess.shape == (4,)
+        and frequency_hz.shape == (5,)
+        and observed.shape == (5,)
+        and np.all(np.isfinite(lower_bounds))
+        and np.all(np.isfinite(upper_bounds))
+        and np.all(np.isfinite(initial_guess))
+        and np.all(np.isfinite(frequency_hz))
+        and np.all(np.isfinite(observed))
+        and np.all(lower_bounds < initial_guess)
+        and np.all(initial_guess < upper_bounds)
+    )
+    if not preparation_is_finite:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="model_evaluation_failed",
+        )
+    initial_prediction = scaled_prediction(initial_guess)
+    initial_residual = np.asarray(initial_prediction - observed, dtype=np.float64)
+    if not (
+        initial_prediction.shape == (5,)
+        and initial_residual.shape == (5,)
+        and np.all(np.isfinite(initial_prediction))
+        and np.all(np.isfinite(initial_residual))
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="model_evaluation_failed",
+        )
 
     optimization = least_squares(
         scaled_residual,
@@ -361,81 +529,232 @@ def fit_sparse_linewidth(
         method="trf",
         max_nfev=configuration.max_nfev,
     )
+    scipy_status, scipy_message, nfev = _canonical_solver_diagnostics(optimization)
+    solver_diagnostics = {
+        "scipy_status": scipy_status,
+        "scipy_message": scipy_message,
+        "nfev": nfev,
+    }
+    if scipy_status <= 0 or nfev >= configuration.max_nfev:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="optimizer_failed",
+            **solver_diagnostics,
+        )
+
     fitted_scaled = np.asarray(optimization.x, dtype=np.float64)
-    fitted_center_correction_hz = float(fitted_scaled[0] * w0_hz)
-    fitted_local_center_hz = float(q0_hz + fitted_center_correction_hz)
-    fitted_fwhm_hz = float(fitted_scaled[1] * w0_hz)
-    fitted_amplitude = float(fitted_scaled[2] * a0)
-    fitted_baseline_offset = float(fitted_scaled[3] * a0)
     residual = np.asarray(optimization.fun, dtype=np.float64)
-    rmse = float(np.sqrt(np.sum(residual**2) / 5.0))
-    amplitude_normalized_rmse = float(rmse / fitted_amplitude)
-    singular_values = np.linalg.svd(
-        np.asarray(optimization.jac, dtype=np.float64), compute_uv=False
+    scaled_jacobian = np.asarray(optimization.jac, dtype=np.float64)
+    cost = float(optimization.cost)
+    if not (
+        fitted_scaled.shape == (4,)
+        and residual.shape == (5,)
+        and scaled_jacobian.shape == (5, 4)
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+    if not (
+        np.all(np.isfinite(fitted_scaled))
+        and np.all(np.isfinite(residual))
+        and math.isfinite(cost)
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        fitted_center_correction_hz = float(fitted_scaled[0] * w0_hz)
+        fitted_local_center_hz = float(q0_hz + fitted_center_correction_hz)
+        fitted_fwhm_hz = float(fitted_scaled[1] * w0_hz)
+        fitted_amplitude = float(fitted_scaled[2] * a0)
+        fitted_baseline_offset = float(fitted_scaled[3] * a0)
+    public_parameters = (
+        fitted_center_correction_hz,
+        fitted_local_center_hz,
+        fitted_fwhm_hz,
+        fitted_amplitude,
+        fitted_baseline_offset,
     )
+    if not all(math.isfinite(value) for value in public_parameters):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        final_prediction = scaled_prediction(fitted_scaled)
+        rmse = float(np.sqrt(np.sum(residual**2) / 5.0))
+        amplitude_normalized_rmse = float(rmse / fitted_amplitude)
+    singular_values = np.asarray(
+        np.linalg.svd(scaled_jacobian, compute_uv=False), dtype=np.float64
+    )
+    finite_solution_values = (
+        *fitted_scaled,
+        *public_parameters,
+        *final_prediction,
+        *residual,
+        cost,
+        rmse,
+        amplitude_normalized_rmse,
+        *singular_values,
+    )
+    if not (
+        final_prediction.shape == (5,)
+        and singular_values.shape == (4,)
+        and all(math.isfinite(float(value)) for value in finite_solution_values)
+        and fitted_fwhm_hz > 0.0
+        and fitted_amplitude >= 0.0
+        and rmse >= 0.0
+        and amplitude_normalized_rmse >= 0.0
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+
+    fitted_diagnostics = {
+        "fitted_center_correction_hz": fitted_center_correction_hz,
+        "fitted_local_center_hz": fitted_local_center_hz,
+        "fitted_fwhm_hz": fitted_fwhm_hz,
+        "fitted_amplitude": fitted_amplitude,
+        "fitted_baseline_offset": fitted_baseline_offset,
+        "rmse": rmse,
+        "amplitude_normalized_rmse": amplitude_normalized_rmse,
+    }
+    bound_spans = upper_bounds - lower_bounds
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        lower_margins = (fitted_scaled - lower_bounds) / bound_spans
+        upper_margins = (upper_bounds - fitted_scaled) / bound_spans
+    if np.any(
+        (fitted_scaled < lower_bounds)
+        | (fitted_scaled > upper_bounds)
+        | (lower_margins < configuration.min_interior_bound_fraction)
+        | (upper_margins < configuration.min_interior_bound_fraction)
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="bounds_active",
+            **fitted_diagnostics,
+            **solver_diagnostics,
+        )
+
     cutoff = singular_values[0] * configuration.rank_rtol
     scaled_jacobian_rank = int(np.count_nonzero(singular_values > cutoff))
-    scaled_jacobian_condition = float(singular_values[0] / singular_values[-1])
-    fitted_q = float(fitted_local_center_hz / fitted_fwhm_hz)
-    public_reference_timestamp_s = (
-        frozen_observations[0].timestamp_s
-        - frozen_observations[0].integration_time_s / 2.0
+    if scaled_jacobian_rank != 4:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="rank_deficient",
+            scaled_jacobian_rank=scaled_jacobian_rank,
+            **fitted_diagnostics,
+            **solver_diagnostics,
+        )
+
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        scaled_jacobian_condition = float(singular_values[0] / singular_values[-1])
+    if not math.isfinite(scaled_jacobian_condition):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+    late_diagnostics = {
+        "scaled_jacobian_rank": scaled_jacobian_rank,
+        "scaled_jacobian_condition": scaled_jacobian_condition,
+        **fitted_diagnostics,
+        **solver_diagnostics,
+    }
+    if scaled_jacobian_condition > configuration.max_scaled_jacobian_condition:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="ill_conditioned",
+            **late_diagnostics,
+        )
+
+    resolved_amplitude = max(
+        configuration.min_resolved_amplitude_source_ratio * a0,
+        source.fit_configuration.min_resolved_amplitude,
     )
-    for count, observation in enumerate(frozen_observations[1:], start=2):
-        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
-        public_reference_timestamp_s = public_reference_timestamp_s + (
-            midpoint_s - public_reference_timestamp_s
-        ) / count
-    fit_cpu_time_s = (time.process_time_ns() - started_ns) / 1_000_000_000.0
-    return SparseLinewidthScanResult(
-        scan_index=first_query.scan_index,
-        identity_scan_index=first_query.identity_scan_index,
-        resonance_id=first_query.resonance_id,
-        frozen_fast_center_hz=first_query.frozen_fast_center_hz,
-        frozen_fast_center_source_kind=first_query.frozen_fast_center_source_kind,
-        frozen_fast_center_source_pair_index=(
-            first_query.frozen_fast_center_source_pair_index
-        ),
-        frozen_fast_center_reference_timestamp_s=(
-            first_query.frozen_fast_center_reference_timestamp_s
-        ),
-        frozen_fast_center_release_sequence_index=(
-            first_query.frozen_fast_center_release_sequence_index
-        ),
-        frozen_fast_center_release_timestamp_s=(
-            first_query.frozen_fast_center_release_timestamp_s
-        ),
-        frozen_prior_fwhm_hz=first_query.frozen_prior_fwhm_hz,
-        frozen_fwhm_source_kind=first_query.frozen_fwhm_source_kind,
-        frozen_fwhm_source_scan_index=first_query.frozen_fwhm_source_scan_index,
-        frozen_fwhm_reference_timestamp_s=(
-            first_query.frozen_fwhm_reference_timestamp_s
-        ),
-        frozen_fwhm_release_sequence_index=(
-            first_query.frozen_fwhm_release_sequence_index
-        ),
-        frozen_fwhm_release_timestamp_s=(
-            first_query.frozen_fwhm_release_timestamp_s
-        ),
+    if fitted_amplitude < resolved_amplitude:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="amplitude_unresolved",
+            **late_diagnostics,
+        )
+    if amplitude_normalized_rmse > configuration.max_amplitude_normalized_rmse:
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="residual_quality_failed",
+            **late_diagnostics,
+        )
+
+    fitted_q = _derive_fitted_q(fitted_local_center_hz, fitted_fwhm_hz)
+    if not math.isfinite(fitted_q):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
+    return _finish_sparse_fit(
+        started_ns=started_ns,
         queries=frozen_queries,
         observations=frozen_observations,
         public_reference_timestamp_s=public_reference_timestamp_s,
-        release_sequence_index=frozen_observations[-1].sequence_index,
-        release_timestamp_s=frozen_observations[-1].timestamp_s,
         status="success",
         failure_code=None,
-        fitted_center_correction_hz=fitted_center_correction_hz,
-        fitted_local_center_hz=fitted_local_center_hz,
-        fitted_fwhm_hz=fitted_fwhm_hz,
-        fitted_amplitude=fitted_amplitude,
-        fitted_baseline_offset=fitted_baseline_offset,
         fitted_q=fitted_q,
-        rmse=rmse,
-        amplitude_normalized_rmse=amplitude_normalized_rmse,
-        scaled_jacobian_rank=scaled_jacobian_rank,
-        scaled_jacobian_condition=scaled_jacobian_condition,
-        scipy_status=int(optimization.status),
-        scipy_message=str(optimization.message),
-        nfev=int(optimization.nfev),
-        fit_cpu_time_s=fit_cpu_time_s,
+        **late_diagnostics,
     )

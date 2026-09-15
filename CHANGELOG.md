@@ -10,6 +10,15 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's exact ordered sparse-fit outcome gates and diagnostic
+  presence rows. Returned optimizer status/count, malformed/non-finite
+  solutions, scaled bound margin, rank, condition, resolved amplitude, and
+  residual quality now retain their first-applicable scientific result;
+  equality and adjacent-ULP boundaries, one-SVD reuse, arrival-order binary64
+  RMSE, and finite signed/zero scan Q are regression-pinned. Raised programming
+  and process-control exceptions remain exceptions, nonrepresentable Q is a
+  scientific non-finite solution, and every completed scan samples finite
+  nonnegative process CPU before public result construction.
 - Added Stage 6.4's isolated sparse local-fit success path: one bounded TRF
   attempt in exact dimensionless variables fits only target center correction,
   FWHM, amplitude, and constant baseline offset while preserving target eta,
