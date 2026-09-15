@@ -25,7 +25,7 @@ from odmr_bench.estimators.two_point_calibration import (
     _evaluate_target_only_model,
     _target_center_derivative,
 )
-from odmr_bench.models import Baseline, Resonance
+from odmr_bench.models import Baseline, Resonance, multi_resonance_spectrum
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_source_fit,
@@ -185,6 +185,57 @@ def test_bound_source_extraction_preserves_legacy_scalar_model_bit_pattern(
     assert np.asarray(extracted, dtype=np.float64).tobytes() == np.asarray(
         legacy, dtype=np.float64
     ).tobytes()
+
+
+def test_unchanged_scalar_bound_source_model_matches_canonical_query_bytes() -> None:
+    source_fit, target_index = _model_fixture()
+    target = source_fit.resonance_estimates[target_index]
+    frequency_hz = target.center_hz - 0.35 * target.fwhm_hz
+
+    actual = _evaluate_bound_source_model(
+        frequency_hz,
+        SimpleNamespace(source_fit=source_fit),
+        target.resonance_id,
+        center_hz=target.center_hz,
+        fwhm_hz=target.fwhm_hz,
+        amplitude=target.amplitude,
+        baseline_offset=0.0,
+    )
+    expected = multi_resonance_spectrum(
+        np.asarray([frequency_hz], dtype=np.float64),
+        source_fit.resonance_estimates,
+        source_fit.baseline_estimate,
+    )[0]
+
+    assert actual.shape == ()
+    assert float(actual) == float(expected)
+    assert actual.tobytes() == np.asarray(expected, dtype=np.float64).tobytes()
+
+
+def test_scalar_bound_source_model_does_not_use_a_distinct_libm_profile(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_fit, target_index = _model_fixture()
+    target = source_fit.resonance_estimates[target_index]
+    frequency_hz = target.center_hz - 0.35 * target.fwhm_hz
+    expected = multi_resonance_spectrum(
+        np.asarray([frequency_hz], dtype=np.float64),
+        source_fit.resonance_estimates,
+        source_fit.baseline_estimate,
+    )[0]
+
+    monkeypatch.setattr(calibration_module.math, "exp", lambda value: 0.0)
+    actual = _evaluate_bound_source_model(
+        frequency_hz,
+        SimpleNamespace(source_fit=source_fit),
+        target.resonance_id,
+        center_hz=target.center_hz,
+        fwhm_hz=target.fwhm_hz,
+        amplitude=target.amplitude,
+        baseline_offset=0.0,
+    )
+
+    assert actual.tobytes() == np.asarray(expected, dtype=np.float64).tobytes()
 
 
 @pytest.mark.parametrize("target_index", (-1, 8, "not-an-index"))

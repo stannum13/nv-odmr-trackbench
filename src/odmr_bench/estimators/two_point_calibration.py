@@ -33,7 +33,7 @@ from odmr_bench.estimators.types import (
     FitInitialGuess,
     SpectrumFitResult,
 )
-from odmr_bench.models import Resonance
+from odmr_bench.models import Resonance, pseudo_voigt
 
 _VERIFIED_SOURCE_CONSTRUCTION_KEY: object = object()
 _VERIFIED_SOURCE_CONSTRUCTION_IDENTITIES: dict[int, TwoPointCalibrationSource] = {}
@@ -168,36 +168,10 @@ def _evaluate_bound_source_fit_model(
 ) -> NDArray[np.float64]:
     """Evaluate one mutable line against an otherwise frozen source fit."""
     frequency = np.asarray(frequency_hz, dtype=np.float64)
-    if frequency.ndim == 0:
-        scalar_frequency_hz = float(frequency)
-        fluorescence = float(
-            source_fit.baseline_estimate.evaluate(scalar_frequency_hz)
-        )
-        if baseline_offset != 0.0:
-            fluorescence += baseline_offset
-        for index, resonance in enumerate(source_fit.resonance_estimates):
-            evaluated_center_hz = (
-                center_hz if index == target_index else resonance.center_hz
-            )
-            evaluated_fwhm_hz = (
-                resonance.fwhm_hz
-                if index != target_index or fwhm_hz is None
-                else fwhm_hz
-            )
-            evaluated_amplitude = (
-                resonance.amplitude
-                if index != target_index or amplitude is None
-                else amplitude
-            )
-            u = (scalar_frequency_hz - evaluated_center_hz) / evaluated_fwhm_hz
-            profile = resonance.eta / (1.0 + 4.0 * u * u) + (
-                1.0 - resonance.eta
-            ) * math.exp(-4.0 * math.log(2.0) * u * u)
-            fluorescence -= evaluated_amplitude * profile
-        return np.asarray(fluorescence, dtype=np.float64)
-
+    scalar_query = frequency.ndim == 0
+    evaluation_frequency = frequency.reshape(1) if scalar_query else frequency
     fluorescence = np.asarray(
-        source_fit.baseline_estimate.evaluate(frequency), dtype=np.float64
+        source_fit.baseline_estimate.evaluate(evaluation_frequency), dtype=np.float64
     )
     if baseline_offset != 0.0:
         fluorescence = fluorescence + baseline_offset
@@ -215,12 +189,14 @@ def _evaluate_bound_source_fit_model(
             if index != target_index or amplitude is None
             else amplitude
         )
-        u = (frequency - evaluated_center_hz) / evaluated_fwhm_hz
-        profile = resonance.eta / (1.0 + 4.0 * u * u) + (
-            1.0 - resonance.eta
-        ) * np.exp(-4.0 * np.log(2.0) * u * u)
-        fluorescence = fluorescence - evaluated_amplitude * profile
-    return np.asarray(fluorescence, dtype=np.float64)
+        fluorescence = fluorescence - evaluated_amplitude * pseudo_voigt(
+            evaluation_frequency,
+            evaluated_center_hz,
+            evaluated_fwhm_hz,
+            resonance.eta,
+        )
+    result = np.asarray(fluorescence, dtype=np.float64)
+    return result.reshape(()) if scalar_query else result
 
 
 def _evaluate_bound_source_model(
