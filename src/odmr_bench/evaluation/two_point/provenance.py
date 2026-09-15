@@ -14,7 +14,17 @@ from odmr_bench.evaluation.two_point.types import (
 )
 
 if TYPE_CHECKING:
+    from odmr_bench.evaluation.sparse_linewidth.runner import (
+        SparseLinewidthEvaluatorRunner,
+    )
+
     from .runner import TwoPointEvaluatorRunner
+
+    _RegisteredEvaluatorRunner = (
+        TwoPointEvaluatorRunner | SparseLinewidthEvaluatorRunner
+    )
+else:
+    _RegisteredEvaluatorRunner = object
 
 _TOKEN_CONSTRUCTION_KEY: object = object()
 _MINTED_RUN_TOKEN_IDENTITIES: dict[int, VerifiedInstrumentRunToken] = {}
@@ -24,7 +34,7 @@ _MINTED_RUN_TOKEN_IDENTITIES: dict[int, VerifiedInstrumentRunToken] = {}
 class _RunTokenBinding:
     """Exact in-process identities associated with one runner-issued token."""
 
-    issuer_runner: TwoPointEvaluatorRunner
+    issuer_runner: _RegisteredEvaluatorRunner
     instrument: ODMRInstrument
     instrument_configuration: TwoPointEvaluatorInstrumentConfiguration
     success: VerifiedTwoPointCalibrationSuccess | None
@@ -32,6 +42,121 @@ class _RunTokenBinding:
 
 
 _RUN_TOKEN_BINDINGS: dict[VerifiedInstrumentRunToken, _RunTokenBinding] = {}
+
+
+class _VerifiedCalibrationIssuer:
+    """Unforgeable in-process capability for one exact registered runner."""
+
+    __slots__ = (
+        "_instrument",
+        "_instrument_configuration",
+        "_run_token",
+        "_runner",
+    )
+
+    def __new__(cls) -> _VerifiedCalibrationIssuer:
+        raise TypeError("private verified calibration issuer cannot be constructed")
+
+    def __init_subclass__(cls, **kwargs: object) -> None:
+        del kwargs
+        raise TypeError("private verified calibration issuer may not be subclassed")
+
+    def __copy__(self) -> _VerifiedCalibrationIssuer:
+        raise TypeError("private verified calibration issuer cannot be copied")
+
+    def __deepcopy__(self, memo: object) -> _VerifiedCalibrationIssuer:
+        del memo
+        raise TypeError("private verified calibration issuer cannot be copied")
+
+    def __reduce__(self) -> object:
+        raise TypeError("private verified calibration issuer cannot be serialized")
+
+
+_VERIFIED_CALIBRATION_ISSUERS: dict[object, _VerifiedCalibrationIssuer] = {}
+_VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS: dict[
+    VerifiedInstrumentRunToken, tuple[_VerifiedCalibrationIssuer, object]
+] = {}
+
+
+def _registered_runner_types() -> tuple[type[object], type[object]]:
+    """Resolve the closed runner allowlist after both classes are defined."""
+    from odmr_bench.evaluation.sparse_linewidth.runner import (
+        SparseLinewidthEvaluatorRunner,
+    )
+
+    from .runner import TwoPointEvaluatorRunner
+
+    return TwoPointEvaluatorRunner, SparseLinewidthEvaluatorRunner
+
+
+def _is_exact_registered_runner(runner: object) -> bool:
+    return type(runner) in _registered_runner_types()
+
+
+def _mint_verified_calibration_issuer(
+    runner: _RegisteredEvaluatorRunner,
+    instrument: ODMRInstrument,
+    token: VerifiedInstrumentRunToken,
+    instrument_configuration: TwoPointEvaluatorInstrumentConfiguration,
+) -> None:
+    issuer = object.__new__(_VerifiedCalibrationIssuer)
+    object.__setattr__(issuer, "_runner", runner)
+    object.__setattr__(issuer, "_instrument", instrument)
+    object.__setattr__(issuer, "_run_token", token)
+    object.__setattr__(
+        issuer, "_instrument_configuration", instrument_configuration
+    )
+    _VERIFIED_CALIBRATION_ISSUERS[runner] = issuer
+    _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS[token] = (issuer, runner)
+
+
+def _lookup_verified_calibration_issuer(
+    runner: object,
+) -> _VerifiedCalibrationIssuer:
+    """Return authority only for the exact live registered runner identity."""
+    if not _is_exact_registered_runner(runner):
+        raise TypeError("issuer requires a registered exact runner")
+    issuer = _VERIFIED_CALIBRATION_ISSUERS.get(runner)
+    try:
+        state = runner._state
+        instrument = runner._instrument
+    except AttributeError:
+        raise TypeError("issuer requires a registered exact runner") from None
+    binding = _RUN_TOKEN_BINDINGS.get(state.run_token)
+    registration = _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS.get(
+        state.run_token
+    )
+    if (
+        type(issuer) is not _VerifiedCalibrationIssuer
+        or issuer._runner is not runner
+        or issuer._instrument is not instrument
+        or issuer._run_token is not state.run_token
+        or issuer._instrument_configuration is not state.instrument_configuration
+        or registration is None
+        or registration[0] is not issuer
+        or registration[1] is not runner
+        or binding is None
+        or binding.issuer_runner is not runner
+        or binding.instrument is not instrument
+        or binding.instrument_configuration is not state.instrument_configuration
+    ):
+        raise TypeError("issuer requires a registered exact runner")
+    return issuer
+
+
+def _runner_from_verified_calibration_issuer(
+    issuer: _VerifiedCalibrationIssuer,
+) -> _RegisteredEvaluatorRunner:
+    """Authenticate every issuer-held identity against the live registries."""
+    if type(issuer) is not _VerifiedCalibrationIssuer:
+        raise TypeError("issuer requires a registered exact runner")
+    try:
+        runner = issuer._runner
+    except AttributeError:
+        raise TypeError("issuer requires a registered exact runner") from None
+    if _lookup_verified_calibration_issuer(runner) is not issuer:
+        raise TypeError("issuer requires a registered exact runner")
+    return runner
 
 
 def _mint_verified_instrument_run_token(
@@ -47,17 +172,15 @@ def _mint_verified_instrument_run_token(
 
 def _register_run_token(
     token: VerifiedInstrumentRunToken,
-    issuer_runner: TwoPointEvaluatorRunner,
+    issuer_runner: _RegisteredEvaluatorRunner,
     instrument: ODMRInstrument,
     instrument_configuration: TwoPointEvaluatorInstrumentConfiguration,
 ) -> None:
     """Register the initial exact issuer/instrument identity for one token."""
-    from .runner import TwoPointEvaluatorRunner
-
     if type(token) is not VerifiedInstrumentRunToken:
         raise TypeError("token must be an exact VerifiedInstrumentRunToken")
-    if type(issuer_runner) is not TwoPointEvaluatorRunner:
-        raise TypeError("issuer_runner must be an exact TwoPointEvaluatorRunner")
+    if not _is_exact_registered_runner(issuer_runner):
+        raise TypeError("issuer_runner must be a registered exact runner type")
     if type(instrument) is not ODMRInstrument:
         raise TypeError("instrument must be an exact ODMRInstrument")
     if type(
@@ -88,6 +211,12 @@ def _register_run_token(
         success=None,
         source=None,
     )
+    _mint_verified_calibration_issuer(
+        issuer_runner,
+        instrument,
+        token,
+        instrument_configuration,
+    )
 
 
 def _rollback_run_token_registration(
@@ -96,7 +225,12 @@ def _rollback_run_token_registration(
     """Unconditionally revoke one freshly minted bind-attempt token."""
     if _MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is token:
         del _MINTED_RUN_TOKEN_IDENTITIES[id(token)]
-    _RUN_TOKEN_BINDINGS.pop(token, None)
+    binding = _RUN_TOKEN_BINDINGS.pop(token, None)
+    registration = _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS.pop(token, None)
+    if registration is not None:
+        _VERIFIED_CALIBRATION_ISSUERS.pop(registration[1], None)
+    elif binding is not None:
+        _VERIFIED_CALIBRATION_ISSUERS.pop(binding.issuer_runner, None)
 
 
 def _lookup_run_token_binding(
@@ -110,7 +244,7 @@ def _lookup_run_token_binding(
 
 def _snapshot_run_token_binding_before_success(
     token: VerifiedInstrumentRunToken,
-    issuer_runner: TwoPointEvaluatorRunner,
+    issuer_runner: _RegisteredEvaluatorRunner,
     instrument: ODMRInstrument,
 ) -> _RunTokenBinding:
     """Copy the trusted empty binding before a success-bind transaction."""
@@ -136,7 +270,7 @@ def _snapshot_run_token_binding_before_success(
 
 def _bind_run_token_success(
     token: VerifiedInstrumentRunToken,
-    issuer_runner: TwoPointEvaluatorRunner,
+    issuer_runner: _RegisteredEvaluatorRunner,
     instrument: ODMRInstrument,
     success: VerifiedTwoPointCalibrationSuccess,
 ) -> None:
@@ -145,12 +279,10 @@ def _bind_run_token_success(
         _consume_verified_source_construction_identity,
     )
 
-    from .runner import TwoPointEvaluatorRunner
-
     if type(token) is not VerifiedInstrumentRunToken:
         raise TypeError("token must be an exact VerifiedInstrumentRunToken")
-    if type(issuer_runner) is not TwoPointEvaluatorRunner:
-        raise TypeError("issuer_runner must be an exact TwoPointEvaluatorRunner")
+    if not _is_exact_registered_runner(issuer_runner):
+        raise TypeError("issuer_runner must be a registered exact runner type")
     if type(instrument) is not ODMRInstrument:
         raise TypeError("instrument must be an exact ODMRInstrument")
     if type(success) is not VerifiedTwoPointCalibrationSuccess:

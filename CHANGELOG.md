@@ -10,6 +10,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added the Stage 6.4 sparse evaluator runner shell and runner-neutral verified
+  calibration authority. The shell has the exact planned public signatures,
+  binds only an exact clean instrument into an immutable `ready` state, and
+  leaves later transitions as typed placeholders. Both evaluator runners now
+  register exact live instances and delegate Stage 6.3 calibration through an
+  unforgeable issuer joined to runner, instrument, token, and configuration
+  identities; construction, subclass, copy, serialization, forged-allocation,
+  detached-identity, and rollback attacks are rejected without changing any
+  Stage 6.3 public trace or resource behavior. Full sparse exports remain
+  deferred to the dedicated publication task.
 - Closed the revised Stage 6.4 Task 11 resource-cardinality finding. Sparse
   evaluator resources now require fast and sparse incomplete counts to equal
   their accepted tuple remainders modulo two and five, respectively, and the

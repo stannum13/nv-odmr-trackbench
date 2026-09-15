@@ -35,7 +35,9 @@ from odmr_bench.evaluation.two_point.provenance import (
     _bind_run_token_success,
     _lookup_run_token_binding,
     _rollback_run_token_success,
+    _runner_from_verified_calibration_issuer,
     _snapshot_run_token_binding_before_success,
+    _VerifiedCalibrationIssuer,
 )
 from odmr_bench.evaluation.two_point.resource_accounting import (
     _advance_full_resources,
@@ -56,7 +58,16 @@ from odmr_bench.evaluation.two_point.types import (
 )
 
 if TYPE_CHECKING:
+    from odmr_bench.evaluation.sparse_linewidth.runner import (
+        SparseLinewidthEvaluatorRunner,
+    )
     from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
+
+    _RegisteredEvaluatorRunner = (
+        TwoPointEvaluatorRunner | SparseLinewidthEvaluatorRunner
+    )
+else:
+    _RegisteredEvaluatorRunner = object
 
 _RESOURCE_MISMATCH_FIELD_ORDER = cast(
     tuple[ResourceJoinMismatchField, ...],
@@ -101,7 +112,7 @@ def _safe_exception_strings(error: Exception) -> tuple[str, str]:
 
 
 def _capture_started_instrument_boundary(
-    runner: TwoPointEvaluatorRunner,
+    runner: _RegisteredEvaluatorRunner,
 ) -> tuple[_InstrumentBoundary | None, tuple[str, str] | None]:
     """Capture one fresh pair without retrying an ordinary fault forever."""
     first_exception_strings = None
@@ -120,7 +131,7 @@ def _capture_started_instrument_boundary(
 
 
 def _finish_calibration_failure(
-    runner: TwoPointEvaluatorRunner,
+    runner: _RegisteredEvaluatorRunner,
     state_before: TwoPointEvaluatorRunnerState,
     *,
     failure_code: VerifiedCalibrationFailureCode,
@@ -215,7 +226,7 @@ def _sequence_index_from_resources(
 
 
 def _prepare_verified_calibration(
-    runner: TwoPointEvaluatorRunner,
+    runner: _RegisteredEvaluatorRunner,
     frequency_hz: Sequence[float],
     integration_time_s: float,
     fit_configuration: FitConfiguration,
@@ -374,8 +385,8 @@ def _prepare_verified_calibration(
     )
 
 
-def _acquire_verified_calibration(
-    runner: TwoPointEvaluatorRunner,
+def _acquire_verified_calibration_core(
+    issuer: _VerifiedCalibrationIssuer,
     frequency_hz: Sequence[float],
     integration_time_s: float,
     fit_configuration: FitConfiguration,
@@ -387,6 +398,7 @@ def _acquire_verified_calibration(
     source_to_tracker_offset_s: float,
     physical_fit_epoch_rule: Literal["instrument_midpoint_ordered_mean"],
 ) -> VerifiedTwoPointCalibrationOutcome:
+    runner = _runner_from_verified_calibration_issuer(issuer)
     plan = _prepare_verified_calibration(
         runner,
         frequency_hz,

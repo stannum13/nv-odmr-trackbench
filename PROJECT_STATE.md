@@ -6,14 +6,14 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–10 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–12 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
 application, live projection, independent epochs, resources, and update CPU.
 Pure fit geometry remains separate from scheduler-owned query clocks, and
-evaluator value types still precede the sparse runner class that enables exact
-calibration authority.
+evaluator value types, the exact sparse runner shell/clean bind boundary, and
+runner-neutral exact-identity verified-calibration authority.
 Calibration/start, initial resources, accepted resource integration, and
 terminal behavior then form a forward-only runner chain. Production truth
 lookup and public linewidth-dynamics additions remain absent: release-gated
@@ -76,6 +76,26 @@ sparse count to equal the accepted-sparse tuple remainder modulo five, and the
 unaccepted count to equal the unaccepted tuple length. Exact tuple-type, count-
 range, and mutual-exclusion precedence is preserved; resource replay,
 accepted-stream partitioning, and trace/timing joins remain deferred.
+The pushed Task 11 review head `1595c9c` passed the complete native GitHub
+Linux x86 matrix on Python 3.11 and Python 3.12 (run 35027274372).
+
+Task 12 adds the exact seven-signature `SparseLinewidthEvaluatorRunner` shell.
+Binding accepts only an exact clean virtual instrument, snapshots its immutable
+configuration and zero resource boundary into a frozen `ready` state, mints one
+registered token, and exposes state read-only; calibration/start and tracking
+transitions remain explicit typed placeholders for Tasks 13 and 15–16. The
+private verified-calibration transaction is now runner-neutral and accepts only
+an unforgeable issuer authenticated against exact runner, instrument, token,
+and configuration identities. Registration exact-allowlists the live two-point
+and sparse runner classes rather than forward names. Public construction,
+subclassing, copying, serialization, `object.__new__`, detached identities,
+unregistered exact instances, and runner subclasses cannot obtain authority.
+Token-indexed revocation remains correct even if a commit-then-raise path
+mutates both the public binding record and issuer slots. The Stage 6.3 runner
+now delegates through this issuer without changing any public signature,
+calibration outcome, resource, rollback, or tracking trace. The sparse package
+`__all__` intentionally remains the Task 11 value surface until Task 19 owns
+the complete public export expansion.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -983,6 +1003,13 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 12 focused sparse shell plus complete Stage 6.3 calibration/
+  runner compatibility gate: 152 passed.
+- Stage 6.4 Task 12 focused sparse value/shell plus complete Stage 6.3
+  calibration/runner gate: 176 passed.
+- Stage 6.4 Task 12 estimator/evaluation/emulator gate: 1,610 passed.
+- Stage 6.4 Task 12 full repository gate: 1,711 passed.
+- Stage 6.4 Task 12 Ruff gate: All checks passed.
 - Stage 6.4 Task 11 revised-review focused evaluator contract gate: 24 passed.
 - Stage 6.4 Task 11 revised-review compatibility contract gate: 185 passed.
 - Stage 6.4 Task 11 revised-review estimator/evaluation/emulator gate: 1,599
@@ -1109,10 +1136,14 @@ superiority result.
   legal resource equality/treatment branch, isolated abort join, seven-phase
   over/under-validation branch, or equal-but-distinct outcome identity join;
   independent review found the production contracts conformant.
+- The Stage 6.4 sparse evaluator runner currently implements only clean bind,
+  immutable `ready` state, and typed unsupported-phase rejection. Verified
+  sparse calibration/start, acquisition/resource integration, and terminal
+  transitions remain Tasks 13–16.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 12's sparse runner shell and runner-neutral
-   calibration authority without adding later transition behavior early.
+1. Continue Stage 6.4 with Task 13's verified sparse calibration acquisition
+   and tracking start, delegating only through Task 12's exact issuer.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

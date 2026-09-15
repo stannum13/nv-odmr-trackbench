@@ -31,6 +31,7 @@ from odmr_bench.estimators.types import FitConfiguration
 from odmr_bench.evaluation.two_point.provenance import (
     _TOKEN_CONSTRUCTION_KEY,
     _lookup_run_token_binding,
+    _lookup_verified_calibration_issuer,
     _mint_verified_instrument_run_token,
     _register_run_token,
     _rollback_run_token_registration,
@@ -181,11 +182,11 @@ class TwoPointEvaluatorRunner:
     ) -> VerifiedTwoPointCalibrationOutcome:
         """Acquire one lossless verified sweep or typed causal failure."""
         from odmr_bench.evaluation.two_point.calibration import (
-            _acquire_verified_calibration,
+            _acquire_verified_calibration_core,
         )
 
-        return _acquire_verified_calibration(
-            self,
+        return _acquire_verified_calibration_core(
+            _lookup_verified_calibration_issuer(self),
             frequency_hz,
             integration_time_s,
             fit_configuration,

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import pickle
 from dataclasses import replace
 
 import pytest
@@ -118,6 +119,86 @@ def _valid_calibration_arguments() -> dict[str, object]:
         "source_to_tracker_offset_s": 0.0,
         "physical_fit_epoch_rule": "instrument_midpoint_ordered_mean",
     }
+
+
+def test_verified_calibration_issuer_rejects_forgery_and_transfer() -> None:
+    from odmr_bench.evaluation.two_point.calibration import (
+        _acquire_verified_calibration_core,
+    )
+    from odmr_bench.evaluation.two_point.provenance import (
+        _lookup_verified_calibration_issuer,
+        _VerifiedCalibrationIssuer,
+    )
+
+    runner = TwoPointEvaluatorRunner.bind(_instrument())
+    issuer = _lookup_verified_calibration_issuer(runner)
+    assert type(issuer) is _VerifiedCalibrationIssuer
+
+    with pytest.raises(TypeError, match="private verified calibration issuer"):
+        _VerifiedCalibrationIssuer()
+    with pytest.raises(TypeError, match="may not be subclassed"):
+        type("IssuerSubclass", (_VerifiedCalibrationIssuer,), {})
+    with pytest.raises(TypeError):
+        copy.copy(issuer)
+    with pytest.raises(TypeError):
+        copy.deepcopy(issuer)
+    with pytest.raises((TypeError, pickle.PicklingError)):
+        pickle.dumps(issuer)
+
+    forged = object.__new__(_VerifiedCalibrationIssuer)
+    with pytest.raises(TypeError, match="registered exact runner"):
+        _acquire_verified_calibration_core(
+            forged,
+            **_valid_calibration_arguments(),  # type: ignore[arg-type]
+        )
+
+
+@pytest.mark.parametrize(
+    "mismatch",
+    ["runner", "instrument", "token", "configuration"],
+)
+def test_verified_calibration_issuer_requires_all_registered_exact_identities(
+    mismatch: str,
+) -> None:
+    from odmr_bench.evaluation.two_point.calibration import (
+        _acquire_verified_calibration_core,
+    )
+    from odmr_bench.evaluation.two_point.provenance import (
+        _lookup_verified_calibration_issuer,
+    )
+
+    runner = TwoPointEvaluatorRunner.bind(_instrument())
+    issuer = _lookup_verified_calibration_issuer(runner)
+    if mismatch == "runner":
+        other_runner = TwoPointEvaluatorRunner.bind(_instrument())
+        object.__setattr__(issuer, "_runner", other_runner)
+    elif mismatch == "instrument":
+        object.__setattr__(issuer, "_instrument", _instrument())
+    elif mismatch == "token":
+        other = TwoPointEvaluatorRunner.bind(_instrument())
+        object.__setattr__(issuer, "_run_token", other.state.run_token)
+    else:
+        object.__setattr__(
+            issuer,
+            "_instrument_configuration",
+            TwoPointEvaluatorInstrumentConfiguration(1.0, 0.0),
+        )
+
+    with pytest.raises(TypeError, match="registered exact runner"):
+        _acquire_verified_calibration_core(
+            issuer,
+            **_valid_calibration_arguments(),  # type: ignore[arg-type]
+        )
+
+
+def test_verified_calibration_issuer_rejects_unregistered_exact_runner() -> None:
+    from odmr_bench.evaluation.two_point.provenance import (
+        _lookup_verified_calibration_issuer,
+    )
+
+    unregistered = object.__new__(TwoPointEvaluatorRunner)
+    with pytest.raises(TypeError, match="registered exact runner"):
+        _lookup_verified_calibration_issuer(unregistered)
 
 
 @pytest.mark.parametrize(
@@ -1751,15 +1832,19 @@ def test_bind_rollback_revokes_fresh_token_after_binding_mutation(
     instrument = _instrument()
     original_register = runner_module._register_run_token
     captured_tokens: list[object] = []
+    captured_runners: list[object] = []
 
     def mutate_binding_then_fail(*args: object, **kwargs: object) -> None:
         original_register(*args, **kwargs)
         token = args[0]
         captured_tokens.append(token)
+        captured_runners.append(args[1])
         binding = _lookup_run_token_binding(token)
         assert binding is not None
+        issuer = provenance_module._lookup_verified_calibration_issuer(args[1])
         object.__setattr__(binding, "issuer_runner", object())
         object.__setattr__(binding, "instrument", object())
+        object.__setattr__(issuer, "_runner", object())
         raise RuntimeError("registration binding mutated after commit")
 
     monkeypatch.setattr(
@@ -1773,6 +1858,11 @@ def test_bind_rollback_revokes_fresh_token_after_binding_mutation(
     token = captured_tokens[0]
     assert _lookup_run_token_binding(token) is None
     assert provenance_module._MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is not token
+    assert len(captured_runners) == 1
+    with pytest.raises(TypeError, match="registered exact runner"):
+        provenance_module._lookup_verified_calibration_issuer(
+            captured_runners[0]
+        )
 
 
 def test_success_rollback_restores_trusted_prebind_binding_after_registry_mutation(
