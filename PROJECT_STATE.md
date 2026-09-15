@@ -361,6 +361,30 @@ endpoint or ledger corruption. A focused four-point regression pins both hex
 witnesses and the exact instrument midpoint sequence.
 The bounded independent review of this owning timing fix reported zero
 Critical, Important, or Minor findings.
+Task 18 closes the generated scientific acceptance boundary for the calibrated
+two-point center tracker. A checked 4,481-point pseudo-Voigt source fit now
+anchors exact source endpoint, actual/public midpoint, physical/public epoch,
+clock-mapping, and acquisition-resource witnesses. Separate matched fixtures
+cover two noiseless static cycles, seeded Poisson reproducibility without an
+accuracy claim, thirty cycles of common linear center drift, deterministic r3
+contrast loss and recovery, and continuous included-same-run accounting.
+Truth scoring owns a separate dynamics instance, occurs exactly once per
+completed pair only after release, rejects pre-release and duplicate access,
+and pins the pair-3 neighboring-binary64 actual/public reference distinction.
+Identity-cycle-safe traversal of the exact tracker object, dataclass fields,
+instance dictionaries, inherited slots, and built-in containers confirms no
+full observation, snapshot, dynamics, truth oracle, future record, or
+evaluator-only expected-photon field/capability is reachable; a forbidden-slot
+mutation sentinel proves this test is non-vacuous. The static fixture pins all
+32 query frequencies/sides/endpoints plus exact source ages and unchanged
+centers. The loss fixture proves pair 11 is the only lost/common-mode-limited
+pair, all eight calibration cells (including r3) remain unchanged, and r3
+recovers at pair 19.
+These are fixed synthetic regression guards, not benchmark results or evidence
+that the chosen policy is optimal. Task 18's first independent review found
+three Important assertion-strength gaps and no Critical or Minor findings; all
+three received isolated test-only corrections. The final bounded independent
+re-review reported zero Critical, Important, or Minor findings.
 
 ## Completed work
 
@@ -654,9 +678,12 @@ Critical, Important, or Minor findings.
 
 ## Tests currently passing
 
-- Tracked repository test suite plus the owning timing regression: 1197 passed.
-- Task 18's 4,481-point verified-source witness passes; two other uncommitted
-  Task 18 truth-oracle acceptance rows remain under Task 18 ownership.
+- Full repository suite with all seven Task 18 acceptance regressions: 1204
+  passed.
+- Task 18 acceptance file: 7 passed on each of two consecutive complete runs;
+  its static exact-schedule node also passed twice independently.
+- Dynamics, models, estimators, evaluator, and emulator focused integration
+  gate: 1161 passed.
 - Task 17 runner file: 78 passed.
 - Task 17 named protocol matrix: 60 passed.
 - Ruff across every tracked Python file: All checks passed.
@@ -712,6 +739,6 @@ Critical, Important, or Minor findings.
 
 ## Next actions
 
-1. Implement Task 18 closed generated scientific acceptance and truth
-   isolation.
-2. Run the Task 18 per-task specification and quality review.
+1. Implement Task 19 public documentation, example, exports, build, and wheel
+   smoke.
+2. Run the Task 19 per-task specification and quality review.

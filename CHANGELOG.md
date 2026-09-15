@@ -77,6 +77,23 @@ once a package version is introduced.
 
 ### Added
 
+- Added seven closed generated scientific acceptance regressions for the
+  calibrated two-point tracker. The exact 4,481-point source fixture freezes
+  pseudo-Voigt model/configuration values, seeds, acquisition settings,
+  binary64 endpoint/midpoint/epoch witnesses, and lossless source resources.
+  Static, Poisson, common-drift, contrast-loss/recovery, and continuous
+  included-same-run cases pin causal schedules and budgets without presenting
+  the fixed synthetic bounds as experimental or comparative results. Truth
+  scoring uses a separate hidden-dynamics instance exactly once per released
+  pair, rejects pre-release and duplicate lookup, preserves the pair-3
+  actual/public timing distinction, and verifies that tracker-retained graphs
+  contain no full observations, hidden snapshots/dynamics, truth oracle,
+  future record, or evaluator-only expected-photon capability. Review
+  hardening traverses the exact tracker plus all retained dataclass, dictionary,
+  inherited-slot, and container edges with a non-vacuous forbidden-slot
+  sentinel; freezes every static query frequency, side, endpoint, center, and
+  age; and proves pair 11 alone triggers loss/common-mode limiting while every
+  calibration cell remains unchanged and r3 recovers at pair 19.
 - Completed the two-point evaluator runner terminal protocol. Pair-boundary
   budget exhaustion and explicit caller stops now return lossless resource
   summaries without another acquisition; external stops preserve partial,
