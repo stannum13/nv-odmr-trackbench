@@ -20,6 +20,11 @@ once a package version is introduced.
 
 ### Fixed
 
+- Completed the final Stage 6.4 Task 2 record-contract review: incomplete fast
+  and sparse blocks are authenticated against their scheduled identity before a
+  post-update snapshot can clear its pending query, including sparse frozen
+  source/epoch snapshots, acquisition/sequence continuity, and continuation
+  joins. The full ordered fit-diagnostic presence matrix is now covered.
 - Completed the second Stage 6.4 Task 2 record-contract review: sparse
   acquisitions are contiguous and aggregate traces retain their declared
   acquisition order; empty accepted traces may retain their available reset

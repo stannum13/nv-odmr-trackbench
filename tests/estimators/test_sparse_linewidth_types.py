@@ -36,7 +36,11 @@ from tests.sparse_linewidth_helpers import (
     make_scan_result,
     make_sparse_query,
 )
-from tests.two_point_helpers import make_legal_pair_result
+from tests.two_point_helpers import (
+    make_legal_pair_result,
+    make_legal_partial_pair,
+    make_legal_query,
+)
 
 
 def _ordered_mean(values: tuple[float, ...]) -> float:
@@ -275,6 +279,131 @@ def test_pending_sparse_query_must_extend_partial_acquisition_sequence() -> None
             sparse_tracking_resources=one,
             tracking_resources=one,
             charged_resources=one,
+        )
+
+
+def _one_fast_partial_estimate(*, resonance_id: str, pending: bool) -> object:
+    partial = make_legal_partial_pair()
+    first_query = replace(partial.first_query, resonance_id=resonance_id)
+    first_observation = replace(
+        partial.first_observation, frequency_hz=first_query.frequency_hz
+    )
+    partial = replace(
+        partial,
+        resonance_id=resonance_id,
+        first_query=first_query,
+        first_observation=first_observation,
+    )
+    identities = tuple(
+        make_composite_identity(
+            resonance_id=f"r{index}",
+            fast_center_hz=2.76e9 if index == 0 else 2.87e9,
+            live_q=2760.0 if index == 0 else 2870.0,
+            center_age_s=0.006,
+            fwhm_age_s=0.006,
+            center_release_age_s=0.006,
+            fwhm_release_age_s=0.006,
+        )
+        for index in range(8)
+    )
+    resource = PublicAcquisitionResources(1, 0.005, 12_500.0, 12_250, 0, 0.005)
+    pending_query = (
+        None
+        if not pending
+        else make_legal_query(
+            side="plus",
+            query_index=1,
+            resonance_id=resonance_id,
+            interrogation_center_hz=2.76e9,
+            expected_sequence_index=1,
+            expected_end_timestamp_s=0.012,
+        )
+    )
+    return make_composite_estimate(
+        identities=identities,
+        pending_mode=None if pending_query is None else "fast_pair",
+        pending_query=pending_query,
+        incomplete_fast_pair=partial,
+        accepted_observations=1,
+        current_sequence_index=0,
+        current_timestamp_s=0.006,
+        fast_tracking_resources=resource,
+        tracking_resources=resource,
+        charged_resources=resource,
+    )
+
+
+def _one_sparse_partial_estimate(
+    *, resonance_id: str, pending: bool, frozen_prior_fwhm_hz: float = 1.0e6
+) -> object:
+    query = make_sparse_query(
+        resonance_id=resonance_id, frozen_prior_fwhm_hz=frozen_prior_fwhm_hz
+    )
+    observation = EstimatorObservation(0, 0.005, query.frequency_hz, 1.0, 0.005, 1.0)
+    partial = make_partial_scan(
+        resonance_id=resonance_id,
+        frozen_prior_fwhm_hz=frozen_prior_fwhm_hz,
+        queries=(query,),
+        observations=(observation,),
+    )
+    pending_query = (
+        None
+        if not pending
+        else make_sparse_query(
+            acquisition_index=1,
+            point_index=1,
+            resonance_id=resonance_id,
+            frozen_prior_fwhm_hz=frozen_prior_fwhm_hz,
+            offset_multiplier=-1.0,
+            frequency_hz=2.869e9,
+            expected_sequence_index=1,
+            expected_end_timestamp_s=0.010,
+        )
+    )
+    resource = _one_observation_resources()
+    identities = tuple(
+        make_composite_identity(
+            resonance_id=f"r{index}",
+            center_age_s=0.005,
+            fwhm_age_s=0.005,
+            center_release_age_s=0.005,
+            fwhm_release_age_s=0.005,
+        )
+        for index in range(8)
+    )
+    return make_composite_estimate(
+        identities=identities,
+        pending_mode=None if pending_query is None else "sparse_scan",
+        pending_query=pending_query,
+        incomplete_sparse_scan=partial,
+        accepted_observations=1,
+        current_sequence_index=0,
+        current_timestamp_s=0.005,
+        sparse_tracking_resources=resource,
+        tracking_resources=resource,
+        charged_resources=resource,
+    )
+
+
+@pytest.mark.parametrize("pending", (False, True))
+def test_incomplete_fast_pair_must_match_its_scheduled_identity(pending: bool) -> None:
+    with pytest.raises(ValueError):
+        _one_fast_partial_estimate(resonance_id="r1", pending=pending)
+
+
+@pytest.mark.parametrize("pending", (False, True))
+def test_incomplete_sparse_scan_must_match_its_scheduled_identity(
+    pending: bool,
+) -> None:
+    with pytest.raises(ValueError):
+        _one_sparse_partial_estimate(resonance_id="r1", pending=pending)
+
+
+@pytest.mark.parametrize("pending", (False, True))
+def test_incomplete_sparse_scan_must_match_its_frozen_source(pending: bool) -> None:
+    with pytest.raises(ValueError):
+        _one_sparse_partial_estimate(
+            resonance_id="r0", pending=pending, frozen_prior_fwhm_hz=2.0e6
         )
 
 
@@ -539,6 +668,79 @@ def test_scan_result_requires_all_five_query_echoes_and_status_matrix() -> None:
         scaled_jacobian_condition=None,
     )
     assert optimizer_failure.scipy_status == 1
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "overrides"),
+    (
+        (
+            "model_evaluation_failed",
+            {
+                "scipy_status": None,
+                "scipy_message": None,
+                "nfev": None,
+                "fitted_center_correction_hz": None,
+                "fitted_local_center_hz": None,
+                "fitted_fwhm_hz": None,
+                "fitted_amplitude": None,
+                "fitted_baseline_offset": None,
+                "rmse": None,
+                "amplitude_normalized_rmse": None,
+                "scaled_jacobian_rank": None,
+                "scaled_jacobian_condition": None,
+            },
+        ),
+        (
+            "optimizer_failed",
+            {
+                "fitted_center_correction_hz": None,
+                "fitted_local_center_hz": None,
+                "fitted_fwhm_hz": None,
+                "fitted_amplitude": None,
+                "fitted_baseline_offset": None,
+                "rmse": None,
+                "amplitude_normalized_rmse": None,
+                "scaled_jacobian_rank": None,
+                "scaled_jacobian_condition": None,
+            },
+        ),
+        (
+            "nonfinite_solution",
+            {
+                "fitted_center_correction_hz": None,
+                "fitted_local_center_hz": None,
+                "fitted_fwhm_hz": None,
+                "fitted_amplitude": None,
+                "fitted_baseline_offset": None,
+                "rmse": None,
+                "amplitude_normalized_rmse": None,
+                "scaled_jacobian_rank": None,
+                "scaled_jacobian_condition": None,
+            },
+        ),
+        (
+            "bounds_active",
+            {
+                "scaled_jacobian_rank": None,
+                "scaled_jacobian_condition": None,
+            },
+        ),
+        (
+            "rank_deficient",
+            {"scaled_jacobian_rank": 3, "scaled_jacobian_condition": None},
+        ),
+        ("ill_conditioned", {}),
+        ("amplitude_unresolved", {}),
+        ("residual_quality_failed", {}),
+    ),
+)
+def test_scan_result_accepts_each_ordered_failure_diagnostic_row(
+    failure_code: str, overrides: dict[str, object]
+) -> None:
+    result = make_scan_result(
+        status="failure", failure_code=failure_code, fitted_q=None, **overrides
+    )
+    assert result.failure_code == failure_code
 
 
 def test_aggregate_enforces_one_incomplete_block_and_history_counter_equations() -> (

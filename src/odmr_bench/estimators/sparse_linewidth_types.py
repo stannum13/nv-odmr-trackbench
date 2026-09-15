@@ -1357,6 +1357,28 @@ def _resources_match_replay(
     ) == _replay_resource_components(observations, initial=initial)
 
 
+def _identity_sparse_snapshot(
+    identity: CompositeIdentityEstimate, scan_index: int
+) -> tuple[object, ...]:
+    return (
+        scan_index,
+        identity.completed_sparse_scans,
+        identity.resonance_id,
+        identity.fast_center_hz,
+        identity.fast_center_source_kind,
+        identity.fast_center_source_pair_index,
+        identity.fast_center_reference_timestamp_s,
+        identity.fast_center_release_sequence_index,
+        identity.fast_center_release_timestamp_s,
+        identity.active_fwhm_hz,
+        identity.fwhm_source_kind,
+        identity.fwhm_source_scan_index,
+        identity.fwhm_reference_timestamp_s,
+        identity.fwhm_release_sequence_index,
+        identity.fwhm_release_timestamp_s,
+    )
+
+
 def _composite_observation_traces(
     fast_history: tuple[TwoPointPairResult, ...],
     sparse_history: tuple[SparseLinewidthScanResult, ...],
@@ -1593,6 +1615,46 @@ class SparseLinewidthCompositeEstimate:
             or current_timestamp_s != tracking_trace[-1].timestamp_s
         ):
             raise ValueError("current endpoint must equal the accepted trace tail")
+        if self.incomplete_fast_pair is not None:
+            partial_fast = self.incomplete_fast_pair
+            fast_target = identities[completed_fast_pairs % 8]
+            expected_first_side = (
+                "minus" if fast_target.completed_fast_pairs % 2 == 0 else "plus"
+            )
+            if (
+                partial_fast.pair_index != completed_fast_pairs
+                or partial_fast.identity_pair_index
+                != fast_target.completed_fast_pairs
+                or partial_fast.resonance_id != fast_target.resonance_id
+                or partial_fast.interrogation_center_hz != fast_target.fast_center_hz
+                or partial_fast.first_side != expected_first_side
+                or partial_fast.first_query.query_index != 2 * completed_fast_pairs
+                or partial_fast.first_query.expected_sequence_index
+                != current_sequence_index
+                or partial_fast.first_query.expected_end_timestamp_s
+                != current_timestamp_s
+            ):
+                raise ValueError(
+                    "incomplete fast pair must match the scheduled identity"
+                )
+        if self.incomplete_sparse_scan is not None:
+            partial_sparse = self.incomplete_sparse_scan
+            sparse_target = identities[completed_sparse_scans % 8]
+            first_query = partial_sparse.queries[0]
+            if (
+                _query_snapshot(first_query)
+                != _identity_sparse_snapshot(sparse_target, completed_sparse_scans)
+                or first_query.acquisition_index
+                != accepted_observations - len(partial_sparse.queries)
+                or first_query.expected_sequence_index
+                != current_sequence_index - len(partial_sparse.queries) + 1
+                or partial_sparse.observations[-1].sequence_index
+                != current_sequence_index
+                or partial_sparse.observations[-1].timestamp_s != current_timestamp_s
+            ):
+                raise ValueError(
+                    "incomplete sparse scan must match the scheduled identity"
+                )
         if not _resources_match_replay(self.fast_tracking_resources, fast_trace):
             raise ValueError("fast tracking resources must replay the fast trace")
         if not _resources_match_replay(self.sparse_tracking_resources, sparse_trace):
@@ -1652,27 +1714,11 @@ class SparseLinewidthCompositeEstimate:
                     )
             else:
                 target = identities[completed_sparse_scans % 8]
-                expected_snapshot = (
-                    completed_sparse_scans,
-                    target.completed_sparse_scans,
-                    target.resonance_id,
-                    target.fast_center_hz,
-                    target.fast_center_source_kind,
-                    target.fast_center_source_pair_index,
-                    target.fast_center_reference_timestamp_s,
-                    target.fast_center_release_sequence_index,
-                    target.fast_center_release_timestamp_s,
-                    target.active_fwhm_hz,
-                    target.fwhm_source_kind,
-                    target.fwhm_source_scan_index,
-                    target.fwhm_reference_timestamp_s,
-                    target.fwhm_release_sequence_index,
-                    target.fwhm_release_timestamp_s,
-                )
                 if (
                     pending_sparse.point_index != 0
                     or pending_sparse.acquisition_index != accepted_observations
-                    or _query_snapshot(pending_sparse) != expected_snapshot
+                    or _query_snapshot(pending_sparse)
+                    != _identity_sparse_snapshot(target, completed_sparse_scans)
                     or fast_pairs_since_scan
                     != self.configuration.scan_period_fast_pairs
                 ):
