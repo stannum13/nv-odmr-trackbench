@@ -26,6 +26,15 @@ public evaluator resources begin only after successful tracking start, and
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
 
+Task 3 now extracts a private, source-bound spectral-model evaluator for the
+sparse estimator while preserving the Stage 6.3 scalar calibration path exactly.
+It evaluates the frozen baseline once, adds only the caller-provided constant
+offset, and subtracts the immutable source tuple in order; only the target
+resonance's center, FWHM, and amplitude may vary. The legacy target-center
+helper delegates to the same scalar core without a public surface or arithmetic
+change. Lorentzian/pseudo-Voigt, affine/quadratic, scalar/vector, boundary, and
+source-order regressions pin that differential. Task 4 remains next.
+
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated
 re-review are on `origin/main`; synchronized CI passed all 797 tests. The Stage
@@ -771,6 +780,9 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 3 source-bound model focused/differential gate: 81 passed.
+- Stage 6.4 Task 3 estimator/evaluator/emulator integration gate: 1,274 passed.
+- Stage 6.4 Task 3 full repository gate: 1,320 passed.
 - Stage 6.4 Task 2 sparse-source regression-closure record contracts: 92 passed.
 - Stage 6.4 Task 2 sparse-source regression-closure
   estimator/evaluator/emulator gate: 1,204 passed.
@@ -847,7 +859,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 3's canonical bound-source model extraction
-   and Stage 6.3 differential protection.
+1. Continue Stage 6.4 with Task 4 after Task 3's canonical bound-source model
+   extraction and Stage 6.3 differential protection.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

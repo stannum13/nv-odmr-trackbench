@@ -6,7 +6,9 @@ import inspect
 import math
 from dataclasses import fields, replace
 from itertools import pairwise
+from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
 import odmr_bench.estimators.two_point_calibration as calibration_module
@@ -19,6 +21,7 @@ from odmr_bench.estimators import (
     calibrate_two_point,
 )
 from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_bound_source_model,
     _evaluate_target_only_model,
     _target_center_derivative,
 )
@@ -124,6 +127,87 @@ def test_target_only_model_and_center_derivative_are_canonical() -> None:
         source_fit, target_index, frequency_hz, center_hz
     )
     assert analytic == pytest.approx(numerical, rel=1e-8, abs=1e-15)
+
+
+@pytest.mark.parametrize("model_kind", ("lorentzian", "pseudo_voigt"))
+@pytest.mark.parametrize("quadratic", (False, True))
+def test_bound_source_extraction_preserves_legacy_scalar_model_bit_pattern(
+    model_kind: str,
+    quadratic: bool,
+) -> None:
+    source_fit, target_index = _model_fixture()
+    resonances = tuple(
+        replace(resonance, eta=1.0)
+        if model_kind == "lorentzian"
+        else resonance
+        for resonance in source_fit.resonance_estimates
+    )
+    baseline = Baseline(
+        intercept=1.07,
+        reference_hz=2.88e9,
+        slope_per_hz=2.3e-11,
+        quadratic_per_hz2=1.9e-20 if quadratic else 0.0,
+    )
+    baseline_degree = 2 if quadratic else 1
+    source_fit = replace(
+        source_fit,
+        model_kind=model_kind,
+        baseline_degree=baseline_degree,
+        resonance_estimates=resonances,
+        baseline_estimate=baseline,
+        initial_guess=replace(
+            source_fit.initial_guess,
+            resonances=resonances,
+            baseline=baseline,
+        ),
+        jacobian_rank=baseline_degree + 1
+        + 8 * (3 if model_kind == "lorentzian" else 4),
+    )
+    target = source_fit.resonance_estimates[target_index]
+    frequency_hz = target.center_hz - 0.31 * target.fwhm_hz
+    center_hz = target.center_hz + 0.07 * target.fwhm_hz
+
+    legacy = _evaluate_target_only_model(
+        source_fit, target_index, frequency_hz, center_hz
+    )
+    extracted = _evaluate_bound_source_model(
+        frequency_hz,
+        SimpleNamespace(source_fit=source_fit),
+        target.resonance_id,
+        center_hz=center_hz,
+        fwhm_hz=target.fwhm_hz,
+        amplitude=target.amplitude,
+        baseline_offset=0.0,
+    )
+
+    assert extracted.shape == ()
+    assert float(extracted) == legacy
+    assert np.asarray(extracted, dtype=np.float64).tobytes() == np.asarray(
+        legacy, dtype=np.float64
+    ).tobytes()
+
+
+@pytest.mark.parametrize("target_index", (-1, 8, "not-an-index"))
+def test_target_only_model_retains_legacy_nonmatching_index_behavior(
+    target_index: object,
+) -> None:
+    source_fit, _ = _model_fixture()
+    frequency_hz = 2.882e9
+    expected = float(source_fit.baseline_estimate.evaluate(frequency_hz))
+    for resonance in source_fit.resonance_estimates:
+        expected -= resonance.amplitude * _profile(
+            frequency_hz, resonance, resonance.center_hz
+        )
+
+    assert (
+        _evaluate_target_only_model(
+            source_fit,
+            target_index,  # type: ignore[arg-type]
+            frequency_hz,
+            2.91e9,
+        )
+        == expected
+    )
 
 
 def test_calibrate_two_point_public_signature_exists() -> None:

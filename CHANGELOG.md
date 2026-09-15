@@ -60,6 +60,12 @@ once a package version is introduced.
 
 ### Changed
 
+- Refactored the Stage 6.4 sparse-estimator seam to share a private,
+  source-bound spectral model with the Stage 6.3 calibration helper. The model
+  retains one baseline evaluation and literal source-order dip subtraction,
+  varies only one target's center/FWHM/amplitude plus a constant offset, and
+  preserves the legacy scalar result bit pattern without exposing a new public
+  API or pre-summing a background.
 - Closed the Stage 6.4 implementation-plan review. The evaluator resource
   builder now rejects every pre-start phase with the public state error,
   constructs public resources only at or after successful tracking start, and

@@ -9,6 +9,7 @@ from dataclasses import fields, is_dataclass, replace
 from itertools import pairwise
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators.two_point_resources import _replay_public_resources
@@ -139,23 +140,119 @@ def _fail(code: TwoPointCalibrationConstructionCode, message: str) -> None:
     raise TwoPointCalibrationConstructionError(code, message)
 
 
+def _evaluate_bound_source_fit_model(
+    frequency_hz: ArrayLike,
+    source_fit: SpectrumFitResult,
+    target_index: int,
+    *,
+    center_hz: float,
+    fwhm_hz: float | None,
+    amplitude: float | None,
+    baseline_offset: float,
+) -> NDArray[np.float64]:
+    """Evaluate one mutable line against an otherwise frozen source fit."""
+    frequency = np.asarray(frequency_hz, dtype=np.float64)
+    if frequency.ndim == 0:
+        scalar_frequency_hz = float(frequency)
+        fluorescence = float(
+            source_fit.baseline_estimate.evaluate(scalar_frequency_hz)
+        )
+        if baseline_offset != 0.0:
+            fluorescence += baseline_offset
+        for index, resonance in enumerate(source_fit.resonance_estimates):
+            evaluated_center_hz = (
+                center_hz if index == target_index else resonance.center_hz
+            )
+            evaluated_fwhm_hz = (
+                resonance.fwhm_hz
+                if index != target_index or fwhm_hz is None
+                else fwhm_hz
+            )
+            evaluated_amplitude = (
+                resonance.amplitude
+                if index != target_index or amplitude is None
+                else amplitude
+            )
+            u = (scalar_frequency_hz - evaluated_center_hz) / evaluated_fwhm_hz
+            profile = resonance.eta / (1.0 + 4.0 * u * u) + (
+                1.0 - resonance.eta
+            ) * math.exp(-4.0 * math.log(2.0) * u * u)
+            fluorescence -= evaluated_amplitude * profile
+        return np.asarray(fluorescence, dtype=np.float64)
+
+    fluorescence = np.asarray(
+        source_fit.baseline_estimate.evaluate(frequency), dtype=np.float64
+    )
+    if baseline_offset != 0.0:
+        fluorescence = fluorescence + baseline_offset
+    for index, resonance in enumerate(source_fit.resonance_estimates):
+        evaluated_center_hz = (
+            center_hz if index == target_index else resonance.center_hz
+        )
+        evaluated_fwhm_hz = (
+            resonance.fwhm_hz
+            if index != target_index or fwhm_hz is None
+            else fwhm_hz
+        )
+        evaluated_amplitude = (
+            resonance.amplitude
+            if index != target_index or amplitude is None
+            else amplitude
+        )
+        u = (frequency - evaluated_center_hz) / evaluated_fwhm_hz
+        profile = resonance.eta / (1.0 + 4.0 * u * u) + (
+            1.0 - resonance.eta
+        ) * np.exp(-4.0 * np.log(2.0) * u * u)
+        fluorescence = fluorescence - evaluated_amplitude * profile
+    return np.asarray(fluorescence, dtype=np.float64)
+
+
+def _evaluate_bound_source_model(
+    frequency_hz: ArrayLike,
+    source: TwoPointCalibrationSource,
+    target_resonance_id: str,
+    *,
+    center_hz: float,
+    fwhm_hz: float,
+    amplitude: float,
+    baseline_offset: float,
+) -> NDArray[np.float64]:
+    """Evaluate a source-bound model with only one line and offset varied."""
+    source_fit = source.source_fit
+    target_index = next(
+        index
+        for index, resonance in enumerate(source_fit.resonance_estimates)
+        if resonance.resonance_id == target_resonance_id
+    )
+    return _evaluate_bound_source_fit_model(
+        frequency_hz,
+        source_fit,
+        target_index,
+        center_hz=center_hz,
+        fwhm_hz=fwhm_hz,
+        amplitude=amplitude,
+        baseline_offset=baseline_offset,
+    )
+
+
 def _evaluate_target_only_model(
     source_fit: SpectrumFitResult,
     target_index: int,
     frequency_hz: float,
     center_hz: float,
 ) -> float:
-    fluorescence = float(source_fit.baseline_estimate.evaluate(frequency_hz))
-    for index, resonance in enumerate(source_fit.resonance_estimates):
-        evaluated_center_hz = (
-            center_hz if index == target_index else resonance.center_hz
+    """Evaluate the legacy scalar target-center model through the shared core."""
+    return float(
+        _evaluate_bound_source_fit_model(
+            frequency_hz,
+            source_fit,
+            target_index,
+            center_hz=center_hz,
+            fwhm_hz=None,
+            amplitude=None,
+            baseline_offset=0.0,
         )
-        u = (frequency_hz - evaluated_center_hz) / resonance.fwhm_hz
-        profile = resonance.eta / (1.0 + 4.0 * u * u) + (
-            1.0 - resonance.eta
-        ) * math.exp(-4.0 * math.log(2.0) * u * u)
-        fluorescence -= resonance.amplitude * profile
-    return fluorescence
+    )
 
 
 def _target_center_derivative(
