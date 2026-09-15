@@ -70,6 +70,23 @@ once a package version is introduced.
 
 ### Added
 
+- Completed the two-point evaluator runner terminal protocol. Pair-boundary
+  budget exhaustion and explicit caller stops now return lossless resource
+  summaries without another acquisition; external stops preserve partial,
+  pending, and retryable-failure state. Tracker validation, update-construction,
+  and unexpected ordinary update failures terminate as typed authenticated
+  aborts with one unaccepted resource atom, while raw resource-join corruption
+  retains its exact full/safe observation, ordered mismatch fields, and
+  timing-derived midpoint availability without fabricating an aggregate.
+  `run_until_event` loops only over accepted observations and returns the first
+  terminal or retryable instrument event. A complete operation-by-phase matrix
+  rejects every illegal acquire/start/step/run/stop call before touching any
+  instrument, tracker, fitter, resource builder, or provenance registry.
+  Process-control `BaseException` values remain outside typed abort conversion.
+  Review hardening makes authenticated unaccepted midpoint publication obey
+  the same timing-only rule as unavailable records: an exact resource join can
+  retain mandatory resource accounting while a one-ULP invalid endpoint
+  correctly leaves the physical midpoint unavailable.
 - Added the public two-point evaluator resource builder and the exact private
   seam needed to continue one authenticated but unaccepted abort observation.
   The builder authenticates the original registry-bound runner, token,

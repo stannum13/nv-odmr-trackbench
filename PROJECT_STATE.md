@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-09-05
+Last updated: 2026-09-15
 
 ## Current stage
 
@@ -320,6 +320,34 @@ expected-only-unavailable midpoint erasure plus a one-ULP failure-boundary
 divergence. The amended local gate passes all 1,136 tests and Ruff.
 The final bounded independent re-review reported zero Critical, Important, or
 Minor findings.
+Task 17 completes the evaluator runner terminal protocol. Exhausted pair
+budgets stop at the unaffordable pair boundary without another instrument
+query or tracker update; explicit external stops preserve accepted partial
+pairs, retained pending queries, and the last retryable instrument failure.
+Authenticated observations rejected by tracker validation, update-record
+construction, or another ordinary update exception become one typed terminal
+abort with an exact unaccepted resource atom and unchanged pending estimate.
+If the returned raw observation cannot join the instrument ledger, the runner
+instead retains its full/safe projections, ordered mismatch fields, and the
+timing-only midpoint witness while returning no fabricated resource aggregate.
+`run_until_event` advances only across accepted observations and returns the
+first budget stop, typed abort, or instrument failure without implicit retry.
+All five public operations now enforce the seven-phase legality matrix before
+calling the instrument, tracker, fitter, resource builder, or provenance
+registry. Ordinary `Exception` values at the tracker-update boundary are typed
+aborts; process-control `BaseException` values remain transactionally restored
+and are re-raised unchanged. The first fresh review found one Important timing
+witness defect: a resource-valid raw observation with an invalid endpoint was
+incorrectly assigned the expected midpoint, so mandatory abort resource
+assembly rejected it. The corrected acquisition seam publishes `None` whenever
+integration/endpoint/resource time does not match, independently of resource
+authentication, while retaining mandatory full resource accounting and the
+authoritative live endpoint. An exact one-ULP endpoint regression pins the
+typed validation abort and terminal no-later-call behavior. The 60 Task 17
+protocol rows and complete 78-test runner file pass; the full repository gate
+passes all 1,196 tests.
+The final bounded independent re-review reported zero Critical, Important, or
+Minor findings.
 
 ## Completed work
 
@@ -613,9 +641,9 @@ Minor findings.
 
 ## Tests currently passing
 
-- `pytest`: 1136 passed.
-- Focused `tests/estimators tests/evaluation tests/emulator`: 1038 passed.
-- Task 16 resource file: 13 passed.
+- `pytest`: 1196 passed.
+- Task 17 runner file: 78 passed.
+- Task 17 named protocol matrix: 60 passed.
 - `ruff check .`: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
@@ -669,5 +697,6 @@ Minor findings.
 
 ## Next actions
 
-1. Implement Task 17 terminal runner transitions.
-2. Run the Task 17 per-task specification and quality review.
+1. Implement Task 18 closed generated scientific acceptance and truth
+   isolation.
+2. Run the Task 18 per-task specification and quality review.

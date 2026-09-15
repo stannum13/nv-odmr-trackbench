@@ -19,10 +19,13 @@ from odmr_bench.estimators.two_point_types import (
     TwoPointCalibration,
     TwoPointCalibrationSource,
     TwoPointClockMapping,
+    TwoPointEstimate,
     TwoPointIdentityBinding,
+    TwoPointObservationValidationError,
     TwoPointQuery,
     TwoPointRunMetadata,
     TwoPointTrackerConfiguration,
+    TwoPointUpdateConstructionError,
 )
 from odmr_bench.estimators.types import FitConfiguration
 from odmr_bench.evaluation.two_point.provenance import (
@@ -35,16 +38,24 @@ from odmr_bench.evaluation.two_point.provenance import (
 )
 from odmr_bench.evaluation.two_point.resource_accounting import (
     _advance_full_resources,
+    _resource_mismatch_fields,
     _zero_full_resources,
 )
 from odmr_bench.evaluation.two_point.types import (
+    TwoPointAbortedRun,
+    TwoPointAbortReason,
     TwoPointCalibrationPreflightError,
     TwoPointEvaluatorInstrumentConfiguration,
     TwoPointEvaluatorPairTiming,
     TwoPointEvaluatorRunnerState,
     TwoPointInstrumentQueryFailure,
+    TwoPointResourceJoinUnavailableAcquisition,
+    TwoPointRunnerAborted,
     TwoPointRunnerAccepted,
+    TwoPointRunnerBudgetStopped,
+    TwoPointRunnerExternallyStopped,
     TwoPointRunnerInstrumentFailure,
+    TwoPointRunnerRunOutcome,
     TwoPointRunnerStartError,
     TwoPointRunnerStateError,
     TwoPointRunnerStepOutcome,
@@ -76,9 +87,7 @@ class TwoPointEvaluatorRunner:
             resources = instrument.resources
             current_virtual_time_s = instrument.virtual_time_s
         except Exception as error:
-            raise TwoPointCalibrationPreflightError(
-                "invalid_argument_value"
-            ) from error
+            raise TwoPointCalibrationPreflightError("invalid_argument_value") from error
         if (
             type(nominal_photon_rate_hz) is not float
             or type(frequency_overhead_s) is not float
@@ -104,21 +113,13 @@ class TwoPointEvaluatorRunner:
                 not math.isfinite(current_virtual_time_s)
                 or current_virtual_time_s < 0.0
             ):
-                raise ValueError(
-                    "current virtual time must be finite and nonnegative"
-                )
+                raise ValueError("current virtual time must be finite and nonnegative")
         except TypeError as error:
-            raise TwoPointCalibrationPreflightError(
-                "invalid_argument_type"
-            ) from error
+            raise TwoPointCalibrationPreflightError("invalid_argument_type") from error
         except ValueError as error:
-            raise TwoPointCalibrationPreflightError(
-                "invalid_argument_value"
-            ) from error
+            raise TwoPointCalibrationPreflightError("invalid_argument_value") from error
         if resources != _zero_full_resources() or current_virtual_time_s != 0.0:
-            raise TwoPointCalibrationPreflightError(
-                "unclean_instrument_boundary"
-            )
+            raise TwoPointCalibrationPreflightError("unclean_instrument_boundary")
 
         token = _mint_verified_instrument_run_token(_TOKEN_CONSTRUCTION_KEY)
         runner = object.__new__(cls)
@@ -266,7 +267,27 @@ class TwoPointEvaluatorRunner:
         try:
             query = tracker.choose_next_query()
             if query is None:
-                raise NotImplementedError("budget-stop transition is deferred")
+                from odmr_bench.evaluation.two_point.resource_accounting import (
+                    build_two_point_evaluator_resources,
+                )
+
+                tracker_estimate = tracker.estimate()
+                state_after = replace(
+                    state_before,
+                    phase="budget_stopped",
+                    tracker_estimate=tracker_estimate,
+                )
+                object.__setattr__(self, "_state", state_after)
+                resources = build_two_point_evaluator_resources(self)
+                if resources is None:
+                    raise RuntimeError(
+                        "budget stop requires available evaluator resources"
+                    )
+                return TwoPointRunnerBudgetStopped(
+                    kind="budget_stopped",
+                    resources=resources,
+                    state=state_after,
+                )
             tracker_estimate_before = tracker.estimate()
             if tracker_estimate_before.pending_query != query:
                 raise RuntimeError("tracker estimate must retain the issued query")
@@ -278,6 +299,7 @@ class TwoPointEvaluatorRunner:
                 + state_before.instrument_configuration.frequency_overhead_s
             ) + query.integration_time_s / 2.0
         except BaseException:
+            object.__setattr__(self, "_state", state_before)
             _restore_tracker_slots(
                 tracker,
                 tracker_configuration_before_query,
@@ -298,9 +320,7 @@ class TwoPointEvaluatorRunner:
                     _safe_exception_strings,
                 )
 
-                exception_type, exception_message = _safe_exception_strings(
-                    error
-                )
+                exception_type, exception_message = _safe_exception_strings(error)
                 failure = TwoPointInstrumentQueryFailure(
                     query=query,
                     exception_type=exception_type,
@@ -348,11 +368,68 @@ class TwoPointEvaluatorRunner:
                 full_observation=full_observation,
                 resources_before=resources_before,
                 resources_after=resources_after,
-                overhead_s=(
-                    state_before.instrument_configuration.frequency_overhead_s
-                ),
+                virtual_time_after=virtual_time_after,
+                overhead_s=(state_before.instrument_configuration.frequency_overhead_s),
             )
-            update = tracker.update(acquisition.safe_observation)
+            if type(acquisition) is TwoPointResourceJoinUnavailableAcquisition:
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason="resource_join_unavailable",
+                    exception_type=None,
+                    exception_message=None,
+                    tracker_estimate_before=tracker_estimate_before,
+                    tracker_estimate_after=tracker_estimate_before,
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
+            try:
+                update = tracker.update(acquisition.safe_observation)
+            except Exception as error:
+                _restore_tracker_slots(
+                    tracker,
+                    tracker_configuration_before_update,
+                    tracker_state_before_update,
+                )
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                if isinstance(error, TwoPointObservationValidationError):
+                    reason = "tracker_observation_validation_error"
+                elif isinstance(error, TwoPointUpdateConstructionError):
+                    reason = "tracker_update_construction_error"
+                else:
+                    reason = "tracker_update_unexpected_error"
+                exception_type, exception_message = _safe_exception_strings(error)
+                tracker_estimate_after = tracker.estimate()
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason=reason,
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    tracker_estimate_before=tracker_estimate_before,
+                    tracker_estimate_after=tracker_estimate_after,
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
+
+            if acquisition.measurement_midpoint_s is None:
+                if (
+                    full_observation.integration_time_s != query.integration_time_s
+                    or full_observation.timestamp_s != query.expected_end_timestamp_s
+                    or virtual_time_after != query.expected_end_timestamp_s
+                ):
+                    raise RuntimeError(
+                        "accepted observation must retain its instrument midpoint"
+                    )
+                acquisition = replace(
+                    acquisition,
+                    measurement_midpoint_s=expected_midpoint_s,
+                )
 
             pair_timings = state_before.pair_timings
             if update.completed_pair is not None:
@@ -360,22 +437,18 @@ class TwoPointEvaluatorRunner:
                 first_midpoint_s = first_acquisition.measurement_midpoint_s
                 second_midpoint_s = acquisition.measurement_midpoint_s
                 if first_midpoint_s is None or second_midpoint_s is None:
-                    raise RuntimeError(
-                        "accepted pair must retain both midpoints"
-                    )
+                    raise RuntimeError("accepted pair must retain both midpoints")
                 pair = update.completed_pair
-                truth_reference_s = first_midpoint_s + (
-                    second_midpoint_s - first_midpoint_s
-                ) / 2.0
+                truth_reference_s = (
+                    first_midpoint_s + (second_midpoint_s - first_midpoint_s) / 2.0
+                )
                 pair_timing = TwoPointEvaluatorPairTiming(
                     pair_index=pair.pair_index,
                     resonance_id=pair.resonance_id,
                     first_measurement_midpoint_s=first_midpoint_s,
                     second_measurement_midpoint_s=second_midpoint_s,
                     truth_reference_timestamp_s=truth_reference_s,
-                    public_reference_timestamp_s=(
-                        pair.pair_reference_timestamp_s
-                    ),
+                    public_reference_timestamp_s=(pair.pair_reference_timestamp_s),
                     release_sequence_index=pair.release_sequence_index,
                     release_timestamp_s=pair.release_timestamp_s,
                 )
@@ -390,9 +463,7 @@ class TwoPointEvaluatorRunner:
                 ),
                 pair_timings=pair_timings,
                 instrument_resources_current=resources_after,
-                instrument_current_sequence_index=(
-                    full_observation.sequence_index
-                ),
+                instrument_current_sequence_index=(full_observation.sequence_index),
                 current_virtual_time_s=virtual_time_after,
                 last_instrument_failure=None,
             )
@@ -403,6 +474,7 @@ class TwoPointEvaluatorRunner:
                 state=state_after,
             )
         except BaseException:
+            object.__setattr__(self, "_state", state_before)
             _restore_tracker_slots(
                 tracker,
                 tracker_configuration_before_update,
@@ -411,6 +483,163 @@ class TwoPointEvaluatorRunner:
             raise
         object.__setattr__(self, "_state", state_after)
         return outcome
+
+    def stop_external(self) -> TwoPointRunnerExternallyStopped:
+        """Stop tracking at the current causal boundary without acquisition."""
+        state_before = self._state
+        if state_before.phase != "tracking" or self._tracker is None:
+            raise TwoPointRunnerStateError(
+                "stop_external requires a runner in the tracking phase"
+            )
+        from odmr_bench.evaluation.two_point.resource_accounting import (
+            build_two_point_evaluator_resources,
+        )
+
+        state_after = replace(state_before, phase="externally_stopped")
+        object.__setattr__(self, "_state", state_after)
+        try:
+            resources = build_two_point_evaluator_resources(self)
+            if resources is None:
+                raise RuntimeError(
+                    "external stop requires available evaluator resources"
+                )
+            outcome = TwoPointRunnerExternallyStopped(
+                kind="externally_stopped",
+                resources=resources,
+                state=state_after,
+            )
+        except BaseException:
+            object.__setattr__(self, "_state", state_before)
+            raise
+        return outcome
+
+    def run_until_event(self) -> TwoPointRunnerRunOutcome:
+        """Advance through accepted observations to the first non-accept event."""
+        if self._state.phase != "tracking" or self._tracker is None:
+            raise TwoPointRunnerStateError(
+                "run_until_event requires a runner in the tracking phase"
+            )
+        while True:
+            outcome = self.step()
+            if type(outcome) is not TwoPointRunnerAccepted:
+                return outcome
+
+
+def _finish_aborted_step(
+    runner: TwoPointEvaluatorRunner,
+    *,
+    state_before: TwoPointEvaluatorRunnerState,
+    acquisition: (
+        TwoPointTrackingAcquisition | TwoPointResourceJoinUnavailableAcquisition
+    ),
+    reason: TwoPointAbortReason,
+    exception_type: str | None,
+    exception_message: str | None,
+    tracker_estimate_before: TwoPointEstimate,
+    tracker_estimate_after: TwoPointEstimate,
+    resources_after: ResourceSnapshot,
+    virtual_time_after: float,
+) -> TwoPointRunnerAborted:
+    """Construct one terminal abort and its optional resource aggregate."""
+    abort = TwoPointAbortedRun(
+        reason=reason,
+        exception_type=exception_type,
+        exception_message=exception_message,
+        unaccepted_acquisition=acquisition,
+        unaccepted_observation_count=1,
+        tracker_estimate_before=tracker_estimate_before,
+        tracker_estimate_after=tracker_estimate_after,
+    )
+    state_after = replace(
+        state_before,
+        phase="aborted",
+        tracker_estimate=tracker_estimate_after,
+        instrument_resources_current=resources_after,
+        instrument_current_sequence_index=acquisition.full_observation.sequence_index,
+        current_virtual_time_s=virtual_time_after,
+        last_instrument_failure=None,
+        terminal_abort=abort,
+    )
+    object.__setattr__(runner, "_state", state_after)
+    if type(acquisition) is TwoPointResourceJoinUnavailableAcquisition:
+        from odmr_bench.evaluation.two_point.resource_accounting import (
+            build_two_point_evaluator_resources,
+        )
+
+        resources = build_two_point_evaluator_resources(runner)
+        if resources is not None:
+            raise RuntimeError("unavailable abort must not fabricate resources")
+    else:
+        from odmr_bench.evaluation.two_point.resource_accounting import (
+            _build_two_point_evaluator_resources_from_context,
+        )
+
+        resources = _build_two_point_evaluator_resources_from_context(
+            runner,
+            authenticated_unaccepted=acquisition,
+        )
+    return TwoPointRunnerAborted(
+        kind="aborted",
+        abort=abort,
+        resources=resources,
+        state=state_after,
+    )
+
+
+def _build_tracking_acquisition(
+    *,
+    query: TwoPointQuery,
+    expected_midpoint_s: float,
+    full_observation: InstrumentObservation,
+    resources_before: ResourceSnapshot,
+    resources_after: ResourceSnapshot,
+    virtual_time_after: float,
+    overhead_s: float,
+) -> TwoPointTrackingAcquisition | TwoPointResourceJoinUnavailableAcquisition:
+    safe_observation = full_observation.estimator_view()
+    resource_delta = _advance_full_resources(
+        _zero_full_resources(),
+        full_observation,
+        overhead_s,
+    )
+    expected_resources_after = _advance_full_resources(
+        resources_before,
+        full_observation,
+        overhead_s,
+    )
+    resource_mismatch_fields = _resource_mismatch_fields(
+        expected_resources_after,
+        resources_after,
+    )
+    timing_matches = (
+        full_observation.integration_time_s == query.integration_time_s
+        and full_observation.timestamp_s == query.expected_end_timestamp_s
+        and virtual_time_after == query.expected_end_timestamp_s
+        and resources_after.virtual_elapsed_time_s == query.expected_end_timestamp_s
+    )
+    if resource_mismatch_fields:
+        return TwoPointResourceJoinUnavailableAcquisition(
+            resource_join_status="unavailable",
+            query=query,
+            expected_measurement_midpoint_s=expected_midpoint_s,
+            measurement_midpoint_s=(expected_midpoint_s if timing_matches else None),
+            full_observation=full_observation,
+            safe_observation=safe_observation,
+            resource_mismatch_fields=resource_mismatch_fields,
+            instrument_resources_before=resources_before,
+            instrument_resources_after=resources_after,
+        )
+    return TwoPointTrackingAcquisition(
+        resource_join_status="authenticated",
+        query=query,
+        expected_measurement_midpoint_s=expected_midpoint_s,
+        measurement_midpoint_s=(expected_midpoint_s if timing_matches else None),
+        full_observation=full_observation,
+        safe_observation=safe_observation,
+        instrument_resources_before=resources_before,
+        instrument_resources_after=resources_after,
+        instrument_resource_delta=resource_delta,
+    )
 
 
 def _build_authenticated_tracking_acquisition(
@@ -421,23 +650,21 @@ def _build_authenticated_tracking_acquisition(
     resources_before: ResourceSnapshot,
     resources_after: ResourceSnapshot,
     overhead_s: float,
-) -> TwoPointTrackingAcquisition:
-    safe_observation = full_observation.estimator_view()
-    resource_delta = _advance_full_resources(
-        _zero_full_resources(),
-        full_observation,
-        overhead_s,
-    )
-    return TwoPointTrackingAcquisition(
-        resource_join_status="authenticated",
+    virtual_time_after: float | None = None,
+) -> TwoPointTrackingAcquisition | TwoPointResourceJoinUnavailableAcquisition:
+    """Retain the Task 16 private authenticated-construction seam."""
+    return _build_tracking_acquisition(
         query=query,
-        expected_measurement_midpoint_s=expected_midpoint_s,
-        measurement_midpoint_s=expected_midpoint_s,
+        expected_midpoint_s=expected_midpoint_s,
         full_observation=full_observation,
-        safe_observation=safe_observation,
-        instrument_resources_before=resources_before,
-        instrument_resources_after=resources_after,
-        instrument_resource_delta=resource_delta,
+        resources_before=resources_before,
+        resources_after=resources_after,
+        virtual_time_after=(
+            full_observation.timestamp_s
+            if virtual_time_after is None
+            else virtual_time_after
+        ),
+        overhead_s=overhead_s,
     )
 
 
@@ -564,8 +791,7 @@ def _validate_run_provenance(
         and own_binding is binding
         and binding.issuer_runner is runner
         and binding.instrument is instrument
-        and binding.instrument_configuration
-        is state_before.instrument_configuration
+        and binding.instrument_configuration is state_before.instrument_configuration
     )
     other_runner_success = (
         state_before.phase == "ready"
@@ -590,10 +816,7 @@ def _validate_run_provenance(
                 or not other_runner_success
             )
         )
-        or (
-            state_before.phase == "calibration_succeeded"
-            and not same_runner_success
-        )
+        or (state_before.phase == "calibration_succeeded" and not same_runner_success)
     ):
         raise TwoPointRunnerStartError("run_provenance_mismatch")
     return same_runner_success
@@ -619,9 +842,7 @@ def _validate_start_metadata(
                 source.availability_timestamp_s,
             )
         )
-        source_rate_hz = (
-            source.fluorescence_provenance.nominal_photon_rate_hz
-        )
+        source_rate_hz = source.fluorescence_provenance.nominal_photon_rate_hz
         metadata_matches = (
             public_metadata.tracker_clock_id == mapping.tracker_clock_id
             and public_metadata.current_sequence_index
@@ -671,9 +892,7 @@ def _capture_tracking_boundary(
         resources_before = runner._instrument.resources
         virtual_time_before = runner._instrument.virtual_time_s
     except Exception as error:
-        raise TwoPointRunnerStartError(
-            "resource_boundary_mismatch"
-        ) from error
+        raise TwoPointRunnerStartError("resource_boundary_mismatch") from error
     if (
         type(resources_before) is not ResourceSnapshot
         or type(virtual_time_before) is not float
@@ -681,8 +900,7 @@ def _capture_tracking_boundary(
         or virtual_time_before != state_before.current_virtual_time_s
         or (
             same_runner_success
-            and verified_calibration.instrument_resources_after
-            != resources_before
+            and verified_calibration.instrument_resources_after != resources_before
         )
     ):
         raise TwoPointRunnerStartError("resource_boundary_mismatch")
@@ -697,6 +915,4 @@ def _capture_tracking_boundary(
             resources_before.virtual_elapsed_time_s,
         )
     except (TypeError, ValueError) as error:
-        raise TwoPointRunnerStartError(
-            "resource_boundary_mismatch"
-        ) from error
+        raise TwoPointRunnerStartError("resource_boundary_mismatch") from error
