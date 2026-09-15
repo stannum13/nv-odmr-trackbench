@@ -18,6 +18,7 @@ from odmr_bench.estimators.types import (
     InitializationDiagnostics,
     SpectrumFitResult,
 )
+from odmr_bench.models import Resonance
 
 CalibrationBudgetTreatment: TypeAlias = Literal[
     "included_same_run", "conditional_free_precalibration"
@@ -560,15 +561,36 @@ def _snapshot_tracker_configuration(
     )
 
 
+def _snapshot_string(value: str) -> str:
+    return str.__str__(value)
+
+
+def _snapshot_optional_string(value: str | None) -> str | None:
+    return None if value is None else _snapshot_string(value)
+
+
+def _snapshot_resonances(values: object) -> tuple[Resonance, ...]:
+    return tuple(
+        Resonance(
+            resonance_id=_snapshot_string(item.resonance_id),
+            center_hz=item.center_hz,
+            fwhm_hz=item.fwhm_hz,
+            amplitude=item.amplitude,
+            eta=item.eta,
+        )
+        for item in values  # type: ignore[union-attr]
+    )
+
+
 def _snapshot_initialization_diagnostics(
     value: InitializationDiagnostics,
 ) -> InitializationDiagnostics:
     return InitializationDiagnostics(
-        source=value.source,
+        source=_snapshot_string(value.source),
         candidate_count=value.candidate_count,
         selected_indices=value.selected_indices,
         used_fallback=value.used_fallback,
-        messages=value.messages,
+        messages=tuple(_snapshot_string(item) for item in value.messages),
     )
 
 
@@ -587,7 +609,7 @@ def _snapshot_fit_uncertainty(value: FitUncertainty | None) -> FitUncertainty | 
             if value.eta is None
             else np.array(value.eta, dtype=np.float64, copy=True)
         ),
-        method=value.method,
+        method=_snapshot_string(value.method),
     )
 
 
@@ -596,23 +618,23 @@ def _snapshot_spectrum_fit_result(value: SpectrumFitResult) -> SpectrumFitResult
         None
         if value.initial_guess is None
         else FitInitialGuess(
-            resonances=value.initial_guess.resonances,
+            resonances=_snapshot_resonances(value.initial_guess.resonances),
             baseline=value.initial_guess.baseline,
         )
     )
     return SpectrumFitResult(
         success=value.success,
-        failure_code=value.failure_code,
-        model_kind=value.model_kind,
+        failure_code=_snapshot_optional_string(value.failure_code),
+        model_kind=_snapshot_string(value.model_kind),
         baseline_degree=value.baseline_degree,
-        resonance_estimates=value.resonance_estimates,
+        resonance_estimates=_snapshot_resonances(value.resonance_estimates),
         baseline_estimate=value.baseline_estimate,
         diagnostics=_snapshot_initialization_diagnostics(value.diagnostics),
         initial_guess=initial_guess,
         uncertainty=_snapshot_fit_uncertainty(value.uncertainty),
-        uncertainty_reason=value.uncertainty_reason,
+        uncertainty_reason=_snapshot_optional_string(value.uncertainty_reason),
         scipy_status=value.scipy_status,
-        scipy_message=value.scipy_message,
+        scipy_message=_snapshot_optional_string(value.scipy_message),
         nfev=value.nfev,
         cost=value.cost,
         residual_rmse=value.residual_rmse,
@@ -666,7 +688,16 @@ class TwoPointCalibrationSource:
             raise TypeError("fit_configuration must be a FitConfiguration")
         fit_configuration = FitConfiguration(
             **{
-                item.name: getattr(self.fit_configuration, item.name)
+                item.name: (
+                    _snapshot_string(getattr(self.fit_configuration, item.name))
+                    if item.name == "model_kind"
+                    else tuple(
+                        _snapshot_string(value)
+                        for value in self.fit_configuration.resonance_ids
+                    )
+                    if item.name == "resonance_ids"
+                    else getattr(self.fit_configuration, item.name)
+                )
                 for item in fields(FitConfiguration)
             }
         )

@@ -433,6 +433,17 @@ calibration rejects a capable source subclass because source identity is
 semantically retained. Focused wave-two coverage passes 3 tests, the affected
 estimator/evaluator suite passes 263 tests, and the full repository passes 1,212
 tests.
+Task 20's third integrated re-review found two Important composition gaps. A
+combined resource mismatch and live-clock divergence now terminates through
+the resource-first unavailable path: the validator requires state/live clock
+identity but requires the observation endpoint only for an authenticated
+midpoint, preserving raw evidence, no estimator update, no aggregate, and a
+terminal runner. Stage 6.3 fit snapshots now canonicalize nested configuration,
+diagnostic, uncertainty, optimizer, and resonance-ID strings to exact built-in
+values. The public caller-asserted binding and subsequent calibration/reset
+therefore cannot retain callbacks carried by string subclasses. The focused
+gate passes 4 tests, affected suites pass 249 tests, and the complete repository
+passes 1,213 tests.
 
 ## Completed work
 
@@ -726,7 +737,9 @@ tests.
 
 ## Tests currently passing
 
-- Full repository suite including both Task 20 integrated fix waves: 1212 passed.
+- Full repository suite including all three Task 20 fix waves: 1213 passed.
+- Task 20 wave-three focused composition gate: 4 passed.
+- Task 20 wave-three affected estimator/evaluator gate: 249 passed.
 - Task 20 wave-two focused transaction/capability gate: 3 passed.
 - Task 20 wave-two affected estimator/evaluator integration gate: 263 passed.
 - Task 20 focused scientific/capability regression gate: 32 passed.

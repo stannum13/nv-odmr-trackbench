@@ -79,7 +79,29 @@ def test_nested_record_subclass_capability_is_removed_before_reset_graph() -> No
     assert type(configuration.identity_binding) is TwoPointIdentityBinding
     assert not hasattr(configuration.identity_binding, "callback")
 
-    source = make_legal_caller_asserted_source()
+    class StringCarrier(str):
+        pass
+
+    capable_message = StringCarrier("converged")
+    capable_message.callback = lambda: None
+    base_source = make_legal_caller_asserted_source()
+    capable_fit = replace(base_source.source_fit, scipy_message=capable_message)
+    source = bind_caller_asserted_two_point_calibration_source(
+        capable_fit,
+        base_source.fit_configuration,
+        base_source.source_observations,
+        base_source.identity_binding,
+        base_source.fluorescence_provenance,
+        source_id=base_source.source_id,
+        source_frequency_overhead_s=base_source.source_frequency_overhead_s,
+        source_start_timestamp_s=base_source.source_start_timestamp_s,
+        physical_fit_epoch_s=base_source.physical_fit_epoch_s,
+        availability_sequence_index=base_source.availability_sequence_index,
+        availability_timestamp_s=base_source.availability_timestamp_s,
+        clock_mapping=base_source.clock_mapping,
+    )
+    assert type(source.source_fit.scipy_message) is str
+    assert not hasattr(source.source_fit.scipy_message, "callback")
     calibration = calibrate_two_point(
         source,
         configuration,

@@ -1662,7 +1662,9 @@ def test_fifth_observation_expected_only_corruption_retains_physical_midpoint(
     assert build_two_point_evaluator_resources(runner) is None
 
 
-def test_live_clock_only_divergence_aborts_before_tracker_update(
+@pytest.mark.parametrize("corrupt_expected_photons", (False, True))
+def test_live_clock_divergence_aborts_before_tracker_update(
+    corrupt_expected_photons: bool,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     runner, instrument, tracker = _conditional_tracking_inputs(monkeypatch)
@@ -1682,7 +1684,16 @@ def test_live_clock_only_divergence_aborts_before_tracker_update(
             "_virtual_time_s",
             math.nextafter(observation.timestamp_s, math.inf),
         )
-        return observation
+        return (
+            replace(
+                observation,
+                expected_photons=math.nextafter(
+                    observation.expected_photons, math.inf
+                ),
+            )
+            if corrupt_expected_photons
+            else observation
+        )
 
     original_update = CalibratedTwoPointTracker.update
 
@@ -1700,12 +1711,20 @@ def test_live_clock_only_divergence_aborts_before_tracker_update(
     aborted = runner.step()
 
     assert type(aborted) is TwoPointRunnerAborted
-    assert aborted.resources is not None
-    assert aborted.abort.reason == "tracker_observation_validation_error"
-    assert aborted.abort.exception_type == "TwoPointObservationValidationError"
-    assert aborted.abort.exception_message
+    assert (aborted.resources is None) is corrupt_expected_photons
+    assert aborted.abort.reason == (
+        "resource_join_unavailable"
+        if corrupt_expected_photons
+        else "tracker_observation_validation_error"
+    )
+    assert (aborted.abort.exception_type is None) is corrupt_expected_photons
+    assert (aborted.abort.exception_message is None) is corrupt_expected_photons
     acquisition = aborted.abort.unaccepted_acquisition
-    assert acquisition.resource_join_status == "authenticated"
+    assert acquisition.resource_join_status == (
+        "unavailable" if corrupt_expected_photons else "authenticated"
+    )
+    if corrupt_expected_photons:
+        assert acquisition.resource_mismatch_fields == ("expected_photons",)
     assert acquisition.measurement_midpoint_s is None
     assert acquisition.full_observation.timestamp_s == (
         acquisition.query.expected_end_timestamp_s

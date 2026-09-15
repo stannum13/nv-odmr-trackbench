@@ -10,6 +10,11 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed the third Stage 6.3 integrated-review wave. Combined resource and live-
+  clock corruption now remains a resource-first unavailable terminal abort, and
+  Stage 6.3 source snapshots canonicalize all nested fit/configuration/
+  diagnostic/uncertainty strings and resonance IDs so string-subclass callbacks
+  cannot survive public binding, calibration, or reset.
 - Closed the second Stage 6.3 integrated-review wave. A live-clock-only
   post-query divergence now becomes a lossless typed terminal abort before any
   estimator update, retaining its exact joined acquisition resources while

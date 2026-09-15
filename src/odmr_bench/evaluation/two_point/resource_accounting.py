@@ -582,8 +582,11 @@ def _validate_unavailable_abort_context(
         or live_resources != acquisition.instrument_resources_after
         or state.instrument_current_sequence_index
         != full_observation.sequence_index
-        or state.current_virtual_time_s != full_observation.timestamp_s
-        or live_time_s != full_observation.timestamp_s
+        or state.current_virtual_time_s != live_time_s
+        or (
+            acquisition.measurement_midpoint_s is not None
+            and live_time_s != full_observation.timestamp_s
+        )
     ):
         _invalid_context("unavailable authoritative boundary")
 
