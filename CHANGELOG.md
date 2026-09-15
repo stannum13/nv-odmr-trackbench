@@ -20,6 +20,8 @@ once a package version is introduced.
 
 ### Fixed
 
+- Added Stage 6.4 Task 2 regression coverage proving malformed retained fast
+  history order is rejected rather than sorted or repaired.
 - Completed the Stage 6.4 Task 2 cadence review: incomplete fast blocks cannot
   begin when a sparse scan is due, and incomplete sparse blocks cannot begin
   before that cadence boundary; pending sparse continuations are exercised from

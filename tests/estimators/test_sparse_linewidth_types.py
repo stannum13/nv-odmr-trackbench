@@ -28,6 +28,7 @@ from odmr_bench.estimators import (
     SparseResetFailureCode,
     SparseUpdateConstructionCode,
 )
+from odmr_bench.estimators.sparse_linewidth_types import _composite_observation_traces
 from odmr_bench.estimators.two_point_types import PublicAcquisitionResources
 from tests.sparse_linewidth_helpers import (
     make_composite_estimate,
@@ -504,6 +505,13 @@ def test_incomplete_fast_pair_cannot_start_at_due_sparse_cadence() -> None:
 def test_incomplete_sparse_scan_cannot_start_before_due_cadence() -> None:
     with pytest.raises(ValueError, match="cadence"):
         _one_sparse_partial_estimate(resonance_id="r0", pending=False)
+
+
+def test_composite_trace_rejects_malformed_fast_history_tuple_order() -> None:
+    first = make_legal_pair_result(pair_index=0, resonance_id="r0")
+    second = make_legal_pair_result(pair_index=1, resonance_id="r1")
+    with pytest.raises(ValueError, match="contiguous"):
+        _composite_observation_traces((second, first), (), None, None)
 
 
 @pytest.mark.parametrize("pending", (False, True))
