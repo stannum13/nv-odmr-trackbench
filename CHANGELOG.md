@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed the Stage 6.4 implementation-plan review. The evaluator resource
+  builder now rejects every pre-start phase with the public state error,
+  constructs public resources only at or after successful tracking start, and
+  reserves `None` exclusively for an unavailable terminal resource join.
+  Timing-isolation coverage now uses a query-scoped test dynamics spy to reject
+  extra evaluator truth access without assuming a configurable quadrature call
+  count; the explicit truth oracle remains test-only and post-release.
 - Repaired the Stage 6.4 implementation-plan dependency graph after review.
   Pure fit geometry now precedes scheduler-owned clocked queries; fast updates
   precede due-scan construction; evaluator values and the sparse runner shell

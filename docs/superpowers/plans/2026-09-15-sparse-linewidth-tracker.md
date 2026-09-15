@@ -138,7 +138,7 @@ and the existing `odmr_bench.models`, `dynamics`, `emulator`, `estimators`, and
 | `src/odmr_bench/evaluation/two_point/calibration.py` | Extract private runner-neutral verified acquisition transaction; preserve public Stage 6.3 entry point. |
 | `src/odmr_bench/evaluation/two_point/runner.py` | Adapt private core call only; preserve all public behavior. |
 | `src/odmr_bench/evaluation/sparse_linewidth/types.py` | Evaluator errors, acquisition/query-failure, timing, abort, resources, runner states, and outcomes. |
-| `src/odmr_bench/evaluation/sparse_linewidth/resource_accounting.py` | Exact authenticated full/safe joins and evaluator arrival-order ledgers. |
+| `src/odmr_bench/evaluation/sparse_linewidth/resource_accounting.py` | Tracking/terminal-only authenticated full/safe joins and evaluator arrival-order ledgers; pre-start phases raise the public state error. |
 | `src/odmr_bench/evaluation/sparse_linewidth/runner.py` | Public bind/calibration/start/step/run/stop state machine. |
 | `src/odmr_bench/evaluation/sparse_linewidth/__init__.py` | Exact evaluator public surface. |
 | `tests/sparse_linewidth_helpers.py` | Legal source/calibration/instrument/query helper factories shared only by tests. |
@@ -237,6 +237,12 @@ class SparseLinewidthEvaluatorRunner:
     def run_until_event(self) -> SparseRunnerRunOutcome
     def stop_external(self) -> SparseRunnerExternallyStopped
 ```
+
+The resource builder raises `SparseRunnerStateError` in `ready`, pre-start
+`calibration_succeeded`, and `calibration_failed`; it first constructs a public
+resource record after successful tracking start. Tracking and authenticated
+terminal states return the record, while `None` is exclusive to the terminal
+resource-join-unavailable abort.
 
 Private verified-calibration extraction introduces `_VerifiedCalibrationIssuer`
 with exact `runner`, `instrument`, `run_token`, and
@@ -926,7 +932,7 @@ def test_start_rejects_calibration_mismatch_before_tracker_reset(spy_tracker) ->
 
 ---
 
-### Task 14: Evaluator Resource Builder at Bind and Start Boundaries
+### Task 14: Evaluator Resource Builder at Tracking Start
 
 **Files:** Create
 `src/odmr_bench/evaluation/sparse_linewidth/resource_accounting.py` and
@@ -937,12 +943,26 @@ and `CHANGELOG.md`.
 **Interface:** Implement
 `build_sparse_linewidth_evaluator_resources(runner:
 SparseLinewidthEvaluatorRunner) -> SparseLinewidthEvaluatorResources | None`
-for ready, calibration success/failure, and newly started tracking states. Task
-15 extends this same function for accepted/unaccepted tracking atoms.
+for a successfully started tracking state. Calls in `ready`,
+`calibration_succeeded` before start, and `calibration_failed` raise the exact
+public `SparseRunnerStateError`; tests inspect zero bind/calibration boundaries
+only through `SparseEvaluatorRunnerState`. No phase returns `None` in this task:
+`None` is reserved exclusively for Task 16's resource-join-unavailable terminal
+behavior. Task 15 extends the same function for accepted tracking atoms.
 
 **First RED witness:**
 
 ```python
+@pytest.mark.parametrize(
+    "runner_factory",
+    (ready_runner, calibration_succeeded_before_start_runner, calibration_failed_runner),
+)
+def test_resource_builder_rejects_every_prestart_phase(runner_factory) -> None:
+    runner = runner_factory()
+    assert runner.state.normal_tracking_trace == ()
+    with pytest.raises(SparseRunnerStateError):
+        build_sparse_linewidth_evaluator_resources(runner)
+
 def test_started_resource_builder_respects_source_treatment() -> None:
     included = build_sparse_linewidth_evaluator_resources(started_included_runner())
     conditional = build_sparse_linewidth_evaluator_resources(started_conditional_runner())
@@ -950,16 +970,22 @@ def test_started_resource_builder_respects_source_treatment() -> None:
     assert conditional.charged_resources.observations == 0
 ```
 
-- [ ] **RED:** Cover zero-at-bind, calibration success/failure, included source
-  charged exactly once, conditional source reported but uncharged, exact
-  calibration full/safe joins, and start-boundary equality. Run
+- [ ] **RED:** Assert `ready`, pre-start `calibration_succeeded`, and
+  `calibration_failed` calls raise `SparseRunnerStateError`, never return a
+  fabricated record or `None`, and leave state unchanged. Inspect their zero
+  tracking traces/CPU and exact bind/calibration resource boundaries only on
+  `runner.state`. After successful start, cover included source charged exactly
+  once, conditional source reported but uncharged, exact calibration full/safe
+  joins, and start-boundary equality. Run
   `.venv/bin/python -m pytest
   tests/evaluation/test_sparse_linewidth_resources.py -q`; expect missing
   builder.
-- [ ] **GREEN:** Replay immutable calibration atoms left-associatively from zero.
-  Build exact zero tracking ledgers and treatment-specific charged ledgers
-  without requiring a future step trace or future terminal behavior. Re-run RED;
-  expect all bind/calibration/start resource cases green.
+- [ ] **GREEN:** Check runner phase before reading resource inputs. Reject all
+  three pre-start phases with the public state error. Only after successful
+  tracking start, replay immutable calibration atoms left-associatively from
+  zero and build exact zero tracking ledgers plus treatment-specific charged
+  ledgers. Do not return `None`. Re-run RED; expect the pre-start rejection and
+  started-resource cases green.
 - [ ] Run Mandatory Gate and commit with
   `git commit -m "feat: build initial sparse evaluator resources"`.
 
@@ -977,17 +1003,38 @@ and `CHANGELOG.md`.
 `step() -> SparseRunnerStepOutcome`; extend
 `build_sparse_linewidth_evaluator_resources` through accepted fast/sparse
 atoms. Task 16 alone adds the terminal authenticated-unaccepted-atom path.
+Within `tests/evaluation/test_sparse_linewidth_runner.py`, define test-only
+`QueryScopedDynamicsCall(timestamp_s: float, inside_instrument_query: bool)` and
+`QueryScopedDynamicsSpy(base_dynamics: SpectralDynamics)` with immutable
+`calls`, `clear_calls()`, and
+`instrument_query_scope() -> AbstractContextManager[None]` used by a
+monkeypatched exact `ODMRInstrument.query`; neither name enters production or
+package exports.
 
 **First RED witness:**
 
 ```python
-def test_completed_scan_retains_midpoints_and_release_without_truth_lookup() -> None:
+def test_completed_scan_retains_timing_without_out_of_query_dynamics(
+    monkeypatch,
+) -> None:
+    spy = QueryScopedDynamicsSpy(base_dynamics)
+    instrument = instrument_using(spy)
+    runner = started_runner(instrument)
+    original_query = ODMRInstrument.query
+
+    def query_in_declared_signal_scope(self, *args, **kwargs):
+        with spy.instrument_query_scope():
+            return original_query(self, *args, **kwargs)
+
+    monkeypatch.setattr(ODMRInstrument, "query", query_in_declared_signal_scope)
+    spy.clear_calls()
     outcome = accept_one_complete_scan(runner)
     timing = outcome.state.scan_timings[-1]
     assert timing.public_reference_timestamp_s == ordered_mean(public_midpoints)
     assert timing.truth_reference_timestamp_s == ordered_mean(actual_midpoints)
     assert timing.release_sequence_index == outcome.update.observation.sequence_index
-    assert instrument.spectral_truth_lookup_calls == 0
+    assert spy.calls
+    assert all(call.inside_instrument_query for call in spy.calls)
 ```
 
 - [ ] **RED:** For both modes, assert pre-query expected midpoint, returned
@@ -998,15 +1045,23 @@ def test_completed_scan_retains_midpoints_and_release_without_truth_lookup() -> 
   five-midpoint timing with actual/public ordered means and fifth release joins.
   Test partial and scientifically failed scans, fast/sparse/interleaved ledgers,
   both treatments, and expected/realized photons for accepted atoms.
-  Assert production runner and instrument perform zero spectral-truth lookups.
+  Define `QueryScopedDynamicsSpy` in
+  `tests/evaluation/test_sparse_linewidth_runner.py`; wrap the exact instrument
+  query method in a test-only scope marker, clear construction/calibration calls,
+  and assert every later dynamics call occurs inside that query scope. Require at
+  least one declared signal-evaluation call, but do not pin a count because the
+  instrument's quadrature policy may vary. Any out-of-query call is an extra
+  evaluator truth access and fails the test.
   Run focused runner/resource tests with `-k 'accepted or retry or timing or
   tracking_resources'`; expect missing accepted integration.
 - [ ] **GREEN:** Query once, keep full observations evaluator-only, commit trace,
   timing, resource, and state only after tracker acceptance, and replay all
   evaluator atoms in exact arrival order. A pre-return ordinary instrument
   exception is retryable and uncharged. Compute only midpoint/reference/release
-  timing; do not request a truth snapshot or spectral value. Re-run RED; expect
-  accepted steps, retry, timing retention, and resource integration green.
+  timing; do not request a truth snapshot or spectral value. The test-only spy
+  remains outside production and makes no assertion about the number of calls
+  inside one query. Re-run RED; expect accepted steps, retry, timing retention,
+  and resource integration green.
 - [ ] Run Mandatory Gate and commit with
   `git commit -m "feat: integrate accepted sparse evaluator steps"`.
 
@@ -1141,8 +1196,8 @@ def test_exact_static_acceptance_recovers_local_linewidth() -> None:
   unbiased recovery or performance. Audit with `rg -n
   "current_snapshot|snapshot_at|spectral_truth|_dynamics"
   src/odmr_bench/estimators src/odmr_bench/evaluation/sparse_linewidth` and add
-  two explicit tests: production runner/instrument truth lookup count remains
-  zero; `evaluate_released_scan_truth` rejects an incomplete timing and calls
+  two explicit tests: production tracking produces no out-of-query dynamics
+  call; `evaluate_released_scan_truth` rejects an incomplete timing and calls
   test-held dynamics exactly once only after the completed timing record exists.
   Re-run regression plus focused sparse tracker/runner/resources tests; expect
   green.

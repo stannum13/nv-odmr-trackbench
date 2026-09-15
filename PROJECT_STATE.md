@@ -5,8 +5,8 @@ Last updated: 2026-09-15
 ## Current stage
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
-twenty-task detailed TDD implementation plan whose first dependency review has
-been repaired; independent re-review is pending. Pure fit geometry is now
+twenty-task detailed TDD implementation plan whose final review is closed and
+which is ready for task-by-task execution. Pure fit geometry is now
 separate from stateful scheduler-owned query clocks, reset precedes fast update
 and due-scan behavior, and evaluator value types precede the sparse runner class
 that enables exact calibration-authority registration. Calibration/start,
@@ -16,7 +16,12 @@ dynamics additions have been removed: release-gated truth evaluation and
 linewidth drift exist only as test fixtures. The plan also uses configured
 `max_nfev`, stops fit CPU timing before result construction, and keeps private
 authority tests in the existing calibration test module. No Stage 6.4
-production code or Stage 6.5 claim has been added.
+production code or Stage 6.5 claim has been added. Final plan review also closes
+resource-builder phase semantics: pre-start calls raise the public state error,
+public evaluator resources begin only after successful tracking start, and
+`None` is exclusive to an unavailable terminal resource join. Timing isolation
+uses a query-scoped test dynamics spy rather than a nonexistent instrument
+counter, without pinning configurable quadrature call counts.
 
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated
