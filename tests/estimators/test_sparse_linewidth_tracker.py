@@ -626,6 +626,67 @@ def _identity_source_snapshot(identity) -> tuple[object, ...]:
     )
 
 
+def _frozen_source_snapshot(value) -> tuple[object, ...]:
+    return (
+        value.frozen_fast_center_hz,
+        value.frozen_fast_center_source_kind,
+        value.frozen_fast_center_source_pair_index,
+        value.frozen_fast_center_reference_timestamp_s,
+        value.frozen_fast_center_release_sequence_index,
+        value.frozen_fast_center_release_timestamp_s,
+        value.frozen_prior_fwhm_hz,
+        value.frozen_fwhm_source_kind,
+        value.frozen_fwhm_source_scan_index,
+        value.frozen_fwhm_reference_timestamp_s,
+        value.frozen_fwhm_release_sequence_index,
+        value.frozen_fwhm_release_timestamp_s,
+    )
+
+
+def _independent_resource_transition(
+    resources: PublicAcquisitionResources,
+    observation: EstimatorObservation,
+    metadata: TwoPointRunMetadata,
+) -> PublicAcquisitionResources:
+    realized_increment = (
+        0 if observation.realized_photons is None else observation.realized_photons
+    )
+    missing_increment = 1 if observation.realized_photons is None else 0
+    return PublicAcquisitionResources(
+        observations=resources.observations + 1,
+        integration_time_s=(
+            resources.integration_time_s + observation.integration_time_s
+        ),
+        nominal_exposure_photons=(
+            resources.nominal_exposure_photons
+            + observation.nominal_exposure_photons
+        ),
+        realized_photons=resources.realized_photons + realized_increment,
+        observations_without_realized_counts=(
+            resources.observations_without_realized_counts + missing_increment
+        ),
+        virtual_elapsed_time_s=(
+            resources.virtual_elapsed_time_s
+            + (metadata.frequency_overhead_s + observation.integration_time_s)
+        ),
+    )
+
+
+def _assert_resource_fields(
+    actual: PublicAcquisitionResources,
+    expected: PublicAcquisitionResources,
+) -> None:
+    assert actual.observations == expected.observations
+    assert actual.integration_time_s == expected.integration_time_s
+    assert actual.nominal_exposure_photons == expected.nominal_exposure_photons
+    assert actual.realized_photons == expected.realized_photons
+    assert (
+        actual.observations_without_realized_counts
+        == expected.observations_without_realized_counts
+    )
+    assert actual.virtual_elapsed_time_s == expected.virtual_elapsed_time_s
+
+
 def _accept_fast_pairs(
     tracker: SparseLinewidthCompositeTracker,
     calibration: TwoPointCalibration,
@@ -1534,6 +1595,9 @@ def test_first_four_sparse_points_are_frozen_partial_transitions() -> None:
         partial = update.estimate.incomplete_sparse_scan
         assert type(partial) is SparsePartialScan
         assert len(partial.queries) == point_index + 1
+        assert _frozen_source_snapshot(partial) == _frozen_source_snapshot(
+            reserved[0]
+        )
         assert all(
             actual is expected
             for actual, expected in zip(
@@ -1583,30 +1647,14 @@ def test_first_four_sparse_points_are_frozen_partial_transitions() -> None:
         == source_snapshots[index]
         for index in range(8)
     )
-    frozen_query_facts = tuple(
-        (
-            query.frozen_fast_center_hz,
-            query.frozen_fast_center_source_kind,
-            query.frozen_fast_center_source_pair_index,
-            query.frozen_fast_center_reference_timestamp_s,
-            query.frozen_fast_center_release_sequence_index,
-            query.frozen_fast_center_release_timestamp_s,
-            query.frozen_prior_fwhm_hz,
-            query.frozen_fwhm_source_kind,
-            query.frozen_fwhm_source_scan_index,
-            query.frozen_fwhm_reference_timestamp_s,
-            query.frozen_fwhm_release_sequence_index,
-            query.frozen_fwhm_release_timestamp_s,
-        )
-        for query in reserved
-    )
+    frozen_query_facts = tuple(_frozen_source_snapshot(query) for query in reserved)
     assert len(set(frozen_query_facts)) == 1
 
 
 def test_sparse_partial_resource_ledgers_follow_exact_arrival_order() -> None:
     configuration = SparseLinewidthConfiguration(integration_time_s=0.007)
-    calibration = _calibration()
-    metadata = _metadata(calibration, frequency_overhead_s=0.003)
+    calibration = _calibration(included=True)
+    metadata = _metadata(calibration, included=True)
     tracker = _reset_tracker(
         configuration=configuration,
         calibration=calibration,
@@ -1617,30 +1665,33 @@ def test_sparse_partial_resource_ledgers_follow_exact_arrival_order() -> None:
     expected_sparse = before.sparse_tracking_resources
     expected_tracking = before.tracking_resources
     expected_charged = before.charged_resources
+    assert expected_charged != expected_tracking
 
     for point_index in range(4):
         query = tracker.choose_next_query()
         assert type(query) is SparseLinewidthQuery
         observation = _sparse_observation(
             query,
-            realized_photons=None if point_index in {1, 3} else 10 + point_index,
+            realized_photons=None if point_index == 1 else 10 + point_index,
         )
-        expected_sparse = tracker_module._advance_observation_resources(
+        expected_sparse = _independent_resource_transition(
             expected_sparse, observation, metadata
         )
-        expected_tracking = tracker_module._advance_observation_resources(
+        expected_tracking = _independent_resource_transition(
             expected_tracking, observation, metadata
         )
-        expected_charged = tracker_module._advance_observation_resources(
+        expected_charged = _independent_resource_transition(
             expected_charged, observation, metadata
         )
 
         update = tracker.update(observation)
 
         assert update.estimate.fast_tracking_resources == before.fast_tracking_resources
-        assert update.estimate.sparse_tracking_resources == expected_sparse
-        assert update.estimate.tracking_resources == expected_tracking
-        assert update.estimate.charged_resources == expected_charged
+        _assert_resource_fields(
+            update.estimate.sparse_tracking_resources, expected_sparse
+        )
+        _assert_resource_fields(update.estimate.tracking_resources, expected_tracking)
+        _assert_resource_fields(update.estimate.charged_resources, expected_charged)
         assert (
             update.estimate.sparse_tracking_resources.observations
             == point_index + 1

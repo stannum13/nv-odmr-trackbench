@@ -39,6 +39,15 @@ sequence/frequency/integration/endpoint/exposure/value precedence. Ordinary
 partial/resource/aggregate/update construction failures translate to the exact
 Stage 6.4 typed code with commit-last value rollback, while process-control
 exceptions propagate as the identical object.
+Task 9's independent review judged production behavior conformant and found
+two Important test-evidence gaps plus one Minor oracle gap. The closed matrix
+now covers the complete sparse validation chain and every ordinary/process-
+control construction failure at pending points one through four, retaining the
+complete prefix state on rollback. Every partial length explicitly matches all
+twelve frozen center/FWHM source fields to query one, and all five reserved
+queries retain that snapshot. Resource expectations now come from an
+independent field-by-field arrival recurrence with distinct point atoms and an
+included-calibration charged prefix rather than the production helper.
 
 Task 7 adds the exact public `SparseLinewidthCompositeTracker` shell. Reset
 enforces declaration-order typed precedence, validates the tracker-held sparse
@@ -921,6 +930,11 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 9 review-fix focused tracker/atomicity files: 161 passed.
+- Stage 6.4 Task 9 review-fix plus complete Stage 6.3 tracker/atomicity gate:
+  230 passed.
+- Stage 6.4 Task 9 review-fix estimator/evaluator/emulator gate: 1,502 passed.
+- Stage 6.4 Task 9 review-fix full repository gate: 1,603 passed.
 - Stage 6.4 Task 9 focused tracker/atomicity files: 106 passed.
 - Stage 6.4 Task 9 plus complete Stage 6.3 tracker/atomicity gate: 175 passed.
 - Stage 6.4 Task 9 estimator/evaluator/emulator gate: 1,447 passed.

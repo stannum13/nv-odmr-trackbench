@@ -339,9 +339,25 @@ def _pending_fast_observation(
 
 def _pending_sparse_observation(
     tracker: SparseLinewidthCompositeTracker,
+    *,
+    accepted_prefix_length: int = 0,
 ) -> EstimatorObservation:
     for _ in range(16):
         tracker.update(_pending_fast_observation(tracker))
+    for point_index in range(accepted_prefix_length):
+        prefix_query = tracker.choose_next_query()
+        assert type(prefix_query) is SparseLinewidthQuery
+        tracker.update(
+            EstimatorObservation(
+                prefix_query.expected_sequence_index,
+                prefix_query.expected_end_timestamp_s,
+                prefix_query.frequency_hz,
+                0.9 + 0.01 * point_index,
+                prefix_query.integration_time_s,
+                prefix_query.expected_nominal_exposure_photons,
+                17 + point_index,
+            )
+        )
     query = tracker.choose_next_query()
     assert type(query) is SparseLinewidthQuery
     return EstimatorObservation(
@@ -665,124 +681,130 @@ def test_every_fast_construction_stage_preserves_identical_base_exception(
     assert _snapshot(tracker) == before
 
 
+def _install_sparse_validation_defect(
+    tracker: SparseLinewidthCompositeTracker,
+    observation: EstimatorObservation,
+    case: str,
+) -> object:
+    state = tracker._state
+    assert state is not None
+    if case in {"invalid_type", "no_pending"}:
+        estimate = replace(
+            state.estimate,
+            pending_mode=None,
+            pending_query=None,
+        )
+        object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+        if case == "invalid_type":
+            return object()
+        return replace(
+            observation,
+            sequence_index=observation.sequence_index + 1,
+        )
+    if case == "pending_mode":
+        estimate = copy(state.estimate)
+        object.__setattr__(estimate, "pending_mode", "fast_pair")
+        object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+        return replace(
+            observation,
+            sequence_index=observation.sequence_index + 1,
+        )
+    if case == "sparse_echo":
+        estimate = replace(
+            state.estimate,
+            pending_query=replace(state.estimate.pending_query),
+        )
+        object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+        return replace(
+            observation,
+            sequence_index=observation.sequence_index + 1,
+        )
+    if case == "sequence":
+        return replace(
+            observation,
+            sequence_index=observation.sequence_index + 1,
+            frequency_hz=observation.frequency_hz + 1.0,
+        )
+    if case == "frequency":
+        return replace(
+            observation,
+            frequency_hz=observation.frequency_hz + 1.0,
+            integration_time_s=observation.integration_time_s * 2.0,
+        )
+    if case == "integration":
+        return replace(
+            observation,
+            integration_time_s=observation.integration_time_s * 2.0,
+            timestamp_s=observation.timestamp_s + 1.0,
+        )
+    if case == "endpoint":
+        return replace(
+            observation,
+            timestamp_s=observation.timestamp_s + 1.0,
+            nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
+        )
+    if case == "nominal_exposure":
+        corrupted = replace(
+            observation,
+            nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
+        )
+        object.__setattr__(corrupted, "fluorescence", float("nan"))
+        return corrupted
+    if case == "invalid_value":
+        corrupted = copy(observation)
+        object.__setattr__(corrupted, "fluorescence", float("nan"))
+        object.__setattr__(corrupted, "realized_photons", -1)
+        return corrupted
+    raise AssertionError(f"unknown sparse validation case: {case}")
+
+
+@pytest.mark.parametrize("accepted_prefix_length", range(4))
 @pytest.mark.parametrize(
-    ("mutation", "expected_code"),
+    ("case", "expected_code"),
     (
-        (lambda observation: object(), "invalid_observation_type"),
-        (
-            lambda observation: replace(
-                observation,
-                sequence_index=observation.sequence_index + 1,
-                frequency_hz=observation.frequency_hz + 1.0,
-            ),
-            "sequence_mismatch",
-        ),
-        (
-            lambda observation: replace(
-                observation,
-                frequency_hz=observation.frequency_hz + 1.0,
-                integration_time_s=observation.integration_time_s * 2.0,
-            ),
-            "frequency_mismatch",
-        ),
-        (
-            lambda observation: replace(
-                observation,
-                integration_time_s=observation.integration_time_s * 2.0,
-                timestamp_s=observation.timestamp_s + 1.0,
-            ),
-            "integration_time_mismatch",
-        ),
-        (
-            lambda observation: replace(
-                observation,
-                timestamp_s=observation.timestamp_s + 1.0,
-                nominal_exposure_photons=(
-                    observation.nominal_exposure_photons + 1.0
-                ),
-            ),
-            "endpoint_mismatch",
-        ),
-        (
-            lambda observation: replace(
-                observation,
-                nominal_exposure_photons=(
-                    observation.nominal_exposure_photons + 1.0
-                ),
-            ),
-            "nominal_exposure_mismatch",
-        ),
+        ("invalid_type", "invalid_observation_type"),
+        ("no_pending", "no_pending_query"),
+        ("pending_mode", "pending_mode_mismatch"),
+        ("sparse_echo", "sparse_query_echo_mismatch"),
+        ("sequence", "sequence_mismatch"),
+        ("frequency", "frequency_mismatch"),
+        ("integration", "integration_time_mismatch"),
+        ("endpoint", "endpoint_mismatch"),
+        ("nominal_exposure", "nominal_exposure_mismatch"),
+        ("invalid_value", "invalid_observation_value"),
     ),
 )
 def test_sparse_validation_precedence_is_exact_and_atomic(
-    mutation, expected_code: str
+    accepted_prefix_length: int,
+    case: str,
+    expected_code: str,
 ) -> None:
     tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
+    observation = _pending_sparse_observation(
+        tracker, accepted_prefix_length=accepted_prefix_length
+    )
+    pending = tracker.estimate().pending_query
+    assert type(pending) is SparseLinewidthQuery
+    assert pending.point_index == accepted_prefix_length
+    partial = tracker.estimate().incomplete_sparse_scan
+    if accepted_prefix_length == 0:
+        assert partial is None
+    else:
+        assert partial is not None
+        assert len(partial.queries) == accepted_prefix_length
+    corrupted_observation = _install_sparse_validation_defect(
+        tracker, observation, case
+    )
     before = _snapshot(tracker)
 
     with pytest.raises(SparseLinewidthObservationValidationError) as raised:
-        tracker.update(mutation(observation))
+        tracker.update(corrupted_observation)  # type: ignore[arg-type]
 
     assert raised.value.code == expected_code
     assert _snapshot(tracker) == before
 
 
-def test_sparse_echo_precedes_sequence_and_value_validation() -> None:
-    tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
-    state = tracker._state
-    assert state is not None
-    estimate = replace(
-        state.estimate,
-        pending_query=replace(state.estimate.pending_query),
-    )
-    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
-    observation = replace(
-        observation,
-        sequence_index=observation.sequence_index + 1,
-    )
-    object.__setattr__(observation, "fluorescence", float("nan"))
-    before = _snapshot(tracker)
-
-    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
-        tracker.update(observation)
-
-    assert raised.value.code == "sparse_query_echo_mismatch"
-    assert _snapshot(tracker) == before
-
-
-def test_sparse_nominal_exposure_precedes_invalid_value_and_rolls_back() -> None:
-    tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
-    observation = replace(
-        observation,
-        nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
-    )
-    object.__setattr__(observation, "fluorescence", float("nan"))
-    before = _snapshot(tracker)
-
-    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
-        tracker.update(observation)
-
-    assert raised.value.code == "nominal_exposure_mismatch"
-    assert _snapshot(tracker) == before
-
-
-def test_invalid_sparse_value_is_last_validation_code_and_atomic() -> None:
-    tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
-    object.__setattr__(observation, "fluorescence", float("nan"))
-    object.__setattr__(observation, "realized_photons", -1)
-    before = _snapshot(tracker)
-
-    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
-        tracker.update(observation)
-
-    assert raised.value.code == "invalid_observation_value"
-    assert _snapshot(tracker) == before
-
-
+@pytest.mark.parametrize("accepted_prefix_length", range(4))
 @pytest.mark.parametrize(
     ("constructor_name", "expected_code"),
     (
@@ -797,16 +819,22 @@ def test_invalid_sparse_value_is_last_validation_code_and_atomic() -> None:
 )
 def test_sparse_partial_construction_codes_and_rollback(
     monkeypatch: pytest.MonkeyPatch,
+    accepted_prefix_length: int,
     constructor_name: str,
     expected_code: str,
 ) -> None:
     tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
+    observation = _pending_sparse_observation(
+        tracker, accepted_prefix_length=accepted_prefix_length
+    )
     before = _snapshot(tracker)
+    injected = RuntimeError(
+        f"injected point {accepted_prefix_length} {constructor_name}"
+    )
 
     def fail(*args, **kwargs):
         del args, kwargs
-        raise RuntimeError(f"injected {constructor_name}")
+        raise injected
 
     monkeypatch.setattr(tracker_module, constructor_name, fail, raising=False)
 
@@ -814,10 +842,11 @@ def test_sparse_partial_construction_codes_and_rollback(
         tracker.update(observation)
 
     assert raised.value.code == expected_code
-    assert raised.value.__cause__ is not None
+    assert raised.value.__cause__ is injected
     assert _snapshot(tracker) == before
 
 
+@pytest.mark.parametrize("accepted_prefix_length", range(4))
 @pytest.mark.parametrize(
     "constructor_name",
     (
@@ -829,10 +858,13 @@ def test_sparse_partial_construction_codes_and_rollback(
 )
 def test_every_sparse_partial_stage_preserves_identical_base_exception(
     monkeypatch: pytest.MonkeyPatch,
+    accepted_prefix_length: int,
     constructor_name: str,
 ) -> None:
     tracker = _valid_tracker()
-    observation = _pending_sparse_observation(tracker)
+    observation = _pending_sparse_observation(
+        tracker, accepted_prefix_length=accepted_prefix_length
+    )
     before = _snapshot(tracker)
     injected = KeyboardInterrupt(f"injected sparse {constructor_name}")
 

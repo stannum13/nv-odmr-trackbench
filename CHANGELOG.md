@@ -69,6 +69,14 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed the Stage 6.4 Task 9 review evidence gaps without changing production
+  behavior. Sparse validation precedence plus ordinary and identical
+  process-control rollback now run at accepted prefix lengths zero through
+  three for every partial/resource/aggregate/update construction stage. Each
+  partial length one through four explicitly matches all twelve frozen source
+  fields to the first query and all five reserved queries. Resource assertions
+  now use an independent field-by-field arrival recurrence over distinct point
+  atoms and a nonzero included-calibration charged prefix.
 - Unified the Stage 6.3 tracker source model with the canonical NumPy
   pseudo-Voigt numeric path used by acquisition. This removes a native Linux
   x86/Python 3.11 last-bit mismatch that produced a false nanohertz-scale
