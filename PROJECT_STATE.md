@@ -348,6 +348,19 @@ protocol rows and complete 78-test runner file pass; the full repository gate
 passes all 1,196 tests.
 The final bounded independent re-review reported zero Critical, Important, or
 Minor findings.
+Task 18's closed 4,481-point calibration fixture exposed one invalid timing
+association in the Task 13 acquisition seam. The instrument clock advances as
+`(previous endpoint + overhead) + integration`, while the required resource
+ledger independently accumulates `previous elapsed + (overhead + integration)`;
+these exact binary64 recurrences first differ by one ULP at the fourth query.
+Calibration midpoint authentication now uses the observation endpoint and live
+instrument clock only. Resource-ledger integrity remains separately protected
+by exact atomic replay and boundary comparison, so removing the cross-
+association equality neither introduces a tolerance nor weakens detection of
+endpoint or ledger corruption. A focused four-point regression pins both hex
+witnesses and the exact instrument midpoint sequence.
+The bounded independent review of this owning timing fix reported zero
+Critical, Important, or Minor findings.
 
 ## Completed work
 
@@ -641,10 +654,12 @@ Minor findings.
 
 ## Tests currently passing
 
-- `pytest`: 1196 passed.
+- Tracked repository test suite plus the owning timing regression: 1197 passed.
+- Task 18's 4,481-point verified-source witness passes; two other uncommitted
+  Task 18 truth-oracle acceptance rows remain under Task 18 ownership.
 - Task 17 runner file: 78 passed.
 - Task 17 named protocol matrix: 60 passed.
-- `ruff check .`: All checks passed.
+- Ruff across every tracked Python file: All checks passed.
 - The fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
   `nv_odmr_trackbench-0.1.0-py3-none-any.whl`, then installed the wheel into a

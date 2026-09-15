@@ -347,6 +347,38 @@ def test_verified_calibration_success_uses_safe_fit_and_identity_binding(
     assert runner.state.current_virtual_time_s == 0.012
 
 
+def test_calibration_accepts_instrument_clock_when_ledger_elapsed_differs_by_one_ulp(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+
+    instrument = _instrument()
+    runner = TwoPointEvaluatorRunner.bind(instrument)
+    arguments = _valid_calibration_arguments()
+    arguments["frequency_hz"] = (2.74e9, 2.75e9, 2.76e9, 2.77e9)
+    fit_configuration = arguments["fit_configuration"]
+    returned_fit = make_legal_source_fit(fit_configuration)
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda sweep, configuration, initial_guess=None: returned_fit,
+    )
+
+    outcome = runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
+
+    assert instrument.virtual_time_s.hex() == "0x1.89374bc6a7efbp-6"
+    assert instrument.resources.virtual_elapsed_time_s.hex() == (
+        "0x1.89374bc6a7efap-6"
+    )
+    assert type(outcome) is VerifiedTwoPointCalibrationSuccess
+    assert tuple(value.hex() for value in outcome.measurement_midpoints_s) == (
+        "0x1.cac083126e979p-9",
+        "0x1.374bc6a7ef9dbp-7",
+        "0x1.fbe76c8b43959p-7",
+        "0x1.604189374bc6bp-6",
+    )
+
+
 def test_verified_source_identity_matrix_rejects_public_mint_and_copies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

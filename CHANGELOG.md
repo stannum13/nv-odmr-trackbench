@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Corrected verified-calibration timing authentication for long exact binary64
+  schedules. The physical instrument clock and resource ledger use two
+  intentionally different addition associations, so their elapsed-time totals
+  may differ by one ULP without a timing or accounting fault. Midpoints now
+  authenticate against the observation endpoint and live instrument clock,
+  while exact resource replay continues to validate the ledger independently;
+  focused hex witnesses preserve strict detection of real timing corruption.
 - Made repository-local test support and estimator test directories explicit
   packages so clean Linux direct-pytest collection resolves
   `tests.two_point_helpers`; the repair passed the complete GitHub CI matrix on

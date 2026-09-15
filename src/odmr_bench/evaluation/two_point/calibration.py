@@ -615,13 +615,14 @@ def _acquire_verified_calibration(
         safe_observation = observation.estimator_view()
         full_observations.append(observation)
         safe_observations.append(safe_observation)
+        # The resource ledger accumulates overhead plus integration as one
+        # atom, so its binary64 total need not equal the separately advanced
+        # instrument clock. Exact resource replay validates that total below.
         timing_matches = (
             not boundary_after_query_unavailable
             and observation.integration_time_s == request.integration_time_s
             and observation.timestamp_s == request.expected_end_timestamp_s
             and instrument_time_after == request.expected_end_timestamp_s
-            and instrument_resources_after.virtual_elapsed_time_s
-            == request.expected_end_timestamp_s
         )
         measurement_midpoints_s.append(
             request.expected_measurement_midpoint_s if timing_matches else None
