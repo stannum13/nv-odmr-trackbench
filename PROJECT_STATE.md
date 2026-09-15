@@ -94,6 +94,18 @@ complete Stage 6.3 tracker/atomicity tests. The fresh combined mandatory gate
 passed 1,427 estimator/evaluation/emulator tests and 1,528 repository tests;
 Ruff and `git diff --check` passed.
 
+The Task 7 push exposed a native Linux x86/Python 3.11 Stage 6.3 regression:
+the instrument's canonical NumPy pseudo-Voigt path and the tracker's private
+scalar-libm source model differed in their last bits, producing a false
+approximately `5.8e-9 Hz` correction in a static noiseless trace. The tracker
+source model now promotes scalar queries through the same canonical
+pseudo-Voigt primitive as vector/acquisition evaluation while retaining
+baseline-first, optional-offset, literal-source-order, and target-only
+semantics. Exact test oracles use the canonical one-element NumPy spectrum;
+independent analytic depth/derivative tests remain closed-form. Independent
+review is clean. macOS and exact-version Linux container gates pass; native
+GitHub x86 Python 3.11 CI remains the final external confirmation after push.
+
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
 returned evaluation count at the configured, including non-default, limit is
@@ -894,6 +906,13 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 8 focused tracker/atomicity files: 86 passed.
+- Stage 6.4 Task 8 plus complete Stage 6.3 tracker/atomicity gate: 155 passed.
+- Stage 6.4 Task 8 estimator/evaluator/emulator gate: 1,427 passed.
+- Stage 6.4 Task 8 full repository gate including the numeric repair: 1,528
+  passed.
+- Canonical numeric-path focused gate: 69 passed on macOS and the exact-version
+  Linux/amd64 Python 3.11 container; independent review clean.
 - Stage 6.4 Task 7 review-fix focused tracker/atomicity files: 32 passed.
 - Stage 6.4 Task 7 review-fix sparse/source compatibility gate: 313 passed.
 - Stage 6.4 Task 7 full repository gate: 1,472 passed.
@@ -985,7 +1004,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 8's exact fast-pair updates and due-scan
-   selection.
+1. Continue Stage 6.4 with Task 9's sparse first-through-fourth observation
+   transitions.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

@@ -59,6 +59,12 @@ once a package version is introduced.
 
 ### Fixed
 
+- Unified the Stage 6.3 tracker source model with the canonical NumPy
+  pseudo-Voigt numeric path used by acquisition. This removes a native Linux
+  x86/Python 3.11 last-bit mismatch that produced a false nanohertz-scale
+  correction in an exact static/noiseless trace. Exact model-value test oracles
+  now use the same canonical one-element spectrum path, while independent
+  analytic discriminator checks remain separately formulated.
 - Closed the Task 8 composite-tracker review gaps. Sparse acceptance now rejects
   a value-equal pending-query clone and stale fast reservation/partial state as
   `sparse_query_echo_mismatch` before sequence validation. Expanded regressions
