@@ -59,6 +59,14 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed the Task 8 composite-tracker review gaps. Sparse acceptance now rejects
+  a value-equal pending-query clone and stale fast reservation/partial state as
+  `sparse_query_echo_mismatch` before sequence validation. Expanded regressions
+  compare a complete Stage 6.3 fast-view projection after every flank across
+  all gate outcomes, pin scan target rotation and both per-ID orders with every
+  frozen source echo and non-default integration, cover the full validation
+  precedence matrix, and prove identical process-control rollback at every
+  public fast construction stage.
 - Fixed two Stage 6.4 composite-reset calibration boundaries found in Task 7
   review. Conditional-free pre-calibration remains uncharged but now preserves
   the mapped source availability release epoch. Reset also revalidates the

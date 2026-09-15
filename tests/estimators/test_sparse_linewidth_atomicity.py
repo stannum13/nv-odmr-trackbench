@@ -399,6 +399,111 @@ def test_fast_validation_precedence_is_exact_and_atomic(
     assert _snapshot(tracker) == before
 
 
+def test_no_pending_precedes_sequence_and_preserves_corrupted_boundary() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    state = tracker._state
+    assert state is not None
+    estimate = replace(
+        state.estimate,
+        pending_mode=None,
+        pending_query=None,
+    )
+    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+    before = _snapshot(tracker)
+    observation = replace(
+        observation, sequence_index=observation.sequence_index + 1
+    )
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "no_pending_query"
+    assert _snapshot(tracker) == before
+
+
+def test_invalid_type_precedes_no_pending_query() -> None:
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(object())  # type: ignore[arg-type]
+
+    assert raised.value.code == "invalid_observation_type"
+    assert _snapshot(tracker) == before
+
+
+def test_pending_mode_precedes_fast_echo_and_sequence() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    state = tracker._state
+    assert state is not None
+    estimate = copy(state.estimate)
+    object.__setattr__(estimate, "pending_mode", "sparse_scan")
+    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+    before = _snapshot(tracker)
+    observation = replace(
+        observation, sequence_index=observation.sequence_index + 1
+    )
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "pending_mode_mismatch"
+    assert _snapshot(tracker) == before
+
+
+def test_fast_reserved_query_echo_precedes_sequence() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    state = tracker._state
+    assert state is not None
+    cloned_query = replace(state.estimate.pending_query)
+    estimate = replace(state.estimate, pending_query=cloned_query)
+    object.__setattr__(tracker, "_state", replace(state, estimate=estimate))
+    before = _snapshot(tracker)
+    observation = replace(
+        observation, sequence_index=observation.sequence_index + 1
+    )
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "fast_query_echo_mismatch"
+    assert _snapshot(tracker) == before
+
+
+def test_invalid_fast_value_is_last_validation_code_and_atomic() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    object.__setattr__(observation, "realized_photons", -1)
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "invalid_observation_value"
+    assert _snapshot(tracker) == before
+
+
+def test_nominal_exposure_precedes_invalid_fast_value() -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    observation = replace(
+        observation,
+        nominal_exposure_photons=observation.nominal_exposure_photons + 1.0,
+    )
+    object.__setattr__(observation, "fluorescence", float("nan"))
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "nominal_exposure_mismatch"
+    assert _snapshot(tracker) == before
+
+
 @pytest.mark.parametrize(
     ("constructor_name", "failure_call", "expected_code"),
     (
@@ -500,19 +605,39 @@ def test_second_fast_side_construction_codes_and_rollback(
     assert _snapshot(tracker) == before
 
 
-def test_fast_base_exception_is_identical_and_rolls_back(
+@pytest.mark.parametrize(
+    ("side", "constructor_name"),
+    (
+        ("first", "TwoPointPartialPair"),
+        ("first", "PublicAcquisitionResources"),
+        ("first", "SparseLinewidthCompositeEstimate"),
+        ("first", "SparseLinewidthCompositeUpdate"),
+        ("second", "TwoPointPairResult"),
+        ("second", "CompositeIdentityEstimate"),
+        ("second", "PublicAcquisitionResources"),
+        ("second", "SparseLinewidthCompositeEstimate"),
+        ("second", "SparseLinewidthCompositeUpdate"),
+    ),
+)
+def test_every_fast_construction_stage_preserves_identical_base_exception(
     monkeypatch: pytest.MonkeyPatch,
+    side: str,
+    constructor_name: str,
 ) -> None:
     tracker = _valid_tracker()
-    observation = _pending_second_fast_observation(tracker)
+    observation = (
+        _pending_fast_observation(tracker)
+        if side == "first"
+        else _pending_second_fast_observation(tracker)
+    )
     before = _snapshot(tracker)
-    injected = KeyboardInterrupt("injected process control")
+    injected = KeyboardInterrupt(f"injected {side} {constructor_name}")
 
     def fail(*args, **kwargs):
         del args, kwargs
         raise injected
 
-    monkeypatch.setattr(tracker_module, "TwoPointPairResult", fail)
+    monkeypatch.setattr(tracker_module, constructor_name, fail)
 
     with pytest.raises(KeyboardInterrupt) as raised:
         tracker.update(observation)

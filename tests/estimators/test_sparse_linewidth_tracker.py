@@ -6,6 +6,7 @@ import ast
 import inspect
 import math
 import textwrap
+from copy import copy
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -18,10 +19,13 @@ from odmr_bench.estimators import (
     PublicAcquisitionResources,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
+    SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
     SparseLinewidthResetError,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
+    TwoPointEstimate,
+    TwoPointIdentityEstimate,
     TwoPointQuery,
     TwoPointRunMetadata,
     calibrate_two_point,
@@ -29,10 +33,12 @@ from odmr_bench.estimators import (
 from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
 from odmr_bench.estimators import two_point_calibration as calibration_module
 from odmr_bench.estimators.sparse_linewidth_fit import (
+    _construct_sparse_fit_geometry,
     _SparseGeometryConstructionError,
 )
 from odmr_bench.estimators.two_point_calibration import (
     _evaluate_target_only_model,
+    _target_center_derivative,
 )
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
@@ -591,6 +597,79 @@ def _accept_fast_pairs(
         tracker.update(_fast_observation(calibration, query))
 
 
+def _project_composite_fast_view(
+    composite: SparseLinewidthCompositeTracker,
+    calibration: TwoPointCalibration,
+) -> TwoPointEstimate:
+    estimate = composite.estimate()
+    identities = tuple(
+        TwoPointIdentityEstimate(
+            resonance_id=identity.resonance_id,
+            center_hz=identity.fast_center_hz,
+            calibration_fwhm_hz=cell.calibration_fwhm_hz,
+            calibration_cell_lower_hz=cell.calibration_cell_lower_hz,
+            calibration_cell_upper_hz=cell.calibration_cell_upper_hz,
+            allowed_center_min_hz=cell.allowed_center_min_hz,
+            allowed_center_max_hz=cell.allowed_center_max_hz,
+            active_source_kind=identity.fast_center_source_kind,
+            active_source_pair_index=identity.fast_center_source_pair_index,
+            active_reference_timestamp_s=(
+                identity.fast_center_reference_timestamp_s
+            ),
+            active_release_sequence_index=(
+                identity.fast_center_release_sequence_index
+            ),
+            active_release_timestamp_s=(
+                identity.fast_center_release_timestamp_s
+            ),
+            estimate_age_sequence_indices=(
+                None
+                if identity.fast_center_release_sequence_index is None
+                else estimate.current_sequence_index
+                - identity.fast_center_release_sequence_index
+            ),
+            estimate_age_s=identity.center_age_s,
+            release_age_s=identity.center_release_age_s,
+            completed_pairs=identity.completed_fast_pairs,
+            lock_state=(
+                "calibrated"
+                if identity.latest_fast_pair is None
+                else identity.latest_fast_pair.lock_state
+            ),
+            failure_code=(
+                None
+                if identity.latest_fast_pair is None
+                else identity.latest_fast_pair.failure_code
+            ),
+            latest_pair=identity.latest_fast_pair,
+        )
+        for identity, cell in zip(
+            estimate.identities, calibration.identities, strict=True
+        )
+    )
+    return TwoPointEstimate(
+        identities=identities,
+        calibration_source_id=estimate.calibration_source_id,
+        calibration_source_provenance=estimate.calibration_source_provenance,
+        calibration_budget_treatment=estimate.calibration_budget_treatment,
+        current_sequence_index=estimate.current_sequence_index,
+        current_timestamp_s=estimate.current_timestamp_s,
+        accepted_observations=estimate.accepted_observations,
+        completed_pairs=estimate.completed_fast_pairs,
+        incomplete_pair=estimate.incomplete_fast_pair,
+        pending_query=(
+            estimate.pending_query if estimate.pending_mode == "fast_pair" else None
+        ),
+        pair_history=estimate.fast_pair_history,
+        tracking_resources=estimate.fast_tracking_resources,
+        calibration_resources=estimate.calibration_resources,
+        charged_resources=estimate.charged_resources,
+        budget_ceiling=estimate.budget_ceiling,
+        stopped_reason=estimate.stopped_reason,
+        seed=estimate.seed,
+    )
+
+
 def test_fast_only_trace_is_stage_63_differentially_identical() -> None:
     calibration = _calibration()
     metadata = _metadata(calibration)
@@ -608,7 +687,7 @@ def test_fast_only_trace_is_stage_63_differentially_identical() -> None:
             composite_query = composite.choose_next_query()
             assert type(legacy_query) is TwoPointQuery
             assert composite_query == legacy_query
-            fluorescence = -1.0 if pair_index == 6 else None
+            fluorescence = -1.0 if pair_index == 14 else None
             legacy_update = legacy.update(
                 _fast_observation(
                     calibration,
@@ -626,6 +705,9 @@ def test_fast_only_trace_is_stage_63_differentially_identical() -> None:
                 )
             )
             assert composite_update.completed_fast_pair == legacy_update.completed_pair
+            assert _project_composite_fast_view(composite, calibration) == (
+                legacy.estimate()
+            )
 
     legacy_estimate = legacy.estimate()
     composite_estimate = composite.estimate()
@@ -639,10 +721,163 @@ def test_fast_only_trace_is_stage_63_differentially_identical() -> None:
     assert tuple(
         item.completed_fast_pairs for item in composite_estimate.identities
     ) == tuple(item.completed_pairs for item in legacy_estimate.identities)
-    assert composite_estimate.fast_pair_history[6].lock_state == "lost"
+    assert composite_estimate.fast_pair_history[14].lock_state == "lost"
+    r6 = composite_estimate.identities[6]
+    assert r6.fast_center_source_kind == "pair"
+    assert r6.fast_center_source_pair_index == 6
     assert tuple(
         pair.first_side for pair in composite_estimate.fast_pair_history[8:12]
     ) == ("plus", "plus", "plus", "plus")
+
+
+def _differential_gate_case(
+    case: str,
+) -> tuple[TwoPointCalibration, tuple[float, float]]:
+    base_calibration = _calibration()
+    base_configuration = base_calibration.configuration
+    base_cell = base_calibration.identities[0]
+    source_fit = base_calibration.source.source_fit
+    center_hz = base_cell.calibration_center_hz
+    minus_frequency_hz = center_hz - base_cell.offset_hz
+    plus_frequency_hz = center_hz + base_cell.offset_hz
+    mu_minus = _evaluate_target_only_model(
+        source_fit,
+        base_cell.source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    mu_plus = _evaluate_target_only_model(
+        source_fit,
+        base_cell.source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    g_minus = _target_center_derivative(
+        source_fit,
+        base_cell.source_fit_index,
+        minus_frequency_hz,
+        center_hz,
+    )
+    g_plus = _target_center_derivative(
+        source_fit,
+        base_cell.source_fit_index,
+        plus_frequency_hz,
+        center_hz,
+    )
+    model_sum = mu_minus + mu_plus
+    zero_discriminator = (mu_minus - mu_plus) / model_sum
+    slope_per_hz = 2.0 * (
+        mu_plus * g_minus - mu_minus * g_plus
+    ) / model_sum**2
+    desired_raw_hz = {
+        "tracking": 0.05 * base_cell.calibration_fwhm_hz,
+        "common": 0.0,
+        "capture": 0.05 * base_cell.calibration_fwhm_hz,
+        "domain": 0.05 * base_cell.calibration_fwhm_hz,
+        "step-limited": 0.15 * base_cell.calibration_fwhm_hz,
+        "numerical": 2.0,
+    }[case]
+    desired_common = 0.25 if case == "common" else 0.0
+    observed_sum = model_sum + desired_common * base_cell.target_pair_depth
+    desired_discriminator = zero_discriminator + slope_per_hz * desired_raw_hz
+    minus_value = observed_sum * (1.0 + desired_discriminator) / 2.0
+    plus_value = observed_sum - minus_value
+    actual_discriminator = (minus_value - plus_value) / observed_sum
+    actual_common = (observed_sum - model_sum) / base_cell.target_pair_depth
+    actual_raw_hz = (
+        actual_discriminator - zero_discriminator
+    ) / slope_per_hz
+    configuration = replace(
+        base_configuration,
+        proportional_gain=(1.0e308 if case == "numerical" else 1.0),
+        common_mode_limit_target_depths=(
+            math.nextafter(abs(actual_common), 0.0)
+            if case == "common"
+            else None
+        ),
+    )
+    calibration = calibrate_two_point(
+        base_calibration.source,
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    cell = calibration.identities[0]
+    if case == "capture":
+        calibration = replace(
+            calibration,
+            identities=(
+                replace(
+                    cell,
+                    capture_radius_hz=math.nextafter(abs(actual_raw_hz), 0.0),
+                ),
+                *calibration.identities[1:],
+            ),
+        )
+    if case == "domain":
+        candidate_hz = center_hz + min(actual_raw_hz, cell.max_step_hz)
+        calibration = replace(
+            calibration,
+            identities=(
+                replace(
+                    cell,
+                    allowed_center_max_hz=math.nextafter(candidate_hz, -math.inf),
+                ),
+                *calibration.identities[1:],
+            ),
+        )
+    return calibration, (minus_value, plus_value)
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_lock", "expected_failure"),
+    (
+        ("tracking", "tracking", None),
+        ("common", "lost", "common_mode_limit_exceeded"),
+        ("capture", "lost", "capture_exceeded"),
+        ("domain", "lost", "calibration_domain_exceeded"),
+        ("step-limited", "step_limited", None),
+        ("numerical", "lost", "numerical_failure"),
+    ),
+)
+def test_fast_gate_views_are_completely_stage_63_differential(
+    case: str,
+    expected_lock: str,
+    expected_failure: str | None,
+) -> None:
+    calibration, fluorescence_values = _differential_gate_case(case)
+    metadata = _metadata(calibration)
+    ceiling = TwoPointBudgetCeiling(20, None, None, None)
+    legacy = CalibratedTwoPointTracker(calibration.configuration)
+    composite = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    legacy.reset(metadata, calibration, ceiling, seed=31)
+    composite.reset(metadata, calibration, ceiling, seed=31)
+
+    for fluorescence in fluorescence_values:
+        legacy_query = legacy.choose_next_query()
+        composite_query = composite.choose_next_query()
+        assert type(legacy_query) is TwoPointQuery
+        assert composite_query == legacy_query
+        legacy.update(
+            _fast_observation(
+                calibration,
+                legacy_query,
+                fluorescence=fluorescence,
+            )
+        )
+        composite.update(
+            _fast_observation(
+                calibration,
+                composite_query,
+                fluorescence=fluorescence,
+            )
+        )
+        assert _project_composite_fast_view(composite, calibration) == (
+            legacy.estimate()
+        )
+
+    pair = composite.estimate().fast_pair_history[-1]
+    assert pair.lock_state == expected_lock
+    assert pair.failure_code == expected_failure
 
 
 def test_first_fast_side_is_partial_and_second_refreshes_identity() -> None:
@@ -774,6 +1009,88 @@ def test_due_sparse_block_uses_nondefault_policy_and_exact_recurrences() -> None
     )
 
 
+@pytest.mark.parametrize(
+    ("scan_index", "identity_index", "identity_scan_index", "expected_order"),
+    (
+        (0, 0, 0, (0.5, -1.0, 0.0, 1.0, -0.5)),
+        (1, 1, 0, (0.5, -1.0, 0.0, 1.0, -0.5)),
+        (8, 0, 1, (-0.5, 1.0, 0.0, -1.0, 0.5)),
+    ),
+)
+def test_sparse_query_constructor_rotates_targets_orders_and_all_echoes(
+    scan_index: int,
+    identity_index: int,
+    identity_scan_index: int,
+    expected_order: tuple[float, ...],
+) -> None:
+    configuration = SparseLinewidthConfiguration(integration_time_s=0.007)
+    calibration = _calibration()
+    metadata = _metadata(calibration, frequency_overhead_s=0.003)
+    tracker = _reset_tracker(
+        configuration=configuration,
+        calibration=calibration,
+        metadata=metadata,
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    estimate = tracker.estimate()
+    identity = estimate.identities[identity_index]
+    geometry = _construct_sparse_fit_geometry(
+        calibration,
+        configuration,
+        identity,
+        scan_index=scan_index,
+        identity_scan_index=identity_scan_index,
+    )
+
+    queries = tracker_module._construct_sparse_queries(
+        geometry,
+        identity,
+        metadata,
+        integration_time_s=configuration.integration_time_s,
+        first_acquisition_index=40,
+        first_sequence_index=73,
+        start_timestamp_s=0.5,
+        scan_index=scan_index,
+        identity_scan_index=identity_scan_index,
+    )
+
+    assert tuple(query.offset_multiplier for query in queries) == expected_order
+    assert {query.resonance_id for query in queries} == {f"r{identity_index}"}
+    expected_frozen = (
+        identity.fast_center_hz,
+        identity.fast_center_source_kind,
+        identity.fast_center_source_pair_index,
+        identity.fast_center_reference_timestamp_s,
+        identity.fast_center_release_sequence_index,
+        identity.fast_center_release_timestamp_s,
+        identity.active_fwhm_hz,
+        identity.fwhm_source_kind,
+        identity.fwhm_source_scan_index,
+        identity.fwhm_reference_timestamp_s,
+        identity.fwhm_release_sequence_index,
+        identity.fwhm_release_timestamp_s,
+    )
+    for point_index, query in enumerate(queries):
+        assert (
+            query.frozen_fast_center_hz,
+            query.frozen_fast_center_source_kind,
+            query.frozen_fast_center_source_pair_index,
+            query.frozen_fast_center_reference_timestamp_s,
+            query.frozen_fast_center_release_sequence_index,
+            query.frozen_fast_center_release_timestamp_s,
+            query.frozen_prior_fwhm_hz,
+            query.frozen_fwhm_source_kind,
+            query.frozen_fwhm_source_scan_index,
+            query.frozen_fwhm_reference_timestamp_s,
+            query.frozen_fwhm_release_sequence_index,
+            query.frozen_fwhm_release_timestamp_s,
+        ) == expected_frozen
+        assert query.acquisition_index == 40 + point_index
+        assert query.expected_sequence_index == 73 + point_index
+        assert query.integration_time_s == 0.007
+        assert query.expected_nominal_exposure_photons == 2.5e6 * 0.007
+
+
 def test_due_sparse_block_does_not_fall_back_to_affordable_fast_work() -> None:
     calibration = _calibration()
     tracker = _reset_tracker(
@@ -860,3 +1177,88 @@ def test_due_sparse_geometry_stops_before_affordability_with_full_diagnostic(
     assert diagnostic.source_frequency_max_hz == (
         calibration.source.source_frequency_max_hz
     )
+
+
+def test_sparse_pending_query_requires_exact_reserved_object_before_sequence() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    query = tracker.choose_next_query()
+    assert type(query) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    cloned_query = replace(query)
+    corrupted_estimate = replace(state.estimate, pending_query=cloned_query)
+    object.__setattr__(
+        tracker,
+        "_state",
+        replace(state, estimate=corrupted_estimate),
+    )
+    observation = EstimatorObservation(
+        sequence_index=query.expected_sequence_index + 1,
+        timestamp_s=query.expected_end_timestamp_s,
+        frequency_hz=query.frequency_hz,
+        fluorescence=0.9,
+        integration_time_s=query.integration_time_s,
+        nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        realized_photons=None,
+    )
+    before = tracker._state
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "sparse_query_echo_mismatch"
+    assert tracker._state == before
+
+
+@pytest.mark.parametrize("stale_kind", ("reservation", "partial"))
+def test_sparse_pending_query_rejects_stale_fast_state_before_sequence(
+    stale_kind: str,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    first_fast_query = tracker.choose_next_query()
+    assert type(first_fast_query) is TwoPointQuery
+    state = tracker._state
+    assert state is not None
+    stale_fast_reservation = state.reserved_fast_queries
+    assert stale_fast_reservation is not None
+    tracker.update(_fast_observation(calibration, first_fast_query))
+    stale_fast_partial = tracker.estimate().incomplete_fast_pair
+    assert stale_fast_partial is not None
+    for _ in range(15):
+        query = tracker.choose_next_query()
+        assert type(query) is TwoPointQuery
+        tracker.update(_fast_observation(calibration, query))
+    sparse_query = tracker.choose_next_query()
+    assert type(sparse_query) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    if stale_kind == "reservation":
+        corrupted_state = replace(
+            state, reserved_fast_queries=stale_fast_reservation
+        )
+    else:
+        corrupted_estimate = copy(state.estimate)
+        object.__setattr__(
+            corrupted_estimate, "incomplete_fast_pair", stale_fast_partial
+        )
+        corrupted_state = replace(state, estimate=corrupted_estimate)
+    object.__setattr__(tracker, "_state", corrupted_state)
+    observation = EstimatorObservation(
+        sequence_index=sparse_query.expected_sequence_index + 1,
+        timestamp_s=sparse_query.expected_end_timestamp_s,
+        frequency_hz=sparse_query.frequency_hz,
+        fluorescence=0.9,
+        integration_time_s=sparse_query.integration_time_s,
+        nominal_exposure_photons=sparse_query.expected_nominal_exposure_photons,
+        realized_photons=None,
+    )
+    before = tracker._state
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == "sparse_query_echo_mismatch"
+    assert tracker._state == before

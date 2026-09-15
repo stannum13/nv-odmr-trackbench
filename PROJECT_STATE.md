@@ -75,6 +75,22 @@ witnesses failed on the Task 7 update placeholder, then the GREEN tracker and
 complete Stage 6.3 tracker/atomicity gate passed 127 tests. The mandatory gate
 passed 1,397 estimator/evaluation/emulator tests and 1,498 repository tests;
 Ruff passed and `git diff --check` was silent.
+Task 8's independent review found four Important implementation/evidence gaps.
+The sparse validation boundary now requires the exact pending query object at
+the expected reserved point before sequence validation and rejects stale fast
+reservation or partial state without consuming sparse work. A complete
+Stage 6.3 projection is compared after every accepted flank across all eight
+identities, repeated parity rounds, sources, epochs, ages, partial/query state,
+resources, metadata, and success/common-mode/capture/domain/step-limited/
+numerical-loss outcomes. Direct stateful-constructor witnesses pin r0/r1 target
+rotation, even and odd per-ID order, non-default integration policy, and every
+frozen center/FWHM echo across all five queries. The validation matrix now
+covers every precedence row, while identical process-control exceptions are
+injected at every public construction stage on both fast sides and retain
+value-equal rollback. Focused review closure passed 153 Task 8 plus complete
+Stage 6.3 tracker/atomicity tests. The fresh combined mandatory gate passed
+1,425 estimator/evaluation/emulator tests and 1,526 repository tests; Ruff and
+`git diff --check` passed.
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a

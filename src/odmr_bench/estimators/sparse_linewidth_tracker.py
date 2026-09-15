@@ -1178,7 +1178,32 @@ class SparseLinewidthCompositeTracker:
                     "pending fast query must echo its exact reserved pair state",
                 )
         else:
-            if state.reserved_sparse_queries is None:
+            partial_sparse = state.estimate.incomplete_sparse_scan
+            expected_point_index = (
+                0 if partial_sparse is None else len(partial_sparse.queries)
+            )
+            reserved_sparse_queries = state.reserved_sparse_queries
+            expected_query = (
+                None
+                if reserved_sparse_queries is None
+                or expected_point_index >= len(reserved_sparse_queries)
+                else reserved_sparse_queries[expected_point_index]
+            )
+            echo_matches = (
+                expected_query is query
+                and state.reserved_fast_queries is None
+                and state.estimate.incomplete_fast_pair is None
+                and query.point_index == expected_point_index
+            )
+            if partial_sparse is not None:
+                echo_matches = echo_matches and (
+                    partial_sparse.queries[0] is reserved_sparse_queries[0]
+                    and query.scan_index == partial_sparse.scan_index
+                    and query.identity_scan_index
+                    == partial_sparse.identity_scan_index
+                    and query.resonance_id == partial_sparse.resonance_id
+                )
+            if not echo_matches:
                 raise SparseLinewidthObservationValidationError(
                     "sparse_query_echo_mismatch",
                     "pending sparse query must echo its exact reserved scan state",
