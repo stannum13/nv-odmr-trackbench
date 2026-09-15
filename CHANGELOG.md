@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Completed a second Stage 6.4 design correction pass. Public composite runner
+  signatures now close every operation, phase, outcome, and typed tracker error;
+  sparse geometry diagnostics have ordered closed codes and exact optional
+  envelope presence; and Q preserves finite signed and zero `center/FWHM`
+  values. Estimates and runner states retain exact arrival-order fast, sparse,
+  and total update-CPU ledgers without subtotal regrouping, while evaluator
+  states join existing fast-pair timings alongside five-point scan timings.
 - Hardened the Stage 6.4 design after review. The composite runner now owns
   verified calibration through a private runner-neutral, exact-allowlisted
   core without changing Stage 6.3 pair behavior; due invalid sparse geometry

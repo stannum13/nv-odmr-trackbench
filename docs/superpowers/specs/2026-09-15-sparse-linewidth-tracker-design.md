@@ -28,95 +28,51 @@ The following decisions are binding:
 
 ## Approaches considered
 
-1. **Additive composite state machine (selected).** A new tracker/evaluator
-   owns the interleaved fast-pair and sparse-scan schedule, reuses the bound
-   Stage 6.3 calibration and reviewed pure line-shape/discriminator helpers,
-   and publishes new composite records. This preserves Stage 6.3 as a stable,
-   independently usable baseline and makes the different update rates explicit.
-2. **Extend Stage 6.3 aggregate records and runner.** Adding optional linewidth
-   fields and scan phases looks smaller, but it changes old constructor and
-   state meanings and makes a Stage 6.3 result depend on Stage 6.4 behavior.
-   It is rejected.
-3. **Joint center/linewidth filter at every observation.** A state-space or
-   continuously updated nonlinear fit could use all samples, but it would
-   confound the sparse-measurement hypothesis with a motion model and erase the
-   deliberately different center and linewidth update rates. It is deferred.
+1. **Additive composite state machine (selected).** It owns the interleaved
+   schedule, reuses bound calibration and reviewed numerical helpers, and keeps
+   Stage 6.3 independently stable with explicit separate update rates.
+2. **Extend Stage 6.3 records/runner.** Optional linewidth fields look smaller
+   but change old constructor/state meanings, so this is rejected.
+3. **Joint center/linewidth filter.** It could use every sample but would
+   confound sparse measurement with a motion model, so it is deferred.
 
-The selected composite does not wrap a running `CalibratedTwoPointTracker`.
-That tracker requires contiguous sequence and resource recurrences, whereas
-sparse observations create intentional gaps in its private stream. Instead,
-the composite owns the global recurrence and uses existing Stage 6.3 calibration
-records plus shared, characterized private numerical helpers. It may reuse
-`TwoPointQuery`, `TwoPointPartialPair`, and `TwoPointPairResult` where their
-existing contracts fit, but it does not construct a misleading
-`TwoPointEstimate` over a non-contiguous stream. A private-helper extraction is
-permitted only with Stage 6.3 differential tests proving unchanged behavior.
+The composite cannot wrap a running `CalibratedTwoPointTracker`: sparse samples
+break its contiguous sequence/resource recurrence. It owns global recurrence,
+uses existing calibration and characterized helpers, may reuse compatible
+pair records, and never fabricates a `TwoPointEstimate` over a gapped stream.
 
 ## Architecture and ownership
 
 ```text
-verified Stage 6.3 calibration source and identity cells
-                         |
-                         v
-new composite scheduler and one global accepted-observation clock
-            /                                  \
-  repeated two-point pairs              due five-point block
-            |                                  |
-    fast center state                 frozen center and FWHM prior
-            |                                  |
-            +------------+---------------------+
-                         v
-          per-ID center source + per-ID FWHM source
-                         |
-                         v
-       asynchronous live-Q projection = fast center / active FWHM
+verified calibration -> one global scheduler/clock
+                    -> repeated fast pairs -> per-ID center source
+                    -> due five-point block -> per-ID FWHM source
+center source + FWHM source -> asynchronous live-Q projection
 
 evaluator: full observations, actual midpoints, expected photons, truth
 tracker:   safe observations, public midpoints, policy state, safe ledgers
 ```
 
-The estimator never receives an instrument, hidden dynamics, a truth snapshot,
-signal-conditioned expected photons, actual measurement midpoints, a callback,
-or an evaluator reference. The evaluator alone owns those values and performs
-the full/safe resource join. New public records are frozen, slotted, defensive
-snapshots using the scalar canonicalization rules already established in Stage
-6.3.
+The estimator never receives instrument/dynamics/truth, expected photons,
+actual midpoints, callbacks, or evaluator references. The evaluator owns them
+and the full/safe join. Public records are frozen, slotted defensive snapshots.
 
 The planned code boundaries are:
 
-- `estimators/sparse_linewidth_types.py`: new immutable contracts and typed
-  construction/validation errors;
-- `estimators/sparse_linewidth_fit.py`: canonical local model, scaling, bounded
-  least-squares fit, and ordered scientific gates;
-- `estimators/sparse_linewidth_tracker.py`: composite schedule, block
-  reservation, atomic state transitions, and asynchronous live-Q projection;
-- `evaluation/sparse_linewidth/types.py`: evaluator-only acquisition, timing,
-  abort, state, outcome, and full-resource records;
-- `evaluation/sparse_linewidth/runner.py`: instrument-owning composite runner;
-- `evaluation/sparse_linewidth/resource_accounting.py`: authenticated full/safe
-  joins and exact arrival-order replays.
-- `evaluation/two_point/calibration.py`: extract the existing verified
-  acquisition transaction into a private runner-neutral core without changing
-  the public Stage 6.3 function or outcome;
-- `evaluation/two_point/provenance.py`: generalize only the private issuer
-  registry to exact-allowlist both runner concrete types and exact bound runner
-  instances.
+- `estimators/sparse_linewidth_{types,fit,tracker}.py`: contracts, fit, schedule;
+- `evaluation/sparse_linewidth/{types,runner,resource_accounting}.py`: evaluator;
+- `evaluation/two_point/calibration.py`: private runner-neutral acquisition core;
+- `evaluation/two_point/provenance.py`: private exact runner allowlisting.
 
-The composite runner implements its own public verified-calibration operation;
-it does not call a public method on `TwoPointEvaluatorRunner`. Both runners call
-the extracted private core through private issuer adapters. The core accepts
-only `type(runner) is TwoPointEvaluatorRunner` or
-`type(runner) is SparseLinewidthEvaluatorRunner`, then authenticates that exact
-runner object, token, instrument, configuration, provisional source, and
-outcome in the private registry. Subclasses and equal-but-distinct objects are
-rejected. Attempt-local bindings are revoked on every ordinary or
-process-control failure, including collaborator commit-then-raise behavior;
-runner, instrument, token, and source identity and the existing Stage 6.3
-rollback rules remain exact. Public record constructors, asserted-source
-factories, class membership, copied records, and `object.__new__` allocations
-cannot mint or transfer verified authority. Characterization tests must prove
-the extracted path returns bitwise/value-identical Stage 6.3 outcomes and does
-not narrow any Stage 6.3 pair, retry, stop, abort, or resource semantics.
+The composite implements its own public calibration operation; both runners use
+private issuer adapters into the extracted core. It accepts only exact runner
+types and registry-bound instances, then authenticates exact runner/token/
+instrument/configuration/source/outcome identity. Subclasses and equal copies
+fail. Every failure revokes attempt bindings and preserves existing rollback,
+including commit-then-raise. Public constructors/factories, class membership,
+copies, and `object.__new__` cannot mint authority. Differential tests require
+bitwise/value-identical Stage 6.3 outcomes and unchanged pair/retry/stop/abort/
+resource semantics.
 
 ## Exact acquisition and fit configuration
 
@@ -177,6 +133,12 @@ returns `None` with `stopped_reason="sparse_geometry_unavailable"` and an exact
 diagnostic snapshot of the target identity, center/width sources, proposed
 envelope, calibration cell, and source domain. It never relabels this clean
 boundary condition as a Stage 6.3 lost pair or narrows Stage 6.3 pair semantics.
+Geometry-code precedence is nonrepresentable lower, nonrepresentable upper,
+empty fit bounds, cell violation, then source-domain violation. Proposed
+minimum and maximum are jointly `None` for either nonrepresentable code and are
+jointly present, finite, and ordered for the other three codes. `q0`, `w0`,
+cell bounds, and source bounds are always finite and present; a lower/upper
+arithmetic failure therefore never erases the exact prior facts that caused it.
 
 The canonical even per-ID scan order is:
 
@@ -308,8 +270,10 @@ condition number, and
 scan_q = fitted_local_center_hz / fitted_fwhm_hz
 ```
 
-Q must be finite and positive. If its division is not representable, the scan
-is `nonfinite_solution`. A scientific failure is a completed, charged scan. It
+Q preserves the repository convention exactly: `center/FWHM` may be finite
+negative, zero, or positive. Only a non-finite/nonrepresentable division makes
+the scan `nonfinite_solution`; generated physical scenarios separately require
+positive absolute centers. A scientific failure is a completed, charged scan. It
 publishes every finite diagnostic available before its failing gate, applies no
 new FWHM, and retains the older active FWHM source. Failure is not an exception.
 Any ordinary `Exception` raised by model arithmetic, scaling, `least_squares`,
@@ -336,71 +300,55 @@ SparseLinewidthSourceKind = Literal["calibration", "scan"]
 CompositeStopReason = Literal[
     "budget_exhausted", "sparse_geometry_unavailable",
 ]
-
+SparseGeometryFailureCode = Literal[
+    "nonrepresentable_frequency_lower", "nonrepresentable_frequency_upper",
+    "empty_fit_bounds", "calibration_cell_violation",
+    "source_domain_violation",
+]
 SparseGeometryUnavailableDiagnostic(
-    scan_index: int,
-    identity_scan_index: int,
-    resonance_id: str,
+    failure_code: SparseGeometryFailureCode,
+    scan_index: int, identity_scan_index: int, resonance_id: str,
     fast_center_hz: float,
     fast_center_source_kind: Literal["calibration", "pair"],
-    fast_center_source_pair_index: int | None,
-    fast_center_reference_timestamp_s: float,
+    fast_center_source_pair_index: int | None, fast_center_reference_timestamp_s: float,
     fast_center_release_sequence_index: int | None,
     fast_center_release_timestamp_s: float,
-    prior_fwhm_hz: float,
-    fwhm_source_kind: SparseLinewidthSourceKind,
-    fwhm_source_scan_index: int | None,
-    fwhm_reference_timestamp_s: float,
-    fwhm_release_sequence_index: int | None,
-    fwhm_release_timestamp_s: float,
-    proposed_frequency_min_hz: float,
-    proposed_frequency_max_hz: float,
-    calibration_cell_lower_hz: float,
-    calibration_cell_upper_hz: float,
-    source_frequency_min_hz: float,
-    source_frequency_max_hz: float,
+    prior_fwhm_hz: float, fwhm_source_kind: SparseLinewidthSourceKind,
+    fwhm_source_scan_index: int | None, fwhm_reference_timestamp_s: float,
+    fwhm_release_sequence_index: int | None, fwhm_release_timestamp_s: float,
+    proposed_frequency_min_hz: float | None, proposed_frequency_max_hz: float | None,
+    calibration_cell_lower_hz: float, calibration_cell_upper_hz: float,
+    source_frequency_min_hz: float, source_frequency_max_hz: float,
 )
 
 SparseLinewidthQuery(
-    acquisition_index: int,
-    scan_index: int,
-    identity_scan_index: int,
-    point_index: int,
-    resonance_id: str,
-    offset_multiplier: float,
+    acquisition_index: int, scan_index: int, identity_scan_index: int,
+    point_index: int, resonance_id: str, offset_multiplier: float,
     frozen_fast_center_hz: float,
     frozen_fast_center_source_kind: Literal["calibration", "pair"],
     frozen_fast_center_source_pair_index: int | None,
     frozen_fast_center_reference_timestamp_s: float,
     frozen_fast_center_release_sequence_index: int | None,
     frozen_fast_center_release_timestamp_s: float,
-    frozen_prior_fwhm_hz: float,
-    frozen_fwhm_source_kind: SparseLinewidthSourceKind,
-    frozen_fwhm_source_scan_index: int | None,
-    frozen_fwhm_reference_timestamp_s: float,
+    frozen_prior_fwhm_hz: float, frozen_fwhm_source_kind: SparseLinewidthSourceKind,
+    frozen_fwhm_source_scan_index: int | None, frozen_fwhm_reference_timestamp_s: float,
     frozen_fwhm_release_sequence_index: int | None,
     frozen_fwhm_release_timestamp_s: float,
-    frequency_hz: float,
-    integration_time_s: float,
-    expected_sequence_index: int,
+    frequency_hz: float, integration_time_s: float, expected_sequence_index: int,
     expected_end_timestamp_s: float,
     expected_nominal_exposure_photons: float,
 )
 
 SparsePartialScan(
-    scan_index: int,
-    identity_scan_index: int,
-    resonance_id: str,
+    scan_index: int, identity_scan_index: int, resonance_id: str,
     frozen_fast_center_hz: float,
     frozen_fast_center_source_kind: Literal["calibration", "pair"],
     frozen_fast_center_source_pair_index: int | None,
     frozen_fast_center_reference_timestamp_s: float,
     frozen_fast_center_release_sequence_index: int | None,
     frozen_fast_center_release_timestamp_s: float,
-    frozen_prior_fwhm_hz: float,
-    frozen_fwhm_source_kind: SparseLinewidthSourceKind,
-    frozen_fwhm_source_scan_index: int | None,
-    frozen_fwhm_reference_timestamp_s: float,
+    frozen_prior_fwhm_hz: float, frozen_fwhm_source_kind: SparseLinewidthSourceKind,
+    frozen_fwhm_source_scan_index: int | None, frozen_fwhm_reference_timestamp_s: float,
     frozen_fwhm_release_sequence_index: int | None,
     frozen_fwhm_release_timestamp_s: float,
     queries: tuple[SparseLinewidthQuery, ...],       # length 1..4
@@ -408,65 +356,45 @@ SparsePartialScan(
 )
 
 SparseLinewidthScanResult(
-    scan_index: int,
-    identity_scan_index: int,
-    resonance_id: str,
+    scan_index: int, identity_scan_index: int, resonance_id: str,
     frozen_fast_center_hz: float,
     frozen_fast_center_source_kind: Literal["calibration", "pair"],
     frozen_fast_center_source_pair_index: int | None,
     frozen_fast_center_reference_timestamp_s: float,
     frozen_fast_center_release_sequence_index: int | None,
     frozen_fast_center_release_timestamp_s: float,
-    frozen_prior_fwhm_hz: float,
-    frozen_fwhm_source_kind: SparseLinewidthSourceKind,
-    frozen_fwhm_source_scan_index: int | None,
-    frozen_fwhm_reference_timestamp_s: float,
+    frozen_prior_fwhm_hz: float, frozen_fwhm_source_kind: SparseLinewidthSourceKind,
+    frozen_fwhm_source_scan_index: int | None, frozen_fwhm_reference_timestamp_s: float,
     frozen_fwhm_release_sequence_index: int | None,
     frozen_fwhm_release_timestamp_s: float,
     queries: tuple[SparseLinewidthQuery, ...],       # length exactly 5
     observations: tuple[EstimatorObservation, ...], # same arrival order
-    public_reference_timestamp_s: float,
-    release_sequence_index: int,
-    release_timestamp_s: float,
-    status: Literal["success", "failure"],
+    public_reference_timestamp_s: float, release_sequence_index: int,
+    release_timestamp_s: float, status: Literal["success", "failure"],
     failure_code: SparseLinewidthFailureCode | None,
     fitted_center_correction_hz: float | None,
     fitted_local_center_hz: float | None,
-    fitted_fwhm_hz: float | None,
-    fitted_amplitude: float | None,
-    fitted_baseline_offset: float | None,
-    fitted_q: float | None,
+    fitted_fwhm_hz: float | None, fitted_amplitude: float | None,
+    fitted_baseline_offset: float | None, fitted_q: float | None,
     rmse: float | None,
     amplitude_normalized_rmse: float | None,
-    scaled_jacobian_rank: int | None,
-    scaled_jacobian_condition: float | None,
-    scipy_status: int | None,
-    scipy_message: str | None,
-    nfev: int | None,
-    fit_cpu_time_s: float,
+    scaled_jacobian_rank: int | None, scaled_jacobian_condition: float | None,
+    scipy_status: int | None, scipy_message: str | None,
+    nfev: int | None, fit_cpu_time_s: float,
 )
 
 CompositeIdentityEstimate(
-    resonance_id: str,
-    fast_center_hz: float,
+    resonance_id: str, fast_center_hz: float,
     fast_center_source_kind: Literal["calibration", "pair"],
-    fast_center_source_pair_index: int | None,
-    fast_center_reference_timestamp_s: float,
+    fast_center_source_pair_index: int | None, fast_center_reference_timestamp_s: float,
     fast_center_release_sequence_index: int | None,
     fast_center_release_timestamp_s: float,
-    active_fwhm_hz: float,
-    fwhm_source_kind: SparseLinewidthSourceKind,
-    fwhm_source_scan_index: int | None,
-    fwhm_reference_timestamp_s: float,
-    fwhm_release_sequence_index: int | None,
-    fwhm_release_timestamp_s: float,
-    live_q: float,
-    center_age_s: float,
-    fwhm_age_s: float,
-    center_release_age_s: float,
-    fwhm_release_age_s: float,
-    completed_fast_pairs: int,
-    completed_sparse_scans: int,
+    active_fwhm_hz: float, fwhm_source_kind: SparseLinewidthSourceKind,
+    fwhm_source_scan_index: int | None, fwhm_reference_timestamp_s: float,
+    fwhm_release_sequence_index: int | None, fwhm_release_timestamp_s: float,
+    live_q: float, center_age_s: float, fwhm_age_s: float,
+    center_release_age_s: float, fwhm_release_age_s: float,
+    completed_fast_pairs: int, completed_sparse_scans: int,
     latest_fast_pair: TwoPointPairResult | None,
     latest_sparse_scan: SparseLinewidthScanResult | None,
 )
@@ -474,30 +402,25 @@ CompositeIdentityEstimate(
 SparseLinewidthCompositeEstimate(
     configuration: SparseLinewidthConfiguration,
     identities: tuple[CompositeIdentityEstimate, ...],
-    calibration_source_id: str,
-    calibration_source_provenance: CalibrationSourceProvenance,
+    calibration_source_id: str, calibration_source_provenance: CalibrationSourceProvenance,
     calibration_budget_treatment: CalibrationBudgetTreatment,
-    pending_mode: CompositeMode | None,
-    pending_query: TwoPointQuery | SparseLinewidthQuery | None,
+    pending_mode: CompositeMode | None, pending_query: TwoPointQuery | SparseLinewidthQuery | None,
     incomplete_fast_pair: TwoPointPartialPair | None,
     incomplete_sparse_scan: SparsePartialScan | None,
     fast_pair_history: tuple[TwoPointPairResult, ...],
     sparse_scan_history: tuple[SparseLinewidthScanResult, ...],
-    accepted_observations: int,
-    completed_fast_pairs: int,
-    completed_sparse_scans: int,
-    fast_pairs_since_scan: int,
-    current_sequence_index: int | None,
-    current_timestamp_s: float,
+    accepted_observations: int, completed_fast_pairs: int,
+    completed_sparse_scans: int, fast_pairs_since_scan: int,
+    current_sequence_index: int | None, current_timestamp_s: float,
     fast_tracking_resources: PublicAcquisitionResources,
     sparse_tracking_resources: PublicAcquisitionResources,
     tracking_resources: PublicAcquisitionResources,
     calibration_resources: PublicAcquisitionResources,
     charged_resources: PublicAcquisitionResources,
-    budget_ceiling: TwoPointBudgetCeiling,
-    stopped_reason: CompositeStopReason | None,
+    budget_ceiling: TwoPointBudgetCeiling, stopped_reason: CompositeStopReason | None,
     sparse_geometry_diagnostic: SparseGeometryUnavailableDiagnostic | None,
-    seed: int,
+    fast_update_cpu_time_s: float, sparse_update_cpu_time_s: float,
+    total_update_cpu_time_s: float, seed: int,
 )
 
 SparseLinewidthCompositeUpdate(
@@ -510,13 +433,10 @@ SparseLinewidthCompositeUpdate(
 )
 
 SparseLinewidthEvaluatorScanTiming(
-    scan_index: int,
-    resonance_id: str,
+    scan_index: int, resonance_id: str,
     measurement_midpoints_s: tuple[float, float, float, float, float],
-    truth_reference_timestamp_s: float,
-    public_reference_timestamp_s: float,
-    release_sequence_index: int,
-    release_timestamp_s: float,
+    truth_reference_timestamp_s: float, public_reference_timestamp_s: float,
+    release_sequence_index: int, release_timestamp_s: float,
 )
 
 SparseLinewidthEvaluatorResources(
@@ -525,12 +445,9 @@ SparseLinewidthEvaluatorResources(
     accepted_sparse_observations: tuple[InstrumentObservation, ...],
     accepted_tracking_observations: tuple[InstrumentObservation, ...],
     unaccepted_tracking_observations: tuple[InstrumentObservation, ...],
-    calibration_resources: ResourceSnapshot,
-    fast_tracking_resources: ResourceSnapshot,
-    sparse_tracking_resources: ResourceSnapshot,
-    tracking_resources: ResourceSnapshot,
-    accepted_charged_resources: ResourceSnapshot,
-    charged_resources: ResourceSnapshot,
+    calibration_resources: ResourceSnapshot, fast_tracking_resources: ResourceSnapshot,
+    sparse_tracking_resources: ResourceSnapshot, tracking_resources: ResourceSnapshot,
+    accepted_charged_resources: ResourceSnapshot, charged_resources: ResourceSnapshot,
     calibration_budget_treatment: CalibrationBudgetTreatment,
     incomplete_fast_pair_observations: Literal[0, 1],
     incomplete_sparse_scan_observations: Literal[0, 1, 2, 3, 4],
@@ -623,6 +540,7 @@ SparseEvaluatorRunnerState(
     calibration: TwoPointCalibration | None,
     tracker_estimate: SparseLinewidthCompositeEstimate | None,
     normal_tracking_trace: tuple[SparseTrackingAcquisition, ...],
+    pair_timings: tuple[TwoPointEvaluatorPairTiming, ...],
     scan_timings: tuple[SparseLinewidthEvaluatorScanTiming, ...],
     instrument_resources_at_bind: ResourceSnapshot,
     tracking_resources_before: ResourceSnapshot | None,
@@ -630,31 +548,79 @@ SparseEvaluatorRunnerState(
     instrument_current_sequence_index: int | None, current_virtual_time_s: float,
     last_instrument_failure: SparseInstrumentQueryFailure | None,
     terminal_abort: SparseAbortedRun | None,
+    fast_update_cpu_time_s: float,
+    sparse_update_cpu_time_s: float,
+    total_update_cpu_time_s: float,
 )
 SparseRunnerAccepted(kind: Literal["accepted"], acquisition: SparseTrackingAcquisition,
     update: SparseLinewidthCompositeUpdate, state: SparseEvaluatorRunnerState)
 SparseRunnerInstrumentFailure(kind: Literal["instrument_failure"],
     failure: SparseInstrumentQueryFailure, state: SparseEvaluatorRunnerState)
-SparseRunnerStopped(kind: Literal["budget_stopped", "geometry_stopped", "externally_stopped"],
+SparseRunnerBudgetStopped(kind: Literal["budget_stopped"],
+    resources: SparseLinewidthEvaluatorResources, state: SparseEvaluatorRunnerState)
+SparseRunnerGeometryStopped(kind: Literal["geometry_stopped"],
+    diagnostic: SparseGeometryUnavailableDiagnostic,
+    resources: SparseLinewidthEvaluatorResources, state: SparseEvaluatorRunnerState)
+SparseRunnerExternallyStopped(kind: Literal["externally_stopped"],
     resources: SparseLinewidthEvaluatorResources, state: SparseEvaluatorRunnerState)
 SparseRunnerAborted(kind: Literal["aborted"], abort: SparseAbortedRun,
     resources: SparseLinewidthEvaluatorResources | None,
     state: SparseEvaluatorRunnerState)
 SparseRunnerStepOutcome = SparseRunnerAccepted | SparseRunnerInstrumentFailure |
-    SparseRunnerStopped | SparseRunnerAborted
-SparseRunnerRunOutcome = SparseRunnerInstrumentFailure | SparseRunnerStopped |
-    SparseRunnerAborted
+    SparseRunnerBudgetStopped | SparseRunnerGeometryStopped | SparseRunnerAborted
+SparseRunnerRunOutcome = SparseRunnerInstrumentFailure | SparseRunnerBudgetStopped |
+    SparseRunnerGeometryStopped | SparseRunnerAborted
 class SparsePreflightError(ValueError): code: SparsePreflightCode
 class SparseStartError(ValueError): code: SparseStartCode
 class SparseRunnerStateError(RuntimeError): ...
+
+class SparseLinewidthEvaluatorRunner:
+    @classmethod
+    def bind(cls, instrument: ODMRInstrument) -> SparseLinewidthEvaluatorRunner: ...
+    @property
+    def state(self) -> SparseEvaluatorRunnerState: ...
+    def acquire_verified_calibration(
+        self, frequency_hz: Sequence[float], integration_time_s: float,
+        fit_configuration: FitConfiguration,
+        identity_binding: TwoPointIdentityBinding, *, source_id: str,
+        source_clock_id: str, tracker_clock_id: str,
+        source_to_tracker_offset_s: float,
+        physical_fit_epoch_rule: Literal["instrument_midpoint_ordered_mean"],
+    ) -> VerifiedTwoPointCalibrationOutcome: ...
+    def start_tracking(
+        self, tracker: SparseLinewidthCompositeTracker,
+        calibration: TwoPointCalibration,
+        verified_calibration: VerifiedTwoPointCalibrationSuccess,
+        public_metadata: TwoPointRunMetadata,
+        budget_ceiling: TwoPointBudgetCeiling, *, seed: int,
+    ) -> SparseEvaluatorRunnerState: ...
+    def step(self) -> SparseRunnerStepOutcome: ...
+    def run_until_event(self) -> SparseRunnerRunOutcome: ...
+    def stop_external(self) -> SparseRunnerExternallyStopped: ...
 ```
+
+`bind` accepts one exact clean `ODMRInstrument` and returns `ready`.
+`acquire_verified_calibration` is legal only in `ready` and terminates in
+`calibration_succeeded` or `calibration_failed`. `start_tracking` is legal in
+`ready` only with an exact other-runner conditional source, or in
+`calibration_succeeded` with its exact outcome; success enters `tracking`.
+`step`, `run_until_event`, and `stop_external` are legal only in `tracking`.
+`step` returns exactly one declared step union member. `run_until_event` loops
+only over accepted steps and returns its first declared terminal/retryable
+member; `stop_external` performs no query and returns its dedicated outcome.
+Every illegal phase fails before touching tracker or instrument: acquire uses
+`SparsePreflightError`, start uses `SparseStartError`, and the last three use
+`SparseRunnerStateError`. Terminal phases expose only read-only state/resources.
 
 Exact-type preflight precedes value, grid, fit/identity, clock, then clean-boundary
 checks; start precedence is the `SparseStartCode` order above. `ready` has no
-calibration/tracker; calibration phases hold exactly one matching verified
-outcome; tracking and terminal run phases hold the exact calibration and
-tracker. Normal trace safe projections equal the tracker's accepted global
-stream, and scan timings align one-to-one with completed scan history. A query
+calibration/tracker; calibration phases hold one matching verified outcome;
+tracking/terminal phases hold exact calibration and tracker. Outcome kind equals
+state phase; stopped resources equal the builder, and geometry diagnostic equals
+the estimate. Normal trace safe projections equal the accepted global
+stream. Pair timings align one-to-one with fast-pair history under the existing
+`TwoPointEvaluatorPairTiming` joins; scan timings align one-to-one with sparse
+history and its exact five actual/public midpoint folds. A query
 failure exists only in nonterminal tracking, has equal resource boundaries, and
 leaves the pending query unchanged. Abort requires equal before/after tracker
 snapshots; unavailable joins require the unavailable acquisition, no exception
@@ -676,6 +642,12 @@ the finite nonnegative process-CPU delta around the accepted estimator update,
 including fit work on a fifth sparse point. Neither includes instrument
 acquisition or waiting, enters any acquisition resource ledger, or supports a
 realtime-performance claim; both are descriptive machine-dependent diagnostics.
+After every accepted update, `total_update_cpu_time_s` performs exactly
+`old_total + update.update_cpu_time_s` in global arrival order. The matching
+mode subtotal performs the same left-associated addition and the other subtotal
+is unchanged. Total is never formed by adding fast and sparse subtotals. Query
+failure, clean stop, external stop, and abort add nothing. Runner CPU fields
+equal tracker-estimate totals (all-zero pre-reset) through terminal outcomes.
 
 ## Asynchronous live-Q projection, epochs, and timing
 
@@ -685,10 +657,11 @@ For each identity, the live projection is always
 live_q = fast_center_hz / active_fwhm_hz
 ```
 
-It is recomputed after every successful fast pair and successful sparse scan.
-This is not a single-epoch spectral Q: its numerator and denominator are
-intentionally asynchronous. The record keeps
-their separate source kinds, source indices, public reference timestamps,
+It is recomputed after every successful fast pair and successful sparse scan,
+but is not a single-epoch Q. Finite signed and zero results are valid; only a
+nonfinite/nonrepresentable division fails, transactionally, as
+`aggregate_estimate_construction_failed`. The record keeps separate source
+kinds, source indices, public reference timestamps,
 release sequence indices, release timestamps, and ages. It never fabricates a
 single Q epoch. Before the first successful scan, FWHM comes from calibration
 with the calibration physical-fit and availability epochs. A failed scan ages
@@ -810,21 +783,53 @@ regardless of mode.
 
 ## Validation and failure boundaries
 
-Public observation acceptance uses the existing exact Stage 6.3 precedence:
-exact safe type, pending query, sequence, frequency, integration, endpoint,
-nominal exposure, then value. There is no tolerance, sorting, resampling,
-duplicate suppression, or timestamp inference.
+```python
+SparseResetFailureCode = Literal[
+    "invalid_argument_type", "configuration_mismatch", "calibration_mismatch",
+    "metadata_mismatch", "invalid_base_sparse_geometry", "budget_mismatch",
+    "initial_state_construction_failed",
+]
+SparseObservationValidationCode = Literal[
+    "invalid_observation_type", "no_pending_query", "pending_mode_mismatch",
+    "fast_query_echo_mismatch", "sparse_query_echo_mismatch",
+    "sequence_mismatch", "frequency_mismatch", "integration_time_mismatch",
+    "endpoint_mismatch", "nominal_exposure_mismatch",
+    "invalid_observation_value",
+]
+SparseUpdateConstructionCode = Literal[
+    "fast_partial_pair_construction_failed",
+    "fast_pair_result_construction_failed",
+    "fast_identity_estimate_construction_failed",
+    "sparse_partial_scan_construction_failed",
+    "sparse_scan_result_construction_failed",
+    "sparse_identity_estimate_construction_failed",
+    "resource_construction_failed", "aggregate_estimate_construction_failed",
+    "update_construction_failed",
+]
+class SparseLinewidthResetError(ValueError): code: SparseResetFailureCode
+class SparseLinewidthObservationValidationError(ValueError):
+    code: SparseObservationValidationCode
+class SparseLinewidthUpdateConstructionError(RuntimeError):
+    code: SparseUpdateConstructionCode
+```
 
-New preflight and construction errors use closed codes and first-applicable
-precedence:
+Reset code precedence is declaration order and reset rolls back to the exact
+prior configuration/state on every failure. Observation precedence is exact
+safe type, pending query, mode, the mode-specific pending-query/state echo,
+sequence, frequency, integration, endpoint, nominal exposure, then value.
+There is no tolerance, sorting, resampling, duplicate suppression, or timestamp
+inference. The fast branch may call the reviewed Stage 6.3 validator privately,
+but catches and translates it; no Stage 6.3 validation/update exception crosses
+the public composite boundary.
 
-1. invalid exact argument type;
-2. invalid scalar, literal, or text value;
-3. calibration/source/identity mismatch;
-4. invalid scan policy or fit bounds;
-5. invalid fixed query geometry or source domain;
-6. budget-treatment or initial-resource mismatch;
-7. immutable prospective-record construction failure.
+After validation, fast construction precedence is partial pair (first side) or
+pair result then fast identity (second side), followed by resources, aggregate,
+and update. Sparse precedence is partial scan (points one through four) or scan
+result then sparse identity (point five), followed by the same final three.
+The first failing exact code is chained from the cause. Any such failure or
+unexpected ordinary exception leaves every tracker field and all three CPU
+totals value-equal to entry; `BaseException` cleanup preserves the same rollback
+and re-raises the identical object.
 
 The runner adds `geometry_stopped` to Stage 6.3's ready, calibration
 success/failure, tracking, budget/external stop, and abort phases. Starting the
@@ -833,12 +838,8 @@ instrument, clock, metadata, treatment, and resource boundary before reset.
 Included and conditional calibration treatments keep their Stage 6.3 meanings.
 No new record can mint verified provenance.
 
-Every accepted update is transactional. Validation failure leaves tracker
-state unchanged. Arithmetic or record construction failure after valid input
-also leaves it unchanged and is chained under a typed composite update error.
-At evaluator level, the already returned full observation remains an
-authenticated unaccepted resource atom when its join is valid. The runner never
-continues after an abort.
+At evaluator level, a returned full observation remains an authenticated
+unaccepted atom when its join is valid; the runner never continues after abort.
 
 ## Verification and test contract
 
@@ -853,12 +854,11 @@ Implementation is not complete until the following deterministic groups pass:
    `1e8` equality/outward ULP; bound-margin `1e-6` equality/inward ULP;
    amplitude/RMSE boundaries; exception rollback; and the presence matrix.
 4. **Q/epochs/timing:** calibration seed, success refresh, failure retention,
-   asynchronous live projection, fitted-local Q, nonrepresentable division,
+   signed/zero asynchronous and scan Q, nonrepresentable division,
    both five-value time folds, neighboring ULPs, release, and truth isolation.
-5. **Reservation/resources/atomicity:** exact two/five-atom ceilings, clean
-   geometry stop, retry/external partial/abort paths, every rollback point,
-   both treatments, interleaved atomic replay, mixed counts, and unavailable
-   joins.
+5. **Reservation/resources/atomicity:** exact ceilings, every geometry code and
+   presence case, retry/partial/abort/rollback, both treatments, interleaved
+   acquisition/CPU replay, pair/scan timing joins, and unavailable joins.
 6. **Compatibility/isolation:** full old suite plus bitwise Stage 6.3 calibration
    and fast-only differential traces; retained graphs forbid full observations,
    expected photons, truth/dynamics, callbacks, instruments, and evaluators.
