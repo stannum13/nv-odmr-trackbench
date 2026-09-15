@@ -41,6 +41,13 @@ once a package version is introduced.
 
 ### Fixed
 
+- Fixed two Stage 6.4 sparse-fit precedence gaps found in Task 6 review.
+  Zero-dimensional and non-finite returned predictions plus non-finite RMSE
+  now retain `nonfinite_solution` before SVD, and returned array shapes are
+  checked without iterating scalars. Preparation also rejects every non-finite
+  or non-positive scaled bound span before model/solver access, including
+  finite extreme endpoints whose subtraction overflows; diagnostic presence
+  and fit-CPU boundaries remain unchanged.
 - Added a late-identity prospective sparse-geometry regression, ensuring
   calibration validation traverses all eight seeds rather than only the first;
   corrected the Stage 6.4 next-task state to Task 5.

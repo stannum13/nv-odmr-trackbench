@@ -41,6 +41,15 @@ last applicable gate/Q derivation and sampled before public-record
 construction. Raised ordinary exceptions and process-control `BaseException`
 values escape unchanged for later transactional translation; no programming
 exception is relabeled as a scientific failure.
+Task 6's first review found two Important first-applicable-precedence gaps.
+Returned scalar/non-finite final predictions and non-finite RMSE now resolve as
+`nonfinite_solution` before any SVD call, while all returned solution,
+residual, Jacobian, and prediction shapes are checked without iterating a
+zero-dimensional array. Preparation now also requires every scaled bound span
+to be finite and positive before model or solver work, including the finite
+`[-max_float, +max_float]` baseline-offset endpoint witness whose subtraction
+overflows. Both fixes retain absent later diagnostics and the original process-
+CPU boundary.
 
 Task 5 performs one isolated four-parameter TRF fit in exact dimensionless
 center-correction/FWHM/amplitude/baseline-offset coordinates. The canonical
@@ -817,9 +826,10 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 6 focused sparse fit file: 74 passed.
-- Stage 6.4 Task 6 estimator/evaluator/emulator integration gate: 1,332 passed.
-- Stage 6.4 Task 6 full repository gate: 1,433 passed.
+- Stage 6.4 Task 6 review-fix focused sparse fit file: 81 passed.
+- Stage 6.4 Task 6 review-fix estimator/evaluator/emulator integration gate:
+  1,339 passed.
+- Stage 6.4 Task 6 review-fix full repository gate: 1,440 passed.
 - Stage 6.4 Task 5 focused sparse fit file: 21 passed.
 - Stage 6.4 Task 5 success/model slice: 3 passed, 18 deselected.
 - Stage 6.4 Task 5 estimator/evaluator/emulator integration gate: 1,279 passed.

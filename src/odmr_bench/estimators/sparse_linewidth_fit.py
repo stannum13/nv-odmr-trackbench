@@ -456,6 +456,8 @@ def fit_sparse_linewidth(
         dtype=np.float64,
     )
     initial_guess = np.asarray((0.0, 1.0, 1.0, 0.0), dtype=np.float64)
+    with np.errstate(over="ignore", invalid="ignore"):
+        bound_spans = upper_bounds - lower_bounds
     public_reference_timestamp_s = _public_reference_timestamp_s(frozen_observations)
 
     def scaled_prediction(packed: np.ndarray) -> np.ndarray:
@@ -485,11 +487,14 @@ def fit_sparse_linewidth(
     preparation_is_finite = (
         lower_bounds.shape == (4,)
         and upper_bounds.shape == (4,)
+        and bound_spans.shape == (4,)
         and initial_guess.shape == (4,)
         and frequency_hz.shape == (5,)
         and observed.shape == (5,)
         and np.all(np.isfinite(lower_bounds))
         and np.all(np.isfinite(upper_bounds))
+        and np.all(np.isfinite(bound_spans))
+        and np.all(bound_spans > 0.0)
         and np.all(np.isfinite(initial_guess))
         and np.all(np.isfinite(frequency_hz))
         and np.all(np.isfinite(observed))
@@ -606,27 +611,30 @@ def fit_sparse_linewidth(
         final_prediction = scaled_prediction(fitted_scaled)
         rmse = float(np.sqrt(np.sum(residual**2) / 5.0))
         amplitude_normalized_rmse = float(rmse / fitted_amplitude)
+    if not (
+        final_prediction.shape == (5,)
+        and np.all(np.isfinite(final_prediction))
+        and fitted_fwhm_hz > 0.0
+        and fitted_amplitude >= 0.0
+        and math.isfinite(rmse)
+        and rmse >= 0.0
+        and math.isfinite(amplitude_normalized_rmse)
+        and amplitude_normalized_rmse >= 0.0
+    ):
+        return _finish_sparse_fit(
+            started_ns=started_ns,
+            queries=frozen_queries,
+            observations=frozen_observations,
+            public_reference_timestamp_s=public_reference_timestamp_s,
+            status="failure",
+            failure_code="nonfinite_solution",
+            **solver_diagnostics,
+        )
     singular_values = np.asarray(
         np.linalg.svd(scaled_jacobian, compute_uv=False), dtype=np.float64
     )
-    finite_solution_values = (
-        *fitted_scaled,
-        *public_parameters,
-        *final_prediction,
-        *residual,
-        cost,
-        rmse,
-        amplitude_normalized_rmse,
-        *singular_values,
-    )
     if not (
-        final_prediction.shape == (5,)
-        and singular_values.shape == (4,)
-        and all(math.isfinite(float(value)) for value in finite_solution_values)
-        and fitted_fwhm_hz > 0.0
-        and fitted_amplitude >= 0.0
-        and rmse >= 0.0
-        and amplitude_normalized_rmse >= 0.0
+        singular_values.shape == (4,) and np.all(np.isfinite(singular_values))
     ):
         return _finish_sparse_fit(
             started_ns=started_ns,
@@ -647,7 +655,6 @@ def fit_sparse_linewidth(
         "rmse": rmse,
         "amplitude_normalized_rmse": amplitude_normalized_rmse,
     }
-    bound_spans = upper_bounds - lower_bounds
     with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
         lower_margins = (fitted_scaled - lower_bounds) / bound_spans
         upper_margins = (upper_bounds - fitted_scaled) / bound_spans

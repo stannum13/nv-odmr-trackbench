@@ -919,6 +919,39 @@ def test_nonrepresentable_preparation_fails_before_model_or_solver(
     assert result.scipy_status is None
 
 
+def test_nonrepresentable_scaled_bound_span_fails_before_model_or_solver(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    configuration = replace(
+        configuration,
+        baseline_offset_source_amplitude_fraction=sys.float_info.max,
+    )
+    monkeypatch.setattr(
+        sparse_fit,
+        "_evaluate_bound_source_model",
+        lambda *args, **kwargs: pytest.fail(
+            "model called after nonrepresentable bound span"
+        ),
+    )
+    monkeypatch.setattr(
+        sparse_fit,
+        "least_squares",
+        lambda *args, **kwargs: pytest.fail(
+            "solver called after nonrepresentable bound span"
+        ),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == (
+        "failure",
+        "model_evaluation_failed",
+    )
+    assert result.scipy_status is None
+    assert result.fitted_center_correction_hz is None
+
+
 @pytest.mark.parametrize("status", (0, -1))
 def test_nonpositive_solver_status_is_optimizer_failure(
     monkeypatch: pytest.MonkeyPatch, status: int
@@ -1028,6 +1061,84 @@ def test_malformed_or_nonfinite_returned_solution_is_nonfinite_solution(
     assert result.scipy_status == 1
     assert result.fitted_center_correction_hz is None
     assert result.rmse is None
+    assert result.scaled_jacobian_rank is None
+
+
+@pytest.mark.parametrize(
+    "component", ("solution", "residual", "jacobian", "prediction")
+)
+def test_zero_dimensional_returned_array_is_nonfinite_solution(
+    monkeypatch: pytest.MonkeyPatch, component: str
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    x: object = (0.0, 1.0, 1.0, 0.0)
+    fun: object = np.zeros(5, dtype=np.float64)
+    jac: object = np.vstack((np.eye(4), np.zeros(4)))
+    if component == "solution":
+        x = np.asarray(1.0)
+    elif component == "residual":
+        fun = np.asarray(0.0)
+    elif component == "jacobian":
+        jac = np.asarray(1.0)
+    elif component == "prediction":
+        original_model = sparse_fit._evaluate_bound_source_model
+        model_calls = 0
+
+        def scalar_final_prediction(*args: object, **kwargs: object) -> np.ndarray:
+            nonlocal model_calls
+            model_calls += 1
+            if model_calls == 1:
+                return original_model(*args, **kwargs)
+            return np.asarray(1.0)
+
+        monkeypatch.setattr(
+            sparse_fit, "_evaluate_bound_source_model", scalar_final_prediction
+        )
+    _patch_solver(monkeypatch, _solver_result(x=x, fun=fun, jac=jac))
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == ("failure", "nonfinite_solution")
+    assert result.scipy_status == 1
+    assert result.fitted_center_correction_hz is None
+
+
+@pytest.mark.parametrize("earlier_failure", ("prediction", "rmse"))
+def test_nonfinite_returned_data_precedes_later_svd_exception(
+    monkeypatch: pytest.MonkeyPatch, earlier_failure: str
+) -> None:
+    source, configuration, queries, observations = _controlled_fit_inputs()
+    fun = np.zeros(5, dtype=np.float64)
+    if earlier_failure == "prediction":
+        original_model = sparse_fit._evaluate_bound_source_model
+        model_calls = 0
+
+        def nonfinite_final_prediction(
+            *args: object, **kwargs: object
+        ) -> np.ndarray:
+            nonlocal model_calls
+            model_calls += 1
+            if model_calls == 1:
+                return original_model(*args, **kwargs)
+            return np.full(5, np.nan)
+
+        monkeypatch.setattr(
+            sparse_fit, "_evaluate_bound_source_model", nonfinite_final_prediction
+        )
+    else:
+        fun[0] = sys.float_info.max
+    _patch_solver(monkeypatch, _solver_result(fun=fun))
+    monkeypatch.setattr(
+        sparse_fit.np.linalg,
+        "svd",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            RuntimeError("SVD must not run after earlier returned failure")
+        ),
+    )
+
+    result = fit_sparse_linewidth(source, configuration, queries, observations)
+
+    assert (result.status, result.failure_code) == ("failure", "nonfinite_solution")
     assert result.scaled_jacobian_rank is None
 
 
