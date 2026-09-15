@@ -10,6 +10,15 @@ once a package version is introduced.
 
 ### Added
 
+- Closed the Stage 6.4 Task 10 independent-review evidence gaps without
+  changing conformant production behavior. Fifth-point tracker transitions now
+  cover negative, signed-zero, and positive live Q under both success and
+  scientific failure; every legal scientific-failure diagnostic-presence shape
+  proves that even a present fitted width cannot refresh the active FWHM
+  source. Commit-last tests now inject ordinary and identical process-control
+  exceptions into metadata/private-state construction, every later identity
+  construction, and both later resource constructions, asserting exact typed
+  codes or identical propagation with value-equal rollback.
 - Completed Stage 6.4's fifth-point sparse estimator transition. The composite
   calls the isolated fitter once over the exact reserved block, commits both
   scientific success and failure to scan history/counters/parity, preserves

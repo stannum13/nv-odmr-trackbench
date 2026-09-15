@@ -957,11 +957,13 @@ def test_every_sparse_partial_stage_preserves_identical_base_exception(
         ("fit_sparse_linewidth", "sparse_scan_result_construction_failed"),
         ("CompositeIdentityEstimate", "sparse_identity_estimate_construction_failed"),
         ("PublicAcquisitionResources", "resource_construction_failed"),
+        ("TwoPointRunMetadata", "aggregate_estimate_construction_failed"),
         (
             "SparseLinewidthCompositeEstimate",
             "aggregate_estimate_construction_failed",
         ),
         ("SparseLinewidthCompositeUpdate", "update_construction_failed"),
+        ("_CompositeTrackerState", "update_construction_failed"),
     ),
 )
 def test_fifth_sparse_construction_codes_and_rollback(
@@ -1002,8 +1004,10 @@ def test_fifth_sparse_construction_codes_and_rollback(
         "fit_sparse_linewidth",
         "CompositeIdentityEstimate",
         "PublicAcquisitionResources",
+        "TwoPointRunMetadata",
         "SparseLinewidthCompositeEstimate",
         "SparseLinewidthCompositeUpdate",
+        "_CompositeTrackerState",
     ),
 )
 def test_every_fifth_sparse_stage_preserves_identical_base_exception(
@@ -1032,6 +1036,102 @@ def test_every_fifth_sparse_stage_preserves_identical_base_exception(
     with pytest.raises(KeyboardInterrupt) as raised:
         tracker.update(observation)
 
+    assert raised.value is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "failing_call", "expected_code"),
+    (
+        *(
+            (
+                "CompositeIdentityEstimate",
+                call,
+                "sparse_identity_estimate_construction_failed",
+            )
+            for call in range(2, 9)
+        ),
+        *(
+            ("PublicAcquisitionResources", call, "resource_construction_failed")
+            for call in range(2, 4)
+        ),
+    ),
+)
+def test_later_fifth_sparse_constructor_calls_are_typed_and_atomic(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    failing_call: int,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = RuntimeError(f"injected {constructor_name} call {failing_call}")
+    constructor = getattr(tracker_module, constructor_name)
+    calls = 0
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def construct(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == failing_call:
+            raise injected
+        return constructor(*args, **kwargs)
+
+    monkeypatch.setattr(tracker_module, "fit_sparse_linewidth", fit_success)
+    monkeypatch.setattr(tracker_module, constructor_name, construct)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert calls == failing_call
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is injected
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "failing_call"),
+    (
+        *(("CompositeIdentityEstimate", call) for call in range(2, 9)),
+        *(("PublicAcquisitionResources", call) for call in range(2, 4)),
+    ),
+)
+def test_later_fifth_sparse_constructor_calls_preserve_base_exception(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    failing_call: int,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_sparse_observation(tracker, accepted_prefix_length=4)
+    fit_result = _completed_sparse_result(tracker, observation)
+    before = _snapshot(tracker)
+    injected = KeyboardInterrupt(f"injected {constructor_name} call {failing_call}")
+    constructor = getattr(tracker_module, constructor_name)
+    calls = 0
+
+    def fit_success(*args, **kwargs):
+        del args, kwargs
+        return fit_result
+
+    def construct(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == failing_call:
+            raise injected
+        return constructor(*args, **kwargs)
+
+    monkeypatch.setattr(tracker_module, "fit_sparse_linewidth", fit_success)
+    monkeypatch.setattr(tracker_module, constructor_name, construct)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        tracker.update(observation)
+
+    assert calls == failing_call
     assert raised.value is injected
     assert _snapshot(tracker) == before
 

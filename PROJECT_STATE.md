@@ -45,6 +45,16 @@ global total independently. Exact fifth-point validation, every construction
 and clock boundary, ordinary-exception rollback, and identical process-control
 propagation are regression-pinned. Evaluator/runner behavior and Stage 6.5
 claims remain deferred.
+Task 10's independent review found the production transition conformant and
+identified three test-evidence gaps. The closed matrix now drives negative,
+negative-zero, positive-zero, and positive live Q through both successful and
+scientifically failed fifth-point completion; exercises all eight legal
+scientific-failure diagnostic-presence shapes, including the five with fitted
+widths; and proves that no failure refreshes the active width source. Ordinary
+and identical process-control rollback now also cover metadata, private state,
+identity construction calls two through eight, and resource construction calls
+two and three. Targeted mutation REDs pin signed-zero preservation, failure
+source aging, exact typed exception translation, and commit-last rollback.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -952,6 +962,11 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 10 review-fix focused tracker/atomicity files: 230 passed.
+- Stage 6.4 Task 10 review-fix complete sparse estimator gate: 454 passed.
+- Stage 6.4 Task 10 review-fix estimator/evaluation/emulator gate: 1,575 passed.
+- Stage 6.4 Task 10 review-fix full repository gate: 1,676 passed.
+- Stage 6.4 Task 10 review-fix Ruff gate: All checks passed.
 - Stage 6.4 Task 10 focused types/tracker/atomicity gate: 288 passed.
 - Stage 6.4 Task 10 complete sparse estimator gate: 416 passed.
 - Stage 6.4 Task 10 estimator/evaluation/emulator gate: 1,537 passed.

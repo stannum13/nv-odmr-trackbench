@@ -755,6 +755,92 @@ def _synthetic_fit_result(
     )
 
 
+def _synthetic_failure_result(
+    queries: tuple[SparseLinewidthQuery, ...],
+    observations: tuple[EstimatorObservation, ...],
+    failure_code: str,
+) -> SparseLinewidthScanResult:
+    successful = _synthetic_fit_result(queries, observations, success=True)
+    replacements: dict[str, object] = {
+        "status": "failure",
+        "failure_code": failure_code,
+        "fitted_q": None,
+    }
+    if failure_code == "model_evaluation_failed":
+        replacements.update(
+            fitted_center_correction_hz=None,
+            fitted_local_center_hz=None,
+            fitted_fwhm_hz=None,
+            fitted_amplitude=None,
+            fitted_baseline_offset=None,
+            rmse=None,
+            amplitude_normalized_rmse=None,
+            scaled_jacobian_rank=None,
+            scaled_jacobian_condition=None,
+            scipy_status=None,
+            scipy_message=None,
+            nfev=None,
+        )
+    elif failure_code in {"optimizer_failed", "nonfinite_solution"}:
+        replacements.update(
+            fitted_center_correction_hz=None,
+            fitted_local_center_hz=None,
+            fitted_fwhm_hz=None,
+            fitted_amplitude=None,
+            fitted_baseline_offset=None,
+            rmse=None,
+            amplitude_normalized_rmse=None,
+            scaled_jacobian_rank=None,
+            scaled_jacobian_condition=None,
+            scipy_status=0 if failure_code == "optimizer_failed" else 1,
+        )
+    elif failure_code == "bounds_active":
+        replacements.update(
+            scaled_jacobian_rank=None,
+            scaled_jacobian_condition=None,
+        )
+    elif failure_code == "rank_deficient":
+        replacements.update(
+            scaled_jacobian_rank=3,
+            scaled_jacobian_condition=None,
+        )
+    return replace(successful, **replacements)
+
+
+def _seed_signed_target_at_fifth_point(
+    tracker: SparseLinewidthCompositeTracker,
+    calibration: TwoPointCalibration,
+    fast_center_hz: float,
+) -> tuple[tuple[SparseLinewidthQuery, ...], object]:
+    for _ in range(2):
+        query = tracker.choose_next_query()
+        assert type(query) is TwoPointQuery
+        tracker.update(_fast_observation(calibration, query, fluorescence=-1.0))
+    _accept_fast_pairs(tracker, calibration, count=7)
+    reserved, _ = _accept_sparse_prefix(tracker)
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    state = tracker._state
+    assert state is not None
+    target = state.estimate.identities[0]
+    assert target.fast_center_source_kind == "calibration"
+    assert target.latest_fast_pair is not None
+    assert target.latest_fast_pair.lock_state == "lost"
+    seeded_target = replace(
+        target,
+        fast_center_hz=fast_center_hz,
+        live_q=fast_center_hz / target.active_fwhm_hz,
+    )
+    seeded_estimate = copy(state.estimate)
+    object.__setattr__(
+        seeded_estimate,
+        "identities",
+        (seeded_target, *state.estimate.identities[1:]),
+    )
+    object.__setattr__(tracker, "_state", replace(state, estimate=seeded_estimate))
+    return reserved, seeded_target
+
+
 def _accept_sparse_prefix(
     tracker: SparseLinewidthCompositeTracker,
     *,
@@ -2083,6 +2169,151 @@ def test_scientific_sparse_failure_is_completed_but_retains_both_sources(
     assert after_target.latest_sparse_scan is scan
     assert after_target.completed_sparse_scans == 1
     assert update.estimate.accepted_observations == before.accepted_observations + 1
+
+
+@pytest.mark.parametrize(
+    "fast_center_hz",
+    (
+        pytest.param(-2.0, id="negative"),
+        pytest.param(-0.0, id="negative-zero"),
+        pytest.param(0.0, id="positive-zero"),
+        pytest.param(2.0, id="positive"),
+    ),
+)
+@pytest.mark.parametrize("fit_success", (False, True), ids=("failure", "success"))
+def test_fifth_sparse_transition_recomputes_signed_and_zero_live_q(
+    monkeypatch: pytest.MonkeyPatch,
+    fast_center_hz: float,
+    fit_success: bool,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    reserved, before_target = _seed_signed_target_at_fifth_point(
+        tracker, calibration, fast_center_hz
+    )
+    fifth = reserved[4]
+    observation = _sparse_observation(fifth)
+
+    def fit_result(source, configuration, queries, observations):
+        del source, configuration
+        return _synthetic_fit_result(
+            queries,
+            observations,
+            success=fit_success,
+        )
+
+    monkeypatch.setattr(tracker_module, "fit_sparse_linewidth", fit_result)
+
+    update = tracker.update(observation)
+
+    scan = update.completed_sparse_scan
+    assert scan is not None
+    after_target = update.estimate.identities[0]
+    assert after_target.fast_center_hz == before_target.fast_center_hz
+    assert math.copysign(1.0, after_target.fast_center_hz) == math.copysign(
+        1.0, before_target.fast_center_hz
+    )
+    assert (
+        after_target.fast_center_source_kind,
+        after_target.fast_center_source_pair_index,
+        after_target.fast_center_reference_timestamp_s,
+        after_target.fast_center_release_sequence_index,
+        after_target.fast_center_release_timestamp_s,
+    ) == (
+        before_target.fast_center_source_kind,
+        before_target.fast_center_source_pair_index,
+        before_target.fast_center_reference_timestamp_s,
+        before_target.fast_center_release_sequence_index,
+        before_target.fast_center_release_timestamp_s,
+    )
+    expected_fwhm_hz = (
+        scan.fitted_fwhm_hz if fit_success else before_target.active_fwhm_hz
+    )
+    assert expected_fwhm_hz is not None
+    assert after_target.active_fwhm_hz == expected_fwhm_hz
+    expected_live_q = before_target.fast_center_hz / expected_fwhm_hz
+    assert after_target.live_q == expected_live_q
+    assert math.copysign(1.0, after_target.live_q) == math.copysign(
+        1.0, expected_live_q
+    )
+
+
+@pytest.mark.parametrize(
+    "failure_code",
+    (
+        "model_evaluation_failed",
+        "optimizer_failed",
+        "nonfinite_solution",
+        "bounds_active",
+        "rank_deficient",
+        "ill_conditioned",
+        "amplitude_unresolved",
+        "residual_quality_failed",
+    ),
+)
+def test_every_scientific_failure_shape_completes_without_refreshing_width(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_code: str,
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+    reserved, _ = _accept_sparse_prefix(tracker)
+    before = tracker.estimate()
+    before_target = before.identities[0]
+    fifth = tracker.choose_next_query()
+    assert fifth is reserved[4]
+    observation = _sparse_observation(fifth)
+
+    def failed_fit(source, configuration, queries, observations):
+        del source, configuration
+        return _synthetic_failure_result(queries, observations, failure_code)
+
+    monkeypatch.setattr(tracker_module, "fit_sparse_linewidth", failed_fit)
+
+    update = tracker.update(observation)
+
+    scan = update.completed_sparse_scan
+    assert scan is not None
+    assert scan.status == "failure"
+    assert scan.failure_code == failure_code
+    after = update.estimate
+    after_target = after.identities[0]
+    assert (
+        after_target.active_fwhm_hz,
+        after_target.fwhm_source_kind,
+        after_target.fwhm_source_scan_index,
+        after_target.fwhm_reference_timestamp_s,
+        after_target.fwhm_release_sequence_index,
+        after_target.fwhm_release_timestamp_s,
+    ) == (
+        before_target.active_fwhm_hz,
+        before_target.fwhm_source_kind,
+        before_target.fwhm_source_scan_index,
+        before_target.fwhm_reference_timestamp_s,
+        before_target.fwhm_release_sequence_index,
+        before_target.fwhm_release_timestamp_s,
+    )
+    assert after_target.live_q == (
+        after_target.fast_center_hz / before_target.active_fwhm_hz
+    )
+    assert after.completed_sparse_scans == before.completed_sparse_scans + 1
+    assert after.fast_pairs_since_scan == 0
+    assert after.sparse_scan_history[-1] is scan
+    assert after_target.latest_sparse_scan is scan
+    assert (
+        after_target.completed_sparse_scans
+        == before_target.completed_sparse_scans + 1
+    )
+    if failure_code in {
+        "bounds_active",
+        "rank_deficient",
+        "ill_conditioned",
+        "amplitude_unresolved",
+        "residual_quality_failed",
+    }:
+        assert scan.fitted_fwhm_hz is not None
+        assert scan.fitted_fwhm_hz != after_target.active_fwhm_hz
 
 
 @pytest.mark.parametrize("included", (False, True))
