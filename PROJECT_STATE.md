@@ -385,6 +385,24 @@ that the chosen policy is optimal. Task 18's first independent review found
 three Important assertion-strength gaps and no Critical or Minor findings; all
 three received isolated test-only corrections. The final bounded independent
 re-review reported zero Critical, Important, or Minor findings.
+Task 19 publishes the calibrated two-point center-tracking workflow. The
+download-free example uses only installed public APIs to acquire a verified
+synthetic calibration, start a separate
+`conditional_free_precalibration` run, complete one pair per identity, and
+print finite public policy, resource, and timing diagnostics without truth,
+error, expected-photon, comparison, or superiority output. Researcher guidance
+now documents verified versus caller-asserted provenance, both mandatory
+budget treatments, fixed identity cells, alternating side order, discriminator
+sign, policy-only lock/common-mode semantics, zero-step refresh, partial and
+unaccepted resources, token continuity, public versus actual timing, release
+and age semantics, terminal aborts, and the inert tracker seed. It states
+explicitly that Stage 6.3 provides no Stage 6.5 matched-budget superiority
+result. The required public-surface characterization exposed five evaluator
+protocol aliases that existed in their defining module but were absent from the
+package export; the authorized narrow export and stale exact-`__all__` test
+updates make the source and isolated wheel surfaces agree.
+The bounded independent Task 19 review reported zero Critical, Important, or
+Minor findings.
 
 ## Completed work
 
@@ -678,8 +696,9 @@ re-review reported zero Critical, Important, or Minor findings.
 
 ## Tests currently passing
 
-- Full repository suite with all seven Task 18 acceptance regressions: 1204
-  passed.
+- Full repository suite including the Task 19 package, example, and guidance
+  nodes: 1207 passed.
+- Task 19 import, out-of-tree example, and guidance nodes: 3 passed.
 - Task 18 acceptance file: 7 passed on each of two consecutive complete runs;
   its static exact-schedule node also passed twice independently.
 - Dynamics, models, estimators, evaluator, and emulator focused integration
@@ -687,11 +706,12 @@ re-review reported zero Critical, Important, or Minor findings.
 - Task 17 runner file: 78 passed.
 - Task 17 named protocol matrix: 60 passed.
 - Ruff across every tracked Python file: All checks passed.
-- The fail-fast package smoke built exactly one
+- The Task 19 fail-fast package smoke built exactly one
   `nv_odmr_trackbench-0.1.0.tar.gz` and one
   `nv_odmr_trackbench-0.1.0-py3-none-any.whl`, then installed the wheel into a
-  fresh environment, imported all Stage 6.2 public aliases and
-  `WarmStartedFullSweepEstimator`, and ran the three-update example there.
+  fresh environment, imported every planned Stage 6.3 estimator/evaluator
+  public name under `-I`, and ran the calibrated two-point example from an
+  unrelated working directory.
 
 ## Known scientific limitations
 
@@ -739,6 +759,5 @@ re-review reported zero Critical, Important, or Minor findings.
 
 ## Next actions
 
-1. Implement Task 19 public documentation, example, exports, build, and wheel
-   smoke.
-2. Run the Task 19 per-task specification and quality review.
+1. Execute Task 20's integrated scientific/software review and closeout.
+2. Run the final deterministic test, lint, build, and repository-hygiene gates.

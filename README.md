@@ -42,7 +42,7 @@ human-readable configuration at `configs/drift.yaml`; from the repository
 root, use `odmrbench simulate --config configs/drift.yaml` when changing or
 inspecting that file.
 
-## Offline full-sweep estimator
+## Offline and calibrated two-point estimators
 
 The package now includes a constrained eight-component Lorentzian and
 pseudo-Voigt fitter plus two completed-sweep wrappers.
@@ -55,20 +55,25 @@ thresholds; it does not prove the presence of eight physical resonances.
 
 See [docs/estimators.md](docs/estimators.md), including its
 [warm-started completed-sweep guidance](docs/estimators.md#warm-started-completed-sweeps),
-for model, initialization, bounds, uncertainty, failure, source, age, resource,
-ordering, and recording-interpretation guidance. From the repository root of a
-source checkout with the package installed, run these download-free generated
-diagnostics:
+and [calibrated two-point guidance](docs/estimators.md#calibrated-two-point-center-tracking),
+for model, initialization, calibration provenance, mandatory budget treatment,
+policy, timing, failure, resource, ordering, and recording-interpretation
+guidance. From the repository root of a source checkout with the package
+installed, run these download-free generated diagnostics:
 
 ```bash
 python examples/fit_synthetic_sweep.py
 python examples/fit_warm_started_sweeps.py
+python examples/track_two_point_centers.py
 ```
 
 They are software fixtures, not benchmark results or evidence of a universal
-warm-start speedup. The `examples/` scripts are source-tree files, are not
-contained in the wheel, and require either the repository-root commands above
-or explicit paths to the checkout.
+warm-start speedup or two-point superiority. The two-point example uses
+`conditional_free_precalibration` and reports only public policy/resource/timing
+diagnostics. There is **no Stage 6.5 matched-budget superiority result** yet.
+The `examples/` scripts are source-tree files, are not contained in the wheel,
+and require either the repository-root commands above or explicit paths to the
+checkout.
 
 Read [docs/datasets.md](docs/datasets.md) before obtaining or replaying the
 optional CC BY data, including its explicit download URL, size, checksum, and

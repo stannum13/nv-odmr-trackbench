@@ -77,6 +77,17 @@ once a package version is introduced.
 
 ### Added
 
+- Published calibrated two-point researcher guidance and a download-free
+  public-API example. The documentation distinguishes verified from
+  caller-asserted provenance, both mandatory calibration-budget treatments,
+  fixed cells and signed alternating flank pairs, policy lock/common-mode
+  diagnostics, zero-step refresh, timing/release/age conventions, partial and
+  unaccepted resource accounting, terminal aborts, and inert tracker seeds. It
+  explicitly makes no Stage 6.5 matched-budget superiority claim. The example
+  runs one pair for each of eight identities and prints only finite public
+  policy, resource, and timing diagnostics. Package tests and an isolated-wheel
+  smoke now pin the complete Stage 6.3 estimator/evaluator surface, including
+  five previously unexported evaluator protocol aliases.
 - Added seven closed generated scientific acceptance regressions for the
   calibrated two-point tracker. The exact 4,481-point source fixture freezes
   pseudo-Voigt model/configuration values, seeds, acquisition settings,

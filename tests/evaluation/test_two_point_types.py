@@ -45,10 +45,15 @@ def test_evaluator_primitive_names_are_public() -> None:
     from odmr_bench.evaluation import two_point
     from odmr_bench.evaluation.two_point import (
         ResourceJoinMismatchField,
+        TwoPointAbortReason,
         TwoPointCalibrationPreflightError,
         TwoPointEvaluatorInstrumentConfiguration,
+        TwoPointRunnerPhase,
         TwoPointRunnerStartError,
+        TwoPointRunnerStartFailureCode,
         TwoPointRunnerStateError,
+        VerifiedCalibrationFailureCode,
+        VerifiedCalibrationPreflightCode,
         VerifiedCalibrationQueryRequest,
         VerifiedInstrumentRunToken,
         build_two_point_evaluator_resources,
@@ -56,6 +61,7 @@ def test_evaluator_primitive_names_are_public() -> None:
 
     assert tuple(two_point.__all__) == (
         "ResourceJoinMismatchField",
+        "TwoPointAbortReason",
         "TwoPointAbortedRun",
         "TwoPointCalibrationPreflightError",
         "TwoPointEvaluatorInstrumentConfiguration",
@@ -70,11 +76,15 @@ def test_evaluator_primitive_names_are_public() -> None:
         "TwoPointRunnerBudgetStopped",
         "TwoPointRunnerExternallyStopped",
         "TwoPointRunnerInstrumentFailure",
+        "TwoPointRunnerPhase",
         "TwoPointRunnerRunOutcome",
         "TwoPointRunnerStartError",
+        "TwoPointRunnerStartFailureCode",
         "TwoPointRunnerStateError",
         "TwoPointRunnerStepOutcome",
         "TwoPointTrackingAcquisition",
+        "VerifiedCalibrationFailureCode",
+        "VerifiedCalibrationPreflightCode",
         "VerifiedCalibrationQueryRequest",
         "VerifiedInstrumentRunToken",
         "VerifiedTwoPointCalibrationFailure",
@@ -98,8 +108,13 @@ def test_evaluator_primitive_names_are_public() -> None:
 
     assert TwoPointCalibrationPreflightError
     assert TwoPointEvaluatorInstrumentConfiguration
+    assert TwoPointAbortReason
+    assert TwoPointRunnerPhase
     assert TwoPointRunnerStartError
+    assert TwoPointRunnerStartFailureCode
     assert TwoPointRunnerStateError
+    assert VerifiedCalibrationFailureCode
+    assert VerifiedCalibrationPreflightCode
     assert VerifiedCalibrationQueryRequest
     assert VerifiedInstrumentRunToken
 
