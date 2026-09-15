@@ -34,6 +34,10 @@ resonance's center, FWHM, and amplitude may vary. The legacy target-center
 helper delegates to the same scalar core without a public surface or arithmetic
 change. Lorentzian/pseudo-Voigt, affine/quadratic, scalar/vector, boundary, and
 source-order regressions pin that differential. Task 4 remains next.
+The bound-only entry point now rejects non-finite and non-scalar supplied target
+parameters before source access or arithmetic, preserves canonical built-in
+float values, requires positive FWHM and non-negative amplitude, and leaves the
+legacy Stage 6.3 delegation behavior unchanged.
 
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated
@@ -780,9 +784,9 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 3 source-bound model focused/differential gate: 81 passed.
-- Stage 6.4 Task 3 estimator/evaluator/emulator integration gate: 1,274 passed.
-- Stage 6.4 Task 3 full repository gate: 1,320 passed.
+- Stage 6.4 Task 3 source-bound model focused/differential gate: 120 passed.
+- Stage 6.4 Task 3 estimator/evaluator/emulator integration gate: 1,313 passed.
+- Stage 6.4 Task 3 full repository gate: 1,359 passed.
 - Stage 6.4 Task 2 sparse-source regression-closure record contracts: 92 passed.
 - Stage 6.4 Task 2 sparse-source regression-closure
   estimator/evaluator/emulator gate: 1,204 passed.

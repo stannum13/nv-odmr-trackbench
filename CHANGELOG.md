@@ -20,6 +20,10 @@ once a package version is introduced.
 
 ### Fixed
 
+- Hardened the private Stage 6.4 bound-source model seam: supplied target
+  center/FWHM/amplitude and baseline offset now require finite real scalars
+  before model arithmetic, target FWHM remains strictly positive, and target
+  amplitude remains non-negative. The Stage 6.3 legacy scalar path is unchanged.
 - Closed the remaining Stage 6.4 Task 2 sparse-source regression matrix with a
   deterministic public period-1 aggregate fixture: a successful `r0` scan
   followed one identity round later by a failed `r0` scan retains the earlier

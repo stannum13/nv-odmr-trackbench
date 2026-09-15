@@ -81,3 +81,49 @@ Atomic commit created with message:
 
 None within Task 3 scope. The helper is intentionally private and the next
 sparse-estimator task owns its first production consumer.
+
+## Review-Fix Pass
+
+### Finding and RED
+
+The Task 3 re-review found that `_evaluate_bound_source_model` accepted NaN,
+both infinities, booleans, complex values, arrays, zero/negative FWHM, and
+negative amplitude. Some values propagated NaNs, projected complex values with
+a warning, or reached a scalar divide-by-zero path.
+
+The focused RED command added scalar and vector witnesses for NaN and both
+infinities on every supplied parameter, all four parameter names crossed with
+boolean/complex/array inputs, and target FWHM/amplitude domain failures:
+
+```text
+.venv/bin/python -m pytest \
+  tests/estimators/test_sparse_linewidth_source_model.py::test_bound_source_model_rejects_nonfinite_scalar_parameters_before_arithmetic \
+  tests/estimators/test_sparse_linewidth_source_model.py::test_bound_source_model_rejects_non_scalar_parameter_types \
+  tests/estimators/test_sparse_linewidth_source_model.py::test_bound_source_model_enforces_target_width_and_amplitude_domains -q
+39 failed, 6 warnings
+```
+
+### GREEN and Final Verification
+
+Added a private finite-real scalar canonicalizer only at the new source-bound
+entry point. It canonicalizes supported NumPy scalar values to built-in floats,
+rejects boolean/complex/array values and non-finite values before source lookup
+or arithmetic, requires FWHM `> 0`, and requires amplitude `>= 0`. The shared
+legacy core remains unvalidated so the Stage 6.3 target-only helper's prior
+inputs, outputs, and exception behavior remain unchanged.
+
+```text
+Focused validation GREEN: 39 passed in 0.77s
+Stage 6.3 calibration + sparse model + tracker: 120 passed in 1.32s
+Estimator integration: 929 passed in 25.95s
+Dynamics/models/evaluator/emulator integration: 384 passed in 8.65s
+Remaining datasets/CLI/package/plotting suite: 46 passed in 4.40s
+Full repository partition total: 1,359 passed
+Affected integration total: 1,313 passed
+.venv/bin/ruff check .: All checks passed!
+git diff --check: clean
+```
+
+The terminal cannot retain a process session after its 30-second stream limit,
+so the full suite again uses exhaustive disjoint repository partitions rather
+than claiming a truncated single-command run.

@@ -104,6 +104,88 @@ def _source_with_model(
     )
 
 
+def _evaluate_default_bound_source_model(
+    frequency_hz: float | np.ndarray,
+    **overrides: object,
+) -> np.ndarray:
+    source = make_legal_caller_asserted_source()
+    arguments: dict[str, object] = {
+        "center_hz": 2.761e9,
+        "fwhm_hz": 1.7e6,
+        "amplitude": 0.018,
+        "baseline_offset": 0.003,
+    }
+    arguments.update(overrides)
+    return _evaluate_bound_source_model(
+        frequency_hz,
+        source,
+        "r0",
+        **arguments,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.parametrize("frequency_hz", (2.76e9, np.array([2.76e9, 2.77e9])))
+@pytest.mark.parametrize(
+    "parameter_name",
+    ("center_hz", "fwhm_hz", "amplitude", "baseline_offset"),
+)
+@pytest.mark.parametrize("invalid_value", (np.nan, np.inf, -np.inf))
+def test_bound_source_model_rejects_nonfinite_scalar_parameters_before_arithmetic(
+    frequency_hz: float | np.ndarray,
+    parameter_name: str,
+    invalid_value: float,
+) -> None:
+    with pytest.raises(ValueError, match=rf"{parameter_name} must be finite"):
+        _evaluate_default_bound_source_model(
+            frequency_hz,
+            **{parameter_name: invalid_value},
+        )
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "invalid_value"),
+    tuple(
+        (parameter_name, invalid_value)
+        for parameter_name in (
+            "center_hz",
+            "fwhm_hz",
+            "amplitude",
+            "baseline_offset",
+        )
+        for invalid_value in (True, 1.0 + 2.0j, np.array([1.0]))
+    ),
+)
+def test_bound_source_model_rejects_non_scalar_parameter_types(
+    parameter_name: str,
+    invalid_value: object,
+) -> None:
+    with pytest.raises(TypeError, match=rf"{parameter_name} must be a real scalar"):
+        _evaluate_default_bound_source_model(
+            np.array([2.76e9, 2.77e9]),
+            **{parameter_name: invalid_value},
+        )
+
+
+@pytest.mark.parametrize(
+    ("parameter_name", "invalid_value", "message"),
+    (
+        ("fwhm_hz", 0.0, "fwhm_hz must be positive"),
+        ("fwhm_hz", -1.0, "fwhm_hz must be positive"),
+        ("amplitude", -np.finfo(np.float64).eps, "amplitude must be non-negative"),
+    ),
+)
+def test_bound_source_model_enforces_target_width_and_amplitude_domains(
+    parameter_name: str,
+    invalid_value: float,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        _evaluate_default_bound_source_model(
+            2.76e9,
+            **{parameter_name: invalid_value},
+        )
+
+
 def test_bound_source_model_changes_only_target_and_constant_offset() -> None:
     source = make_legal_caller_asserted_source()
     frequencies = np.array([2.86e9, 2.87e9, 2.88e9])

@@ -7,6 +7,7 @@ from collections.abc import Sequence
 from contextvars import ContextVar, Token
 from dataclasses import fields, is_dataclass, replace
 from itertools import pairwise
+from numbers import Real
 
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
@@ -140,6 +141,21 @@ def _fail(code: TwoPointCalibrationConstructionCode, message: str) -> None:
     raise TwoPointCalibrationConstructionError(code, message)
 
 
+def _finite_bound_model_scalar(value: object, name: str) -> float:
+    """Canonicalize an evaluator-supplied finite real model scalar."""
+    if isinstance(value, (bool, np.bool_)) or not isinstance(
+        value, (Real, np.integer, np.floating)
+    ):
+        raise TypeError(f"{name} must be a real scalar")
+    try:
+        canonical = float(value)
+    except (TypeError, ValueError, OverflowError):
+        raise ValueError(f"{name} must be finite") from None
+    if not math.isfinite(canonical):
+        raise ValueError(f"{name} must be finite")
+    return canonical
+
+
 def _evaluate_bound_source_fit_model(
     frequency_hz: ArrayLike,
     source_fit: SpectrumFitResult,
@@ -218,6 +234,16 @@ def _evaluate_bound_source_model(
     baseline_offset: float,
 ) -> NDArray[np.float64]:
     """Evaluate a source-bound model with only one line and offset varied."""
+    center_hz = _finite_bound_model_scalar(center_hz, "center_hz")
+    fwhm_hz = _finite_bound_model_scalar(fwhm_hz, "fwhm_hz")
+    if fwhm_hz <= 0.0:
+        raise ValueError("fwhm_hz must be positive")
+    amplitude = _finite_bound_model_scalar(amplitude, "amplitude")
+    if amplitude < 0.0:
+        raise ValueError("amplitude must be non-negative")
+    baseline_offset = _finite_bound_model_scalar(
+        baseline_offset, "baseline_offset"
+    )
     source_fit = source.source_fit
     target_index = next(
         index
