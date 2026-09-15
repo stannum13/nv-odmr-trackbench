@@ -12,10 +12,13 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
+    CalibratedTwoPointTracker,
     PublicAcquisitionResources,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
+    SparseLinewidthQuery,
     SparseLinewidthResetError,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
@@ -25,6 +28,12 @@ from odmr_bench.estimators import (
 )
 from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
 from odmr_bench.estimators import two_point_calibration as calibration_module
+from odmr_bench.estimators.sparse_linewidth_fit import (
+    _SparseGeometryConstructionError,
+)
+from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_target_only_model,
+)
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_tracker_configuration,
@@ -538,4 +547,316 @@ def test_reset_does_not_retain_or_wrap_a_stage_63_tracker() -> None:
     assert not any(
         type(getattr(tracker, slot)).__name__ == "CalibratedTwoPointTracker"
         for slot in tracker.__slots__
+    )
+
+
+def _fast_observation(
+    calibration: TwoPointCalibration,
+    query: TwoPointQuery,
+    *,
+    fluorescence: float | None = None,
+    realized_photons: int | None = None,
+) -> EstimatorObservation:
+    cell = calibration.identities[query.pair_index % 8]
+    value = (
+        _evaluate_target_only_model(
+            calibration.source.source_fit,
+            cell.source_fit_index,
+            query.frequency_hz,
+            query.interrogation_center_hz,
+        )
+        if fluorescence is None
+        else fluorescence
+    )
+    return EstimatorObservation(
+        sequence_index=query.expected_sequence_index,
+        timestamp_s=query.expected_end_timestamp_s,
+        frequency_hz=query.frequency_hz,
+        fluorescence=value,
+        integration_time_s=query.integration_time_s,
+        nominal_exposure_photons=query.expected_nominal_exposure_photons,
+        realized_photons=realized_photons,
+    )
+
+
+def _accept_fast_pairs(
+    tracker: SparseLinewidthCompositeTracker,
+    calibration: TwoPointCalibration,
+    *,
+    count: int,
+) -> None:
+    for _ in range(count * 2):
+        query = tracker.choose_next_query()
+        assert type(query) is TwoPointQuery
+        tracker.update(_fast_observation(calibration, query))
+
+
+def test_fast_only_trace_is_stage_63_differentially_identical() -> None:
+    calibration = _calibration()
+    metadata = _metadata(calibration)
+    ceiling = TwoPointBudgetCeiling(100, None, None, None)
+    legacy = CalibratedTwoPointTracker(calibration.configuration)
+    composite = SparseLinewidthCompositeTracker(
+        SparseLinewidthConfiguration(scan_period_fast_pairs=24)
+    )
+    legacy.reset(metadata, calibration, ceiling, seed=29)
+    composite.reset(metadata, calibration, ceiling, seed=29)
+
+    for pair_index in range(20):
+        for _ in range(2):
+            legacy_query = legacy.choose_next_query()
+            composite_query = composite.choose_next_query()
+            assert type(legacy_query) is TwoPointQuery
+            assert composite_query == legacy_query
+            fluorescence = -1.0 if pair_index == 6 else None
+            legacy_update = legacy.update(
+                _fast_observation(
+                    calibration,
+                    legacy_query,
+                    fluorescence=fluorescence,
+                    realized_photons=pair_index,
+                )
+            )
+            composite_update = composite.update(
+                _fast_observation(
+                    calibration,
+                    composite_query,
+                    fluorescence=fluorescence,
+                    realized_photons=pair_index,
+                )
+            )
+            assert composite_update.completed_fast_pair == legacy_update.completed_pair
+
+    legacy_estimate = legacy.estimate()
+    composite_estimate = composite.estimate()
+    assert composite_estimate.fast_pair_history == legacy_estimate.pair_history
+    assert composite_estimate.fast_tracking_resources == (
+        legacy_estimate.tracking_resources
+    )
+    assert tuple(
+        item.fast_center_hz for item in composite_estimate.identities
+    ) == tuple(item.center_hz for item in legacy_estimate.identities)
+    assert tuple(
+        item.completed_fast_pairs for item in composite_estimate.identities
+    ) == tuple(item.completed_pairs for item in legacy_estimate.identities)
+    assert composite_estimate.fast_pair_history[6].lock_state == "lost"
+    assert tuple(
+        pair.first_side for pair in composite_estimate.fast_pair_history[8:12]
+    ) == ("plus", "plus", "plus", "plus")
+
+
+def test_first_fast_side_is_partial_and_second_refreshes_identity() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    before = tracker.estimate()
+    first_query = tracker.choose_next_query()
+    assert type(first_query) is TwoPointQuery
+    first_observation = _fast_observation(calibration, first_query)
+
+    first_update = tracker.update(first_observation)
+
+    assert first_update.query is first_query
+    assert first_update.observation is first_observation
+    assert first_update.completed_fast_pair is None
+    assert first_update.estimate.incomplete_fast_pair is not None
+    assert first_update.estimate.completed_fast_pairs == 0
+    assert first_update.estimate.accepted_observations == 1
+    assert first_update.estimate.fast_pairs_since_scan == 0
+    assert first_update.estimate.fast_tracking_resources.observations == 1
+    assert first_update.estimate.tracking_resources.observations == 1
+    assert first_update.estimate.charged_resources.observations == 1
+    assert first_update.estimate.sparse_tracking_resources == (
+        before.sparse_tracking_resources
+    )
+
+    second_query = tracker.choose_next_query()
+    assert type(second_query) is TwoPointQuery
+    second_observation = _fast_observation(calibration, second_query)
+    second_update = tracker.update(second_observation)
+    completed = second_update.completed_fast_pair
+
+    assert completed is not None
+    assert completed.first_side == "minus"
+    assert completed.lock_state == "tracking"
+    assert second_update.estimate.incomplete_fast_pair is None
+    assert second_update.estimate.completed_fast_pairs == 1
+    assert second_update.estimate.fast_pairs_since_scan == 1
+    identity = second_update.estimate.identities[0]
+    assert identity.fast_center_source_kind == "pair"
+    assert identity.fast_center_source_pair_index == 0
+    assert identity.fast_center_reference_timestamp_s == (
+        completed.pair_reference_timestamp_s
+    )
+    assert identity.fast_center_release_sequence_index == (
+        completed.release_sequence_index
+    )
+    assert identity.fast_center_release_timestamp_s == completed.release_timestamp_s
+    assert identity.active_fwhm_hz == before.identities[0].active_fwhm_hz
+    assert identity.fwhm_source_kind == "calibration"
+
+
+def test_eighth_fast_pair_selects_one_frozen_sparse_block() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(calibration=calibration)
+    _accept_fast_pairs(tracker, calibration, count=8)
+
+    query = tracker.choose_next_query()
+
+    assert isinstance(query, SparseLinewidthQuery)
+    assert (query.scan_index, query.resonance_id, query.point_index) == (0, "r0", 0)
+    estimate = tracker.estimate()
+    identity = estimate.identities[0]
+    assert estimate.pending_mode == "sparse_scan"
+    assert estimate.pending_query is query
+    assert query.acquisition_index == 16
+    assert query.identity_scan_index == 0
+    assert query.offset_multiplier == 0.5
+    assert query.frozen_fast_center_hz == identity.fast_center_hz
+    assert query.frozen_fast_center_source_kind == identity.fast_center_source_kind
+    assert query.frozen_fast_center_source_pair_index == (
+        identity.fast_center_source_pair_index
+    )
+    assert query.frozen_prior_fwhm_hz == identity.active_fwhm_hz
+    assert query.frozen_fwhm_source_kind == identity.fwhm_source_kind
+    assert query.integration_time_s == estimate.configuration.integration_time_s
+    assert query.expected_nominal_exposure_photons == (
+        tracker._state.metadata.nominal_photon_rate_hz * query.integration_time_s
+    )
+    assert tracker.choose_next_query() is query
+
+
+def test_due_sparse_block_uses_nondefault_policy_and_exact_recurrences() -> None:
+    configuration = SparseLinewidthConfiguration(integration_time_s=0.007)
+    calibration = _calibration()
+    metadata = _metadata(calibration, frequency_overhead_s=0.003)
+    tracker = _reset_tracker(
+        configuration=configuration,
+        calibration=calibration,
+        metadata=metadata,
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+
+    first = tracker.choose_next_query()
+
+    assert type(first) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    queries = state.reserved_sparse_queries
+    assert queries is not None
+    assert len(queries) == 5
+    expected_endpoint = before.current_timestamp_s
+    for point_index, query in enumerate(queries):
+        expected_endpoint = (
+            expected_endpoint + metadata.frequency_overhead_s
+        ) + configuration.integration_time_s
+        assert query.point_index == point_index
+        assert query.acquisition_index == before.accepted_observations + point_index
+        assert query.expected_sequence_index == (
+            before.current_sequence_index + point_index + 1
+        )
+        assert query.expected_end_timestamp_s == expected_endpoint
+        assert query.integration_time_s == 0.007
+        assert query.expected_nominal_exposure_photons == 2.5e6 * 0.007
+    assert tuple(query.offset_multiplier for query in queries) == (
+        0.5,
+        -1.0,
+        0.0,
+        1.0,
+        -0.5,
+    )
+    assert all(
+        query.frozen_fast_center_release_timestamp_s
+        == first.frozen_fast_center_release_timestamp_s
+        and query.frozen_fwhm_release_timestamp_s
+        == first.frozen_fwhm_release_timestamp_s
+        for query in queries
+    )
+
+
+def test_due_sparse_block_does_not_fall_back_to_affordable_fast_work() -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(
+        calibration=calibration,
+        ceiling=TwoPointBudgetCeiling(20, None, None, None),
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+
+    assert tracker.choose_next_query() is None
+
+    stopped = tracker.estimate()
+    assert stopped == replace(before, stopped_reason="budget_exhausted")
+    assert stopped.pending_query is None
+    assert stopped.incomplete_fast_pair is None
+    assert stopped.incomplete_sparse_scan is None
+    assert stopped.fast_pairs_since_scan == 8
+
+
+@pytest.mark.parametrize(
+    ("failure_code", "proposed"),
+    (
+        ("nonrepresentable_frequency_lower", (None, None)),
+        ("nonrepresentable_frequency_upper", (None, None)),
+        ("empty_fit_bounds", (1.0, 2.0)),
+        ("calibration_cell_violation", (1.0, 2.0)),
+        ("source_domain_violation", (1.0, 2.0)),
+    ),
+)
+def test_due_sparse_geometry_stops_before_affordability_with_full_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+    failure_code: str,
+    proposed: tuple[float | None, float | None],
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(
+        calibration=calibration,
+        ceiling=TwoPointBudgetCeiling(16, None, None, None),
+    )
+    _accept_fast_pairs(tracker, calibration, count=8)
+    before = tracker.estimate()
+
+    def fail_geometry(*args, **kwargs):
+        del args, kwargs
+        raise _SparseGeometryConstructionError(
+            failure_code,
+            "injected due geometry",
+            proposed_frequency_min_hz=proposed[0],
+            proposed_frequency_max_hz=proposed[1],
+        )
+
+    def reject_affordability(*args, **kwargs):
+        del args, kwargs
+        raise AssertionError("affordability must follow valid geometry")
+
+    monkeypatch.setattr(tracker_module, "_construct_sparse_fit_geometry", fail_geometry)
+    monkeypatch.setattr(
+        tracker_module, "_reserve_five_atom_block", reject_affordability
+    )
+
+    assert tracker.choose_next_query() is None
+
+    stopped = tracker.estimate()
+    diagnostic = stopped.sparse_geometry_diagnostic
+    identity = before.identities[0]
+    cell = calibration.identities[0]
+    assert stopped.stopped_reason == "sparse_geometry_unavailable"
+    assert diagnostic is not None
+    assert diagnostic.failure_code == failure_code
+    assert diagnostic.scan_index == 0
+    assert diagnostic.identity_scan_index == 0
+    assert diagnostic.resonance_id == "r0"
+    assert diagnostic.fast_center_hz == identity.fast_center_hz
+    assert diagnostic.prior_fwhm_hz == identity.active_fwhm_hz
+    assert (
+        diagnostic.proposed_frequency_min_hz,
+        diagnostic.proposed_frequency_max_hz,
+    ) == proposed
+    assert diagnostic.calibration_cell_lower_hz == cell.calibration_cell_lower_hz
+    assert diagnostic.calibration_cell_upper_hz == cell.calibration_cell_upper_hz
+    assert diagnostic.source_frequency_min_hz == (
+        calibration.source.source_frequency_min_hz
+    )
+    assert diagnostic.source_frequency_max_hz == (
+        calibration.source.source_frequency_max_hz
     )

@@ -6,12 +6,13 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–7 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–8 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
-outcomes, and the first composite scheduler boundary. Fast observation updates
-and due-scan selection remain deferred to Tasks 8–10. Pure fit geometry remains
-separate from scheduler-owned query clocks, and evaluator value types still
-precede the sparse runner class that enables exact calibration authority.
+outcomes, exact fast-pair transitions, and the first due-scan scheduler
+boundary. Sparse observation transitions and fit application remain deferred
+to Tasks 9–10. Pure fit geometry remains separate from scheduler-owned query
+clocks, and evaluator value types still precede the sparse runner class that
+enables exact calibration authority.
 Calibration/start, initial resources, accepted resource integration, and
 terminal behavior then form a forward-only runner chain. Production truth
 lookup and public linewidth-dynamics additions remain absent: release-gated
@@ -56,6 +57,24 @@ keyword supplied by the tracker-owned immutable sparse configuration. This
 preserves non-default policies and keeps scheduler facts out of pure fit
 geometry at the cost of extending one private helper signature; the public API
 is unchanged.
+
+Task 8 completes the composite tracker's exact fast observation branch and
+due-scan selection. Fast pairs preserve Stage 6.3 query order, per-ID parity,
+discriminator/gate diagnostics, successful-source refresh, scientific lost-pair
+semantics, and arrival-order safe resources while the composite independently
+maintains global sequence/time and process-CPU folds. Every validation and
+construction failure retains its declared precedence and value-atomic rollback,
+including identical process-control exceptions. After exactly eight completed
+fast pairs, selection validates current pure geometry before replaying five
+affordability atoms, freezes all five queries with the current source echoes,
+global acquisition/sequence indices, exact endpoint recurrence, configured
+integration time, and nominal exposure, then exposes only point one. Invalid
+geometry produces the complete `sparse_geometry_unavailable` diagnostic;
+unaffordable due work stops without falling back to a fast pair. Focused RED
+witnesses failed on the Task 7 update placeholder, then the GREEN tracker and
+complete Stage 6.3 tracker/atomicity gate passed 127 tests. The mandatory gate
+passed 1,397 estimator/evaluation/emulator tests and 1,498 repository tests;
+Ruff passed and `git diff --check` was silent.
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a

@@ -10,6 +10,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's exact fast-pair branch and due sparse-scan selection. The
+  composite now matches Stage 6.3 pair queries, numerical gates, source refresh,
+  lost-pair behavior, per-ID alternation, immutable histories, and arrival-order
+  safe resources while retaining its own global clock and CPU folds. Exactly
+  eight completed pairs trigger geometry-before-affordability selection: a
+  valid five-point block freezes configured integration, acquisition/sequence/
+  endpoint recurrence, nominal exposure, and both source snapshots before
+  exposing point one; invalid geometry stops with its complete diagnostic, and
+  an unaffordable due block never falls back to fast work. Sparse observation
+  acceptance and fit application remain deferred to Tasks 9–10.
 - Added Stage 6.4's composite tracker reset and initial scheduling shell. Reset
   now preserves exact typed precedence and commit-last rollback, prospectively
   validates all eight calibration-seeded sparse geometries, seeds independent

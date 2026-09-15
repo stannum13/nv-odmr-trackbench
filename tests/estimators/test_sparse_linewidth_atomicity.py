@@ -7,17 +7,23 @@ from dataclasses import replace
 
 import pytest
 
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
     PublicAcquisitionResources,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
+    SparseLinewidthObservationValidationError,
     SparseLinewidthResetError,
+    SparseLinewidthUpdateConstructionError,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
     TwoPointRunMetadata,
     calibrate_two_point,
 )
 from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
+from odmr_bench.estimators.two_point_calibration import (
+    _evaluate_target_only_model,
+)
 from tests.two_point_helpers import (
     make_legal_caller_asserted_source,
     make_legal_tracker_configuration,
@@ -302,4 +308,214 @@ def test_budget_stop_record_failure_is_atomic(
     with pytest.raises(RuntimeError, match="stop construction"):
         tracker.choose_next_query()
 
+    assert _snapshot(tracker) == before
+
+
+def _pending_fast_observation(
+    tracker: SparseLinewidthCompositeTracker,
+) -> EstimatorObservation:
+    state = tracker._state
+    assert state is not None
+    query = tracker.choose_next_query()
+    assert query is not None
+    cell = state.calibration.identities[query.pair_index % 8]
+    fluorescence = _evaluate_target_only_model(
+        state.calibration.source.source_fit,
+        cell.source_fit_index,
+        query.frequency_hz,
+        query.interrogation_center_hz,
+    )
+    return EstimatorObservation(
+        query.expected_sequence_index,
+        query.expected_end_timestamp_s,
+        query.frequency_hz,
+        fluorescence,
+        query.integration_time_s,
+        query.expected_nominal_exposure_photons,
+        13,
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    (
+        (lambda observation: object(), "invalid_observation_type"),
+        (
+            lambda observation: replace(
+                observation,
+                sequence_index=observation.sequence_index + 1,
+                frequency_hz=observation.frequency_hz + 1.0,
+            ),
+            "sequence_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                frequency_hz=observation.frequency_hz + 1.0,
+                integration_time_s=observation.integration_time_s * 2.0,
+            ),
+            "frequency_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                integration_time_s=observation.integration_time_s * 2.0,
+                timestamp_s=observation.timestamp_s + 1.0,
+            ),
+            "integration_time_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                timestamp_s=observation.timestamp_s + 1.0,
+                nominal_exposure_photons=(
+                    observation.nominal_exposure_photons + 1.0
+                ),
+            ),
+            "endpoint_mismatch",
+        ),
+        (
+            lambda observation: replace(
+                observation,
+                nominal_exposure_photons=(
+                    observation.nominal_exposure_photons + 1.0
+                ),
+            ),
+            "nominal_exposure_mismatch",
+        ),
+    ),
+)
+def test_fast_validation_precedence_is_exact_and_atomic(
+    mutation, expected_code: str
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    before = _snapshot(tracker)
+
+    with pytest.raises(SparseLinewidthObservationValidationError) as raised:
+        tracker.update(mutation(observation))
+
+    assert raised.value.code == expected_code
+    assert _snapshot(tracker) == before
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "failure_call", "expected_code"),
+    (
+        ("TwoPointPartialPair", 1, "fast_partial_pair_construction_failed"),
+        ("PublicAcquisitionResources", 1, "resource_construction_failed"),
+        (
+            "SparseLinewidthCompositeEstimate",
+            1,
+            "aggregate_estimate_construction_failed",
+        ),
+        (
+            "SparseLinewidthCompositeUpdate",
+            1,
+            "update_construction_failed",
+        ),
+    ),
+)
+def test_first_fast_side_construction_codes_and_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    failure_call: int,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_fast_observation(tracker)
+    before = _snapshot(tracker)
+    original = getattr(tracker_module, constructor_name)
+    calls = 0
+
+    def fail(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise RuntimeError(f"injected {constructor_name}")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tracker_module, constructor_name, fail)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is not None
+    assert _snapshot(tracker) == before
+
+
+def _pending_second_fast_observation(
+    tracker: SparseLinewidthCompositeTracker,
+) -> EstimatorObservation:
+    first = _pending_fast_observation(tracker)
+    tracker.update(first)
+    return _pending_fast_observation(tracker)
+
+
+@pytest.mark.parametrize(
+    ("constructor_name", "failure_call", "expected_code"),
+    (
+        ("TwoPointPairResult", 1, "fast_pair_result_construction_failed"),
+        ("CompositeIdentityEstimate", 1, "fast_identity_estimate_construction_failed"),
+        ("PublicAcquisitionResources", 1, "resource_construction_failed"),
+        (
+            "SparseLinewidthCompositeEstimate",
+            1,
+            "aggregate_estimate_construction_failed",
+        ),
+        (
+            "SparseLinewidthCompositeUpdate",
+            1,
+            "update_construction_failed",
+        ),
+    ),
+)
+def test_second_fast_side_construction_codes_and_rollback(
+    monkeypatch: pytest.MonkeyPatch,
+    constructor_name: str,
+    failure_call: int,
+    expected_code: str,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_second_fast_observation(tracker)
+    before = _snapshot(tracker)
+    original = getattr(tracker_module, constructor_name)
+    calls = 0
+
+    def fail(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == failure_call:
+            raise RuntimeError(f"injected {constructor_name}")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(tracker_module, constructor_name, fail)
+
+    with pytest.raises(SparseLinewidthUpdateConstructionError) as raised:
+        tracker.update(observation)
+
+    assert raised.value.code == expected_code
+    assert raised.value.__cause__ is not None
+    assert _snapshot(tracker) == before
+
+
+def test_fast_base_exception_is_identical_and_rolls_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracker = _valid_tracker()
+    observation = _pending_second_fast_observation(tracker)
+    before = _snapshot(tracker)
+    injected = KeyboardInterrupt("injected process control")
+
+    def fail(*args, **kwargs):
+        del args, kwargs
+        raise injected
+
+    monkeypatch.setattr(tracker_module, "TwoPointPairResult", fail)
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        tracker.update(observation)
+
+    assert raised.value is injected
     assert _snapshot(tracker) == before
