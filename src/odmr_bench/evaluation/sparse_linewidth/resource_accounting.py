@@ -110,6 +110,25 @@ def _authenticate_started_context(
     from odmr_bench.evaluation.two_point.types import TwoPointEvaluatorRunnerState
 
     source_runner = source_binding.issuer_runner
+    if type(source_runner) is SparseLinewidthEvaluatorRunner:
+        allowed_source_phases = {
+            "calibration_succeeded",
+            "tracking",
+            "budget_stopped",
+            "geometry_stopped",
+            "externally_stopped",
+            "aborted",
+        }
+    elif type(source_runner) is TwoPointEvaluatorRunner:
+        allowed_source_phases = {
+            "calibration_succeeded",
+            "tracking",
+            "budget_stopped",
+            "externally_stopped",
+            "aborted",
+        }
+    else:
+        allowed_source_phases = set()
     try:
         source_state = source_runner._state
         source_instrument = source_runner._instrument
@@ -134,7 +153,7 @@ def _authenticate_started_context(
             and source_binding.instrument_configuration
             is source_state.instrument_configuration
             and source_state.run_token is verified.run_token
-            and source_state.phase not in {"ready", "calibration_failed"}
+            and source_state.phase in allowed_source_phases
             and source_state.calibration_outcome is verified
             and source_state.verified_calibration is verified
             and source.source_frequency_overhead_s
@@ -146,6 +165,12 @@ def _authenticate_started_context(
         source_graph_matches = False
     if not source_graph_matches:
         _invalid_context("verified calibration source runner identity")
+    same_runner = state.run_token is verified.run_token
+    if same_runner:
+        if own_binding is not source_binding:
+            _invalid_context("same-run calibration authority")
+    elif own_binding.success is not None or own_binding.source is not None:
+        _invalid_context("conditional target calibration authority")
     try:
         tracker_state = tracker._state
         live_resources = instrument.resources
@@ -270,6 +295,12 @@ def _validate_start_boundary(
         or estimate.calibration_resources
         != _project_full_resources(calibration_resources)
         or estimate.charged_resources != _project_full_resources(expected_charged)
+        or estimate.fast_update_cpu_time_s != 0.0
+        or estimate.sparse_update_cpu_time_s != 0.0
+        or estimate.total_update_cpu_time_s != 0.0
+        or state.fast_update_cpu_time_s != 0.0
+        or state.sparse_update_cpu_time_s != 0.0
+        or state.total_update_cpu_time_s != 0.0
         or state.fast_update_cpu_time_s != estimate.fast_update_cpu_time_s
         or state.sparse_update_cpu_time_s != estimate.sparse_update_cpu_time_s
         or state.total_update_cpu_time_s != estimate.total_update_cpu_time_s

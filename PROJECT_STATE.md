@@ -147,6 +147,16 @@ future-data access: only immutable acquired calibration observations and
 resource metadata are replayed. Software self-review confirmed exact-type and
 identity joins, phase-first rejection, nonmutating construction, deterministic
 binary64 arrival order, and no Stage 6.3 production changes.
+Task 14's independent review found three provenance/start-boundary gaps. The
+resource builder now authenticates source phases with runner-specific closed
+post-success sets: sparse sources alone admit `geometry_stopped`, while both
+exact source-runner classes retain legitimate real progression from calibration
+success into tracking. Unknown phases are rejected. A conditional target's own
+token binding must retain empty success/source authority, leaving the external
+issuer as the sole calibration owner. Finally, the initial runner and estimate
+fast, sparse, and total CPU ledgers must each be exactly `0.0` as well as equal;
+coordinated nonzero mutations no longer pass. These fixes do not add accepted
+tracking atoms or terminal behavior and do not modify Stage 6.3 production.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1054,6 +1064,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 14 review-fix focused resource-builder gate: 13 passed.
+- Stage 6.4 Task 14 review-fix sparse/two-point runner-resource compatibility
+  gate: 240 passed.
+- Stage 6.4 Task 14 review-fix estimator/evaluation/emulator gate: 1,661 passed.
+- Stage 6.4 Task 14 review-fix full repository gate: 1,762 passed.
+- Stage 6.4 Task 14 review-fix Ruff gate: All checks passed.
 - Stage 6.4 Task 14 focused resource-builder gate: 9 passed.
 - Stage 6.4 Task 14 sparse evaluator/Stage 6.3 resource compatibility gate: 80
   passed.

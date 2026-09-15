@@ -10,6 +10,7 @@ from odmr_bench.dynamics import SpectralSnapshot, StationaryDynamics
 from odmr_bench.emulator import GaussianNoise, InstrumentObservation, ResourceSnapshot
 from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.estimators import (
+    CalibratedTwoPointTracker,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
     TwoPointBudgetCeiling,
@@ -25,6 +26,7 @@ from odmr_bench.evaluation.sparse_linewidth.runner import (
     SparseLinewidthEvaluatorRunner,
 )
 from odmr_bench.evaluation.sparse_linewidth.types import SparseRunnerStateError
+from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
 from odmr_bench.evaluation.two_point.types import (
     VerifiedTwoPointCalibrationFailure,
     VerifiedTwoPointCalibrationSuccess,
@@ -158,6 +160,16 @@ def _start_conditional(
         tracker_clock_id="tracker-clock",
         source_to_tracker_offset_s=-0.012,
     )
+    return _start_conditional_from_success(success)
+
+
+def _start_conditional_from_success(
+    success: VerifiedTwoPointCalibrationSuccess,
+) -> tuple[
+    SparseLinewidthEvaluatorRunner,
+    ODMRInstrument,
+    VerifiedTwoPointCalibrationSuccess,
+]:
     calibration = calibrate_two_point(
         success.source,
         TwoPointTrackerConfiguration(),
@@ -181,6 +193,35 @@ def _start_conditional(
         seed=5,
     )
     return runner, instrument, success
+
+
+def _acquire_two_point_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[
+    TwoPointEvaluatorRunner,
+    ODMRInstrument,
+    VerifiedTwoPointCalibrationSuccess,
+]:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+
+    arguments = _calibration_arguments(
+        source_clock_id="source-clock",
+        tracker_clock_id="tracker-clock",
+        source_to_tracker_offset_s=-0.012,
+    )
+    fit_configuration = arguments["fit_configuration"]
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda sweep, configuration, initial_guess=None: make_legal_source_fit(
+            fit_configuration  # type: ignore[arg-type]
+        ),
+    )
+    instrument = _instrument()
+    runner = TwoPointEvaluatorRunner.bind(instrument)
+    outcome = runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
+    assert type(outcome) is VerifiedTwoPointCalibrationSuccess
+    return runner, instrument, outcome
 
 
 def _replay(
@@ -412,6 +453,125 @@ def test_started_resource_builder_reauthenticates_external_source_runner(
             build_sparse_linewidth_evaluator_resources(target)
     finally:
         object.__setattr__(source_runner.state, "phase", original_phase)
+
+
+@pytest.mark.parametrize("source_kind", ["sparse", "two_point"])
+def test_conditional_builder_accepts_real_source_tracking_progression_and_closes_phases(
+    source_kind: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if source_kind == "sparse":
+        source_runner, source_instrument, success = _acquire_success(
+            monkeypatch,
+            source_clock_id="source-clock",
+            tracker_clock_id="tracker-clock",
+            source_to_tracker_offset_s=-0.012,
+        )
+    else:
+        source_runner, source_instrument, success = _acquire_two_point_success(
+            monkeypatch
+        )
+    target, _, _ = _start_conditional_from_success(success)
+    assert build_sparse_linewidth_evaluator_resources(target) is not None
+
+    source_calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="tracker-clock",
+        current_sequence_index=source_runner.state.instrument_current_sequence_index,
+        current_timestamp_s=source_runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=source_instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=source_instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    if source_kind == "sparse":
+        source_runner.start_tracking(
+            SparseLinewidthCompositeTracker(SparseLinewidthConfiguration()),
+            source_calibration,
+            success,
+            metadata,
+            TwoPointBudgetCeiling(100, None, None, None),
+            seed=11,
+        )
+    else:
+        source_runner.start_tracking(
+            CalibratedTwoPointTracker(TwoPointTrackerConfiguration()),
+            source_calibration,
+            success,
+            metadata,
+            TwoPointBudgetCeiling(100, None, None, None),
+            seed=11,
+        )
+    assert source_runner.state.phase == "tracking"
+    assert build_sparse_linewidth_evaluator_resources(target) is not None
+
+    original_phase = source_runner.state.phase
+    object.__setattr__(source_runner.state, "phase", "hostile_unknown")
+    try:
+        with pytest.raises(ValueError, match="resource context"):
+            build_sparse_linewidth_evaluator_resources(target)
+    finally:
+        object.__setattr__(source_runner.state, "phase", original_phase)
+
+    if source_kind == "sparse":
+        object.__setattr__(source_runner.state, "phase", "geometry_stopped")
+        try:
+            assert build_sparse_linewidth_evaluator_resources(target) is not None
+        finally:
+            object.__setattr__(source_runner.state, "phase", original_phase)
+    else:
+        object.__setattr__(source_runner.state, "phase", "geometry_stopped")
+        try:
+            with pytest.raises(ValueError, match="resource context"):
+                build_sparse_linewidth_evaluator_resources(target)
+        finally:
+            object.__setattr__(source_runner.state, "phase", original_phase)
+
+
+def test_conditional_builder_rejects_polluted_target_token_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point.provenance import _lookup_run_token_binding
+
+    runner, _, success = _start_conditional(monkeypatch)
+    binding = _lookup_run_token_binding(runner.state.run_token)
+    assert binding is not None
+    assert binding.success is None
+    assert binding.source is None
+    object.__setattr__(binding, "success", success)
+    object.__setattr__(binding, "source", success.source)
+    try:
+        with pytest.raises(ValueError, match="resource context"):
+            build_sparse_linewidth_evaluator_resources(runner)
+    finally:
+        object.__setattr__(binding, "success", None)
+        object.__setattr__(binding, "source", None)
+
+
+def test_started_builder_rejects_coordinated_nonzero_cpu_totals(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_included(monkeypatch)
+    state = runner.state
+    estimate = state.tracker_estimate
+    assert estimate is not None
+    field_names = (
+        "fast_update_cpu_time_s",
+        "sparse_update_cpu_time_s",
+        "total_update_cpu_time_s",
+    )
+    for target in (estimate, state):
+        for field_name in field_names:
+            object.__setattr__(target, field_name, 1.0)
+    try:
+        with pytest.raises(ValueError, match="resource context"):
+            build_sparse_linewidth_evaluator_resources(runner)
+    finally:
+        for target in (estimate, state):
+            for field_name in field_names:
+                object.__setattr__(target, field_name, 0.0)
 
 
 def test_resource_builder_requires_exact_runner_type() -> None:

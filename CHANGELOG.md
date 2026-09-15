@@ -133,6 +133,13 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed three Stage 6.4 initial-resource authentication gaps. Calibration
+  source phases now use exact runner-specific post-success allowlists while
+  preserving real sparse and two-point source progression; conditional target
+  tokens must retain empty calibration authority; and all six runner/estimate
+  CPU start values must equal exact zero in addition to matching one another.
+  Unknown phases, polluted conditional bindings, and coordinated nonzero CPU
+  mutations now fail without adding Task 15 accepted-step behavior.
 - Closed the Stage 6.4 Task 13 conditional-provenance vulnerability. A sparse
   ready runner now accepts an external verified calibration only when the
   binding's exact registered issuer, live runner/instrument/configuration,
