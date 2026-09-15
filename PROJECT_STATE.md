@@ -1,6 +1,6 @@
 # Project State
 
-Last updated: 2026-09-15
+Last updated: 2026-09-16
 
 ## Current stage
 
@@ -39,6 +39,14 @@ atomic `budget_exhausted` boundary, repeated selection returns the identical
 pending object, and reservation charges no public resource ledger. The
 composite never wraps a running Stage 6.3 tracker. The observation-update method
 is intentionally a Task 8 placeholder, and no due-scan branch is implemented.
+Task 7's independent review found two Important calibration-source boundary
+defects. Conditional-free pre-calibration now remains uncharged while retaining
+its mapped availability release timestamp instead of inventing a zero release
+epoch. Reset also validates the complete nested source graph—including trace,
+resources, fit, identity, epoch, availability, and clock facts—without minting
+or consuming verified-source authority. Focused corruption witnesses map these
+failures to `calibration_mismatch` with value-atomic rollback. The cumulative
+re-review approved Task 7 with no Critical or Important findings.
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
@@ -840,10 +848,9 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 7 focused tracker/atomicity files: 28 passed.
-- Stage 6.4 Task 7 sparse types/fit/tracker compatibility gate: 201 passed.
-- Stage 6.4 Task 7 estimator/evaluator/emulator integration gate: 1,367 passed.
-- Stage 6.4 Task 7 full repository gate: 1,468 passed.
+- Stage 6.4 Task 7 review-fix focused tracker/atomicity files: 32 passed.
+- Stage 6.4 Task 7 review-fix sparse/source compatibility gate: 313 passed.
+- Stage 6.4 Task 7 full repository gate: 1,472 passed.
 - Stage 6.4 Task 7 Ruff gate: All checks passed.
 - Stage 6.4 Task 6 review-fix focused sparse fit file: 81 passed.
 - Stage 6.4 Task 6 review-fix estimator/evaluator/emulator integration gate:

@@ -49,6 +49,12 @@ once a package version is introduced.
 
 ### Fixed
 
+- Fixed two Stage 6.4 composite-reset calibration boundaries found in Task 7
+  review. Conditional-free pre-calibration remains uncharged but now preserves
+  the mapped source availability release epoch. Reset also revalidates the
+  complete nested source graph against its trace, resource, fit, identity,
+  epoch, availability, and clock facts without minting or consuming verified
+  authority; corruptions fail atomically as `calibration_mismatch`.
 - Fixed two Stage 6.4 sparse-fit precedence gaps found in Task 6 review.
   Zero-dimensional and non-finite returned predictions plus non-finite RMSE
   now retain `nonfinite_solution` before SVD, and returned array shapes are
