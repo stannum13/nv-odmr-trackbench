@@ -10,6 +10,14 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's sparse evaluator value layer: exact closed phase, abort,
+  preflight, and start-code aliases plus frozen/slotted acquisition,
+  query-failure, abort, five-point timing, full-resource, runner-state, and
+  typed outcome records. Constructors defensively snapshot public sequences,
+  enforce authenticated/unavailable abort shapes, exact phase and outcome
+  presence, timing folds, and fast/sparse/interleaved CPU equality. The new
+  package exports only the approved contracts; runner, resource-builder,
+  provenance-authority, and transition behavior remain deferred.
 - Closed the Stage 6.4 Task 10 independent-review evidence gaps without
   changing conformant production behavior. Fifth-point tracker transitions now
   cover negative, signed-zero, and positive live Q under both success and

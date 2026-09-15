@@ -55,6 +55,19 @@ and identical process-control rollback now also cover metadata, private state,
 identity construction calls two through eight, and resource construction calls
 two and three. Targeted mutation REDs pin signed-zero preservation, failure
 source aging, exact typed exception translation, and commit-last rollback.
+The pushed Task 10 review head `b3c83ab` passed the complete native GitHub
+Linux x86 matrix on Python 3.11 and Python 3.12 (run 35023707270).
+
+Task 11 adds the sparse evaluator's exact closed phase, abort, preflight, and
+start-code aliases plus its frozen/slotted acquisition, query-failure, abort,
+scan-timing, resource, runner-state, and typed outcome records. Intrinsic
+constructors canonicalize scalar and string values, defensively snapshot every
+public sequence, enforce authenticated versus unavailable resource joins,
+preserve the exact five-midpoint truth fold, close the complete phase/presence
+and outcome-kind matrices, and require evaluator CPU totals to equal the
+tracker snapshot's independent fast, sparse, and interleaved totals. The
+package exports only this approved value surface: it defines no runner class,
+resource builder, provenance authority, or state transition behavior.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -962,6 +975,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 11 focused evaluator value-contract gate: 21 passed.
+- Stage 6.4 Task 11 sparse/Stage 6.3 evaluator and estimator contract gate: 182
+  passed.
+- Stage 6.4 Task 11 estimator/evaluation/emulator gate: 1,596 passed.
+- Stage 6.4 Task 11 full repository gate: 1,697 passed.
+- Stage 6.4 Task 11 Ruff gate: All checks passed.
 - Stage 6.4 Task 10 review-fix focused tracker/atomicity files: 230 passed.
 - Stage 6.4 Task 10 review-fix complete sparse estimator gate: 454 passed.
 - Stage 6.4 Task 10 review-fix estimator/evaluation/emulator gate: 1,575 passed.
@@ -1079,7 +1098,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 11's evaluator value contracts and outcome
-   types without adding runner behavior early.
+1. Continue Stage 6.4 with Task 12's sparse runner shell and runner-neutral
+   calibration authority without adding later transition behavior early.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
