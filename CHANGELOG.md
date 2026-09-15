@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's immutable sparse estimator record layer: validated,
+  frozen/slotted five-point queries, partial scans, completed scan results,
+  asynchronous identity estimates, composite snapshots, and update echoes.
+  The contracts enforce exact source/release joins, diagnostic gate presence,
+  finite signed Q conventions, immutable history/resource boundaries, and
+  independent fast/sparse/total CPU ledgers; no fitter, scheduler, tracker,
+  or evaluator behavior is added.
 - Added Stage 6.4's first estimator contract layer: closed sparse-linewidth
   failure, mode, source, stop, geometry, reset, observation, and construction
   aliases; typed reset/observation/update errors; validated frozen/slotted

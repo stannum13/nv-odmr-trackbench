@@ -6,14 +6,18 @@ from typing import get_args
 import numpy as np
 import pytest
 
+from odmr_bench.emulator.observations import EstimatorObservation
 from odmr_bench.estimators import (
     CompositeMode,
     CompositeStopReason,
     SparseGeometryFailureCode,
     SparseGeometryUnavailableDiagnostic,
+    SparseLinewidthCompositeEstimate,
+    SparseLinewidthCompositeUpdate,
     SparseLinewidthConfiguration,
     SparseLinewidthFailureCode,
     SparseLinewidthObservationValidationError,
+    SparseLinewidthQuery,
     SparseLinewidthResetError,
     SparseLinewidthSourceKind,
     SparseLinewidthUpdateConstructionError,
@@ -21,6 +25,127 @@ from odmr_bench.estimators import (
     SparseResetFailureCode,
     SparseUpdateConstructionCode,
 )
+from tests.sparse_linewidth_helpers import (
+    make_composite_estimate,
+    make_partial_scan,
+    make_scan_result,
+    make_sparse_query,
+)
+
+
+def test_scan_q_preserves_repository_signed_convention() -> None:
+    result = make_scan_result(
+        status="success",
+        fitted_local_center_hz=-1.0,
+        fitted_fwhm_hz=2.0,
+        fitted_q=-0.5,
+    )
+    assert result.fitted_q == -0.5
+    assert type(result.fitted_q) is float
+
+
+def test_sparse_record_surface_and_tuple_boundaries_are_exact() -> None:
+    assert [field.name for field in fields(SparseLinewidthQuery)] == [
+        "acquisition_index",
+        "scan_index",
+        "identity_scan_index",
+        "point_index",
+        "resonance_id",
+        "offset_multiplier",
+        "frozen_fast_center_hz",
+        "frozen_fast_center_source_kind",
+        "frozen_fast_center_source_pair_index",
+        "frozen_fast_center_reference_timestamp_s",
+        "frozen_fast_center_release_sequence_index",
+        "frozen_fast_center_release_timestamp_s",
+        "frozen_prior_fwhm_hz",
+        "frozen_fwhm_source_kind",
+        "frozen_fwhm_source_scan_index",
+        "frozen_fwhm_reference_timestamp_s",
+        "frozen_fwhm_release_sequence_index",
+        "frozen_fwhm_release_timestamp_s",
+        "frequency_hz",
+        "integration_time_s",
+        "expected_sequence_index",
+        "expected_end_timestamp_s",
+        "expected_nominal_exposure_photons",
+    ]
+    partial = make_partial_scan(queries=list(make_partial_scan().queries))
+    assert type(partial.queries) is tuple
+
+
+@pytest.mark.parametrize("length", (1, 2, 3, 4))
+def test_partial_scan_accepts_exact_prefix_lengths(length: int) -> None:
+    queries = tuple(
+        make_sparse_query(
+            acquisition_index=index,
+            point_index=index,
+            expected_sequence_index=index,
+            expected_end_timestamp_s=(index + 1) * 0.005,
+            offset_multiplier=(0.5, -1.0, 0.0, 1.0, -0.5)[index],
+            frequency_hz=2.87e9 + (0.5, -1.0, 0.0, 1.0, -0.5)[index] * 1.0e6,
+        )
+        for index in range(length)
+    )
+    observations = tuple(
+        EstimatorObservation(
+            query.expected_sequence_index,
+            query.expected_end_timestamp_s,
+            query.frequency_hz,
+            1.0,
+            query.integration_time_s,
+            query.expected_nominal_exposure_photons,
+        )
+        for query in queries
+    )
+    partial = make_partial_scan(queries=queries, observations=observations)
+    assert len(partial.queries) == length
+
+
+def test_scan_result_requires_all_five_query_echoes_and_status_matrix() -> None:
+    assert len(make_scan_result().queries) == 5
+    with pytest.raises((TypeError, ValueError)):
+        make_scan_result(status="success", failure_code="optimizer_failed")
+    with pytest.raises((TypeError, ValueError)):
+        make_scan_result(status="failure", failure_code=None)
+    optimizer_failure = make_scan_result(
+        status="failure",
+        failure_code="optimizer_failed",
+        fitted_center_correction_hz=None,
+        fitted_local_center_hz=None,
+        fitted_fwhm_hz=None,
+        fitted_amplitude=None,
+        fitted_baseline_offset=None,
+        fitted_q=None,
+        rmse=None,
+        amplitude_normalized_rmse=None,
+        scaled_jacobian_rank=None,
+        scaled_jacobian_condition=None,
+    )
+    assert optimizer_failure.scipy_status == 1
+
+
+def test_aggregate_enforces_one_incomplete_block_and_history_counter_equations() -> (
+    None
+):
+    estimate = make_composite_estimate()
+    assert isinstance(estimate, SparseLinewidthCompositeEstimate)
+    with pytest.raises((TypeError, ValueError)):
+        make_composite_estimate(
+            incomplete_sparse_scan=make_partial_scan(),
+            incomplete_fast_pair=object(),
+        )
+
+
+def test_update_requires_exact_query_and_estimate_echo() -> None:
+    query = make_sparse_query()
+    observation = EstimatorObservation(0, 0.005, query.frequency_hz, 1.0, 0.005, 1.0)
+    estimate = make_composite_estimate(
+        pending_mode="sparse_scan",
+        pending_query=query,
+    )
+    with pytest.raises(ValueError):
+        SparseLinewidthCompositeUpdate(query, observation, None, None, estimate, 0.0)
 
 
 def _diagnostic(**overrides: object) -> SparseGeometryUnavailableDiagnostic:

@@ -771,6 +771,9 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 2 focused sparse record contracts: 59 passed.
+- Stage 6.4 Task 2 estimator/evaluator/emulator gate: 1,171 passed.
+- Stage 6.4 Task 2 full repository gate: 1,272 passed.
 - Stage 6.4 Task 1 focused sparse primitive contracts: 50 passed.
 - Stage 6.4 Task 1 estimator/evaluator/emulator gate: 1,162 passed.
 - Stage 6.4 Task 1 full repository gate: 1,263 passed.
@@ -842,7 +845,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 2's immutable sparse query, partial, result,
-   identity, aggregate, and update contracts.
+1. Continue Stage 6.4 with Task 3's canonical bound-source model extraction
+   and Stage 6.3 differential protection.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
