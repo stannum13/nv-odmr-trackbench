@@ -10,6 +10,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4 verified calibration acquisition and authenticated sparse
+  tracking start. The sparse runner delegates only through the private exact
+  issuer, preserves successful and typed-failure calibration traces/boundaries,
+  and revokes commit-then-fail authority. Start validates the exact outcome,
+  source, calibration, runner, instrument, token, clock, metadata, budget
+  treatment, and current resources before reset; it supports same-run and
+  conditional other-runner sources, restores all tracker slots on failure, and
+  publishes an empty tracking state with the exact reset estimate and CPU
+  totals. Acquisition stepping, resource assembly, and terminal transitions
+  remain assigned to the next tasks.
 - Added the Stage 6.4 sparse evaluator runner shell and runner-neutral verified
   calibration authority. The shell has the exact planned public signatures,
   binds only an exact clean instrument into an immutable `ready` state, and

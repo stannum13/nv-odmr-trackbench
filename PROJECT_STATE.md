@@ -6,19 +6,19 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–12 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–13 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
 application, live projection, independent epochs, resources, and update CPU.
 Pure fit geometry remains separate from scheduler-owned query clocks, and
-evaluator value types, the exact sparse runner shell/clean bind boundary, and
-runner-neutral exact-identity verified-calibration authority.
-Calibration/start, initial resources, accepted resource integration, and
-terminal behavior then form a forward-only runner chain. Production truth
-lookup and public linewidth-dynamics additions remain absent: release-gated
-truth evaluation and linewidth drift exist only as future test fixtures. The
-plan uses configured `max_nfev`, stops fit CPU timing before result
+evaluator value types, the exact sparse runner shell/clean bind boundary,
+runner-neutral exact-identity verified-calibration authority, and authenticated
+calibration/start transitions. Initial resources, accepted resource
+integration, and terminal behavior then form a forward-only runner chain.
+Production truth lookup and public linewidth-dynamics additions remain absent:
+release-gated truth evaluation and linewidth drift exist only as future test
+fixtures. The plan uses configured `max_nfev`, stops fit CPU timing before result
 construction, and keeps private authority tests in the existing calibration
 test module. No Stage 6.5 claim has been added. Final plan review also closes
 resource-builder phase semantics: pre-start calls raise the public state error,
@@ -96,6 +96,22 @@ now delegates through this issuer without changing any public signature,
 calibration outcome, resource, rollback, or tracking trace. The sparse package
 `__all__` intentionally remains the Task 11 value surface until Task 19 owns
 the complete public export expansion.
+The pushed Task 12 head `0a080fa` passed the complete native GitHub Linux x86
+matrix on Python 3.11 and Python 3.12 (run 35028977742).
+
+Task 13 delegates sparse verified-calibration acquisition through Task 12's
+private exact-issuer core and translates only its ordered public preflight codes
+to the sparse error surface. Successful and typed-failure outcomes retain the
+exact sparse runner state, full/safe observations, resources, sequence, and
+virtual-time boundary; commit-then-fail private success binding is revoked
+before the typed failure state is published. Tracking start authenticates the
+exact verified outcome, source, calibration, runner, instrument, token, clock,
+metadata, treatment, and current resource boundary in declared code order
+before touching the tracker. It permits same-run acquisition and an exact
+other-runner conditional source, restores all three tracker slots on ordinary
+or process-control reset failure, and commits an empty tracking audit state
+whose calibration, estimate, resources, and independent CPU totals are the
+exact reset products. Step/resource/terminal transitions remain Tasks 14–16.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1003,6 +1019,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 13 focused calibration/start contract gate: 28 passed.
+- Stage 6.4 Task 13 sparse runner plus complete Stage 6.3 calibration/runner
+  compatibility gate: 179 passed.
+- Stage 6.4 Task 13 estimator/evaluation/emulator gate: 1,637 passed.
+- Stage 6.4 Task 13 full repository gate: 1,738 passed.
+- Stage 6.4 Task 13 Ruff gate: All checks passed.
 - Stage 6.4 Task 12 focused sparse shell plus complete Stage 6.3 calibration/
   runner compatibility gate: 152 passed.
 - Stage 6.4 Task 12 focused sparse value/shell plus complete Stage 6.3
@@ -1136,14 +1158,14 @@ superiority result.
   legal resource equality/treatment branch, isolated abort join, seven-phase
   over/under-validation branch, or equal-but-distinct outcome identity join;
   independent review found the production contracts conformant.
-- The Stage 6.4 sparse evaluator runner currently implements only clean bind,
-  immutable `ready` state, and typed unsupported-phase rejection. Verified
-  sparse calibration/start, acquisition/resource integration, and terminal
-  transitions remain Tasks 13–16.
+- The Stage 6.4 sparse evaluator runner now implements clean bind, verified
+  calibration acquisition, and authenticated tracking start. Initial resource
+  construction, accepted acquisition/resource integration, and terminal
+  transitions remain Tasks 14–16.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 13's verified sparse calibration acquisition
-   and tracking start, delegating only through Task 12's exact issuer.
+1. Continue Stage 6.4 with Task 14's authenticated evaluator resource builder
+   at the exact tracking-start boundary.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+from dataclasses import replace
 
 import pytest
 
@@ -10,6 +11,15 @@ from odmr_bench.dynamics import SpectralSnapshot, StationaryDynamics
 from odmr_bench.emulator import GaussianNoise
 from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.emulator.resources import ResourceSnapshot
+from odmr_bench.estimators import (
+    SparseLinewidthCompositeTracker,
+    SparseLinewidthConfiguration,
+    TwoPointBudgetCeiling,
+    TwoPointIdentityBinding,
+    TwoPointRunMetadata,
+    TwoPointTrackerConfiguration,
+    calibrate_two_point,
+)
 from odmr_bench.evaluation.sparse_linewidth import (
     SparseEvaluatorRunnerState,
     SparsePreflightError,
@@ -21,8 +31,14 @@ from odmr_bench.evaluation.sparse_linewidth.runner import (
 )
 from odmr_bench.evaluation.two_point.types import (
     TwoPointEvaluatorInstrumentConfiguration,
+    VerifiedTwoPointCalibrationSuccess,
 )
 from odmr_bench.models import Baseline, Resonance
+from tests.two_point_helpers import (
+    make_legal_caller_asserted_source,
+    make_legal_fit_configuration,
+    make_legal_source_fit,
+)
 
 
 def _snapshot() -> SpectralSnapshot:
@@ -49,6 +65,57 @@ def _instrument() -> ODMRInstrument:
         frequency_overhead_s=0.001,
         seed=13,
     )
+
+
+def _calibration_arguments() -> dict[str, object]:
+    fit_configuration = make_legal_fit_configuration()
+    return {
+        "frequency_hz": (2.74e9, 3.02e9),
+        "integration_time_s": 0.005,
+        "fit_configuration": fit_configuration,
+        "identity_binding": TwoPointIdentityBinding(
+            "require_expected_ids", fit_configuration.resonance_ids
+        ),
+        "source_id": "verified-source",
+        "source_clock_id": "clock",
+        "tracker_clock_id": "clock",
+        "source_to_tracker_offset_s": 0.0,
+        "physical_fit_epoch_rule": "instrument_midpoint_ordered_mean",
+    }
+
+
+def _verified_success(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source_clock_id: str = "clock",
+    tracker_clock_id: str = "clock",
+    source_to_tracker_offset_s: float = 0.0,
+) -> tuple[
+    SparseLinewidthEvaluatorRunner,
+    ODMRInstrument,
+    VerifiedTwoPointCalibrationSuccess,
+]:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+
+    arguments = _calibration_arguments()
+    arguments.update(
+        source_clock_id=source_clock_id,
+        tracker_clock_id=tracker_clock_id,
+        source_to_tracker_offset_s=source_to_tracker_offset_s,
+    )
+    fit_configuration = arguments["fit_configuration"]
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda sweep, configuration, initial_guess=None: make_legal_source_fit(
+            fit_configuration  # type: ignore[arg-type]
+        ),
+    )
+    instrument = _instrument()
+    runner = SparseLinewidthEvaluatorRunner.bind(instrument)
+    outcome = runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
+    assert type(outcome) is VerifiedTwoPointCalibrationSuccess
+    return runner, instrument, outcome
 
 
 def test_sparse_runner_signatures_are_exact() -> None:
@@ -158,7 +225,7 @@ def test_sparse_runner_bind_rejects_nonexact_or_unclean_instrument(
     assert raised.value.code == code
 
 
-def test_sparse_runner_shell_rejects_operations_not_implemented_in_current_phase(
+def test_sparse_runner_rejects_tracking_operations_before_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     instrument = _instrument()
@@ -169,24 +236,6 @@ def test_sparse_runner_shell_rejects_operations_not_implemented_in_current_phase
 
     monkeypatch.setattr(ODMRInstrument, "query", reject_query)
     state_before = runner.state
-    with pytest.raises(SparsePreflightError) as acquire_error:
-        runner.acquire_verified_calibration(  # type: ignore[arg-type]
-            (),
-            0.0,
-            object(),
-            object(),
-            source_id="",
-            source_clock_id="",
-            tracker_clock_id="",
-            source_to_tracker_offset_s=0.0,
-            physical_fit_epoch_rule="instrument_midpoint_ordered_mean",
-        )
-    assert acquire_error.value.code == "invalid_runner_phase"
-    with pytest.raises(SparseStartError) as start_error:
-        runner.start_tracking(  # type: ignore[arg-type]
-            object(), object(), object(), object(), object(), seed=0
-        )
-    assert start_error.value.code == "invalid_runner_phase"
     with pytest.raises(SparseRunnerStateError):
         runner.step()
     with pytest.raises(SparseRunnerStateError):
@@ -195,3 +244,547 @@ def test_sparse_runner_shell_rejects_operations_not_implemented_in_current_phase
         runner.stop_external()
     assert runner.state is state_before
     assert instrument.resources == state_before.instrument_resources_current
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_code"),
+    [
+        ("phase", "invalid_runner_phase"),
+        ("type", "invalid_argument_type"),
+        ("value", "invalid_argument_value"),
+        ("grid", "invalid_frequency_grid"),
+        ("fit", "invalid_fit_or_identity_configuration"),
+        ("clock", "invalid_clock_mapping"),
+        ("boundary", "unclean_instrument_boundary"),
+    ],
+)
+def test_sparse_calibration_preflight_precedence_and_atomicity(
+    case: str, expected_code: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    instrument = _instrument()
+    runner = SparseLinewidthEvaluatorRunner.bind(instrument)
+    arguments = _calibration_arguments()
+    if case == "phase":
+        object.__setattr__(runner.state, "phase", "calibration_failed")
+        arguments["frequency_hz"] = object()
+    elif case == "type":
+        arguments["frequency_hz"] = (True, 3.02e9)
+        arguments["integration_time_s"] = 0.0
+    elif case == "value":
+        arguments["frequency_hz"] = (-1.0, -1.0)
+        arguments["fit_configuration"] = make_legal_fit_configuration(
+            tuple(f"x{i}" for i in range(8))
+        )
+    elif case == "grid":
+        arguments["frequency_hz"] = (2.74e9, 2.74e9)
+        arguments["fit_configuration"] = make_legal_fit_configuration(
+            tuple(f"x{i}" for i in range(8))
+        )
+    elif case == "fit":
+        arguments["fit_configuration"] = make_legal_fit_configuration(
+            tuple(f"x{i}" for i in range(8))
+        )
+        arguments["source_clock_id"] = ""
+    elif case == "clock":
+        arguments["source_to_tracker_offset_s"] = 1.0
+    else:
+        instrument.query(2.8e9, 0.005)
+
+    query_calls = 0
+
+    def reject_query(*args: object, **kwargs: object) -> object:
+        nonlocal query_calls
+        query_calls += 1
+        raise AssertionError((args, kwargs))
+
+    if case != "boundary":
+        monkeypatch.setattr(ODMRInstrument, "query", reject_query)
+    state_before = runner.state
+    resources_before = instrument.resources
+    time_before = instrument.virtual_time_s
+    with pytest.raises(SparsePreflightError) as raised:
+        runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
+    assert raised.value.code == expected_code
+    assert runner.state is state_before
+    assert instrument.resources == resources_before
+    assert instrument.virtual_time_s == time_before
+    assert query_calls == 0
+
+
+def test_sparse_calibration_success_uses_private_core_and_enters_success_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, outcome = _verified_success(monkeypatch)
+
+    assert runner.state.phase == "calibration_succeeded"
+    assert runner.state.calibration_outcome is outcome
+    assert runner.state.verified_calibration is outcome
+    assert runner.state.instrument_resources_current == instrument.resources
+    assert runner.state.current_virtual_time_s == instrument.virtual_time_s
+
+
+def test_sparse_calibration_fit_failure_enters_exact_failure_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+    from odmr_bench.evaluation.two_point.types import VerifiedTwoPointCalibrationFailure
+
+    instrument = _instrument()
+    runner = SparseLinewidthEvaluatorRunner.bind(instrument)
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("fit exploded")),
+    )
+
+    outcome = runner.acquire_verified_calibration(  # type: ignore[arg-type]
+        **_calibration_arguments()
+    )
+
+    assert type(outcome) is VerifiedTwoPointCalibrationFailure
+    assert outcome.failure_code == "fit_exception"
+    assert outcome.exception_type == "RuntimeError"
+    assert outcome.exception_message == "fit exploded"
+    assert runner.state.phase == "calibration_failed"
+    assert runner.state.calibration_outcome is outcome
+    assert runner.state.verified_calibration is None
+    assert runner.state.instrument_resources_current == instrument.resources
+    assert runner.state.current_virtual_time_s == instrument.virtual_time_s
+    assert len(outcome.full_observations) == 2
+    assert outcome.safe_observations == tuple(
+        observation.estimator_view() for observation in outcome.full_observations
+    )
+
+
+def test_sparse_calibration_rolls_back_private_success_binding_before_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+    from odmr_bench.evaluation.two_point.provenance import _lookup_run_token_binding
+    from odmr_bench.evaluation.two_point.types import VerifiedTwoPointCalibrationFailure
+
+    arguments = _calibration_arguments()
+    successful_fit = make_legal_source_fit(arguments["fit_configuration"])
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda *args, **kwargs: successful_fit,
+    )
+    instrument = _instrument()
+    runner = SparseLinewidthEvaluatorRunner.bind(instrument)
+    original_bind = calibration_module._bind_run_token_success
+
+    def commit_then_fail(*args: object, **kwargs: object) -> None:
+        original_bind(*args, **kwargs)
+        raise RuntimeError("success binding exploded")
+
+    monkeypatch.setattr(
+        calibration_module, "_bind_run_token_success", commit_then_fail
+    )
+
+    outcome = runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
+
+    assert type(outcome) is VerifiedTwoPointCalibrationFailure
+    assert outcome.failure_code == "source_binding_failed"
+    assert runner.state.phase == "calibration_failed"
+    binding = _lookup_run_token_binding(runner.state.run_token)
+    assert binding is not None
+    assert binding.success is None
+    assert binding.source is None
+    assert runner.state.instrument_resources_current == instrument.resources
+
+
+def test_sparse_start_rejects_calibration_mismatch_before_tracker_reset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, success = _verified_success(monkeypatch)
+    configuration = SparseLinewidthConfiguration()
+    tracker = SparseLinewidthCompositeTracker(configuration)
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    mismatched = calibrate_two_point(
+        make_legal_caller_asserted_source(),
+        TwoPointTrackerConfiguration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    budget = TwoPointBudgetCeiling(100, None, None, None)
+    reset_calls = 0
+
+    def reset_spy(*args: object, **kwargs: object) -> None:
+        nonlocal reset_calls
+        reset_calls += 1
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_spy)
+    with pytest.raises(SparseStartError) as caught:
+        runner.start_tracking(
+            tracker, mismatched, success, metadata, budget, seed=0
+        )
+    assert caught.value.code == "calibration_mismatch"
+    assert reset_calls == 0
+    assert runner.state.phase == "calibration_succeeded"
+    assert instrument.resources == runner.state.instrument_resources_current
+    assert calibration.source is success.source
+
+
+def test_sparse_start_same_run_enters_tracking_with_exact_reset_estimate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, success = _verified_success(monkeypatch)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    budget = TwoPointBudgetCeiling(100, None, None, None)
+
+    state = runner.start_tracking(
+        tracker, calibration, success, metadata, budget, seed=7
+    )
+
+    assert state is runner.state
+    assert state.phase == "tracking"
+    assert state.calibration_outcome is success
+    assert state.verified_calibration is success
+    assert state.calibration is calibration
+    assert state.tracker_estimate is tracker.estimate()
+    assert state.tracking_resources_before == instrument.resources
+    assert state.instrument_resources_current == instrument.resources
+    assert state.normal_tracking_trace == ()
+    assert state.pair_timings == ()
+    assert state.scan_timings == ()
+    assert state.fast_update_cpu_time_s == state.tracker_estimate.fast_update_cpu_time_s
+    assert state.sparse_update_cpu_time_s == (
+        state.tracker_estimate.sparse_update_cpu_time_s
+    )
+    assert state.total_update_cpu_time_s == (
+        state.tracker_estimate.total_update_cpu_time_s
+    )
+
+
+def test_sparse_start_allows_authenticated_conditional_other_runner_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_runner, _, success = _verified_success(
+        monkeypatch,
+        source_clock_id="source-clock",
+        tracker_clock_id="tracking-clock",
+        source_to_tracker_offset_s=-0.012,
+    )
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    instrument = _instrument()
+    runner = SparseLinewidthEvaluatorRunner.bind(instrument)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="tracking-clock",
+        current_sequence_index=None,
+        current_timestamp_s=0.0,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+
+    state = runner.start_tracking(
+        tracker,
+        calibration,
+        success,
+        metadata,
+        TwoPointBudgetCeiling(100, None, None, None),
+        seed=9,
+    )
+
+    assert state.phase == "tracking"
+    assert state.calibration_outcome is None
+    assert state.verified_calibration is success
+    assert state.run_token is not success.run_token
+    assert state.tracking_resources_before == ResourceSnapshot(
+        0, 0.0, 0.0, 0.0, 0, 0, 0.0
+    )
+    assert source_runner.state.phase == "calibration_succeeded"
+
+
+@pytest.mark.parametrize(
+    ("case", "expected_code"),
+    [
+        ("invalid_runner_phase", "invalid_runner_phase"),
+        ("invalid_argument_type", "invalid_argument_type"),
+        ("unverified_calibration", "unverified_calibration"),
+        ("calibration_mismatch", "calibration_mismatch"),
+        ("run_provenance_mismatch", "run_provenance_mismatch"),
+        ("metadata_mismatch", "metadata_mismatch"),
+        ("resource_boundary_mismatch", "resource_boundary_mismatch"),
+        ("tracker_reset_failed", "tracker_reset_failed"),
+    ],
+)
+def test_sparse_start_error_precedence_and_exact_rollback(
+    case: str,
+    expected_code: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, success = _verified_success(monkeypatch)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    budget = TwoPointBudgetCeiling(100, None, None, None)
+    call_seed: object = 17
+    call_success = success
+    call_calibration = calibration
+    call_metadata = metadata
+    if case == "invalid_runner_phase":
+        object.__setattr__(runner.state, "phase", "tracking")
+        call_seed = True
+        call_success = replace(success)
+    elif case == "invalid_argument_type":
+        call_seed = True
+        call_success = replace(success)
+    elif case == "unverified_calibration":
+        call_success = replace(success)
+        call_metadata = replace(metadata, nominal_photon_rate_hz=3.0e6)
+    elif case == "calibration_mismatch":
+        call_calibration = calibrate_two_point(
+            make_legal_caller_asserted_source(),
+            TwoPointTrackerConfiguration(),
+            budget_treatment="conditional_free_precalibration",
+        )
+        call_metadata = replace(metadata, nominal_photon_rate_hz=3.0e6)
+    elif case == "run_provenance_mismatch":
+        object.__setattr__(runner.state, "calibration_outcome", replace(success))
+        call_metadata = replace(metadata, nominal_photon_rate_hz=3.0e6)
+    elif case == "metadata_mismatch":
+        call_metadata = replace(metadata, nominal_photon_rate_hz=3.0e6)
+    elif case == "resource_boundary_mismatch":
+        instrument.query(2.8e9, 0.005)
+
+    runner_state_before = runner.state
+    tracker_configuration_before = tracker._configuration
+    tracker_configuration_snapshot_before = tracker._configuration_snapshot
+    tracker_state_before = tracker._state
+    resources_before = instrument.resources
+    time_before = instrument.virtual_time_s
+    reset_calls = 0
+    original_reset = SparseLinewidthCompositeTracker.reset
+    reset_failure = RuntimeError("reset committed then failed")
+
+    def reset_sentinel(
+        self: SparseLinewidthCompositeTracker,
+        public_metadata: TwoPointRunMetadata,
+        supplied_calibration: object,
+        budget_ceiling: object,
+        *,
+        seed: int,
+    ) -> None:
+        nonlocal reset_calls
+        reset_calls += 1
+        if case != "tracker_reset_failed":
+            raise AssertionError("start preflight reached tracker.reset")
+        original_reset(
+            self,
+            public_metadata,
+            supplied_calibration,  # type: ignore[arg-type]
+            budget_ceiling,  # type: ignore[arg-type]
+            seed=seed,
+        )
+        object.__setattr__(
+            self, "_configuration", SparseLinewidthConfiguration(max_nfev=9)
+        )
+        object.__setattr__(
+            self,
+            "_configuration_snapshot",
+            SparseLinewidthConfiguration(max_nfev=10),
+        )
+        raise reset_failure
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_sentinel)
+
+    with pytest.raises(SparseStartError) as raised:
+        runner.start_tracking(
+            tracker,
+            call_calibration,
+            call_success,
+            call_metadata,
+            budget,
+            seed=call_seed,  # type: ignore[arg-type]
+        )
+
+    assert raised.value.code == expected_code
+    assert runner.state is runner_state_before
+    assert tracker._configuration is tracker_configuration_before
+    assert tracker._configuration_snapshot is tracker_configuration_snapshot_before
+    assert tracker._state is tracker_state_before
+    assert instrument.resources == resources_before
+    assert instrument.virtual_time_s == time_before
+    assert reset_calls == (1 if case == "tracker_reset_failed" else 0)
+    if case == "tracker_reset_failed":
+        assert raised.value.__cause__ is reset_failure
+
+
+@pytest.mark.parametrize(
+    ("join_case", "expected_code"),
+    [
+        ("token", "unverified_calibration"),
+        ("runner", "run_provenance_mismatch"),
+        ("instrument", "run_provenance_mismatch"),
+        ("treatment", "run_provenance_mismatch"),
+        ("clock", "metadata_mismatch"),
+    ],
+)
+def test_sparse_start_authenticates_each_private_and_public_join_before_reset(
+    join_case: str,
+    expected_code: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point.provenance import _lookup_run_token_binding
+
+    runner, instrument, success = _verified_success(monkeypatch)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    call_success = success
+    binding = _lookup_run_token_binding(success.run_token)
+    assert binding is not None
+    restore: tuple[object, str, object] | None = None
+    if join_case == "token":
+        other = SparseLinewidthEvaluatorRunner.bind(_instrument())
+        call_success = replace(success, run_token=other.state.run_token)
+    elif join_case == "runner":
+        restore = (binding, "issuer_runner", binding.issuer_runner)
+        object.__setattr__(binding, "issuer_runner", object())
+    elif join_case == "instrument":
+        restore = (binding, "instrument", binding.instrument)
+        object.__setattr__(binding, "instrument", _instrument())
+    elif join_case == "treatment":
+        restore = (calibration, "budget_treatment", calibration.budget_treatment)
+        object.__setattr__(calibration, "budget_treatment", "invalid")
+    else:
+        metadata = replace(metadata, tracker_clock_id="different-clock")
+
+    reset_calls = 0
+
+    def reset_spy(*args: object, **kwargs: object) -> None:
+        nonlocal reset_calls
+        reset_calls += 1
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_spy)
+    try:
+        with pytest.raises(SparseStartError) as raised:
+            runner.start_tracking(
+                tracker,
+                calibration,
+                call_success,
+                metadata,
+                TwoPointBudgetCeiling(100, None, None, None),
+                seed=3,
+            )
+    finally:
+        if restore is not None:
+            target, attribute, value = restore
+            object.__setattr__(target, attribute, value)
+
+    assert raised.value.code == expected_code
+    assert reset_calls == 0
+    assert runner.state.phase == "calibration_succeeded"
+
+
+def test_sparse_start_reset_process_control_restores_tracker_and_reraises(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopNow(BaseException):
+        pass
+
+    runner, instrument, success = _verified_success(monkeypatch)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    runner_state_before = runner.state
+    configuration_before = tracker._configuration
+    configuration_snapshot_before = tracker._configuration_snapshot
+    tracker_state_before = tracker._state
+    stop = StopNow()
+
+    def reset_then_stop(*args: object, **kwargs: object) -> None:
+        object.__setattr__(
+            tracker, "_configuration", SparseLinewidthConfiguration(max_nfev=9)
+        )
+        object.__setattr__(
+            tracker,
+            "_configuration_snapshot",
+            SparseLinewidthConfiguration(max_nfev=10),
+        )
+        object.__setattr__(tracker, "_state", object())
+        raise stop
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker, "reset", reset_then_stop
+    )
+
+    with pytest.raises(StopNow) as raised:
+        runner.start_tracking(
+            tracker,
+            calibration,
+            success,
+            metadata,
+            TwoPointBudgetCeiling(100, None, None, None),
+            seed=3,
+        )
+
+    assert raised.value is stop
+    assert runner.state is runner_state_before
+    assert tracker._configuration is configuration_before
+    assert tracker._configuration_snapshot is configuration_snapshot_before
+    assert tracker._state is tracker_state_before
