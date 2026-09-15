@@ -64,6 +64,51 @@ def test_tracker_constructor_and_pre_reset_surface() -> None:
         tracker.estimate()
 
 
+def test_nested_record_subclass_capability_is_removed_before_reset_graph() -> None:
+    class BindingCarrier(TwoPointIdentityBinding):
+        __slots__ = ("callback",)
+
+    exact_binding = TwoPointIdentityBinding(
+        "require_expected_ids", tuple(f"r{index}" for index in range(8))
+    )
+    capable_binding = BindingCarrier(
+        exact_binding.mode, exact_binding.expected_resonance_ids
+    )
+    object.__setattr__(capable_binding, "callback", lambda: None)
+    configuration = TwoPointTrackerConfiguration(identity_binding=capable_binding)
+    assert type(configuration.identity_binding) is TwoPointIdentityBinding
+    assert not hasattr(configuration.identity_binding, "callback")
+
+    source = make_legal_caller_asserted_source()
+    calibration = calibrate_two_point(
+        source,
+        configuration,
+        budget_treatment="conditional_free_precalibration",
+    )
+    tracker = CalibratedTwoPointTracker(configuration)
+    tracker.reset(
+        TwoPointRunMetadata(
+            tracker_clock_id="clock",
+            current_sequence_index=source.availability_sequence_index,
+            current_timestamp_s=source.availability_timestamp_s,
+            nominal_photon_rate_hz=(
+                source.fluorescence_provenance.nominal_photon_rate_hz
+            ),
+            frequency_overhead_s=source.source_frequency_overhead_s,
+            fluorescence_quantity="normalized_fluorescence",
+        ),
+        calibration,
+        TwoPointBudgetCeiling(2, None, None, None),
+        seed=7,
+    )
+
+    assert type(tracker.configuration.identity_binding) is TwoPointIdentityBinding
+    assert type(tracker.calibration.configuration.identity_binding) is (
+        TwoPointIdentityBinding
+    )
+    _assert_tracker_graph_has_no_truth_path(tracker)
+
+
 def test_update_surface_and_pre_reset_guard() -> None:
     tracker = CalibratedTwoPointTracker(make_legal_tracker_configuration())
 

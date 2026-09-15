@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field, fields
 from itertools import pairwise
 from numbers import Integral, Real
 from typing import Literal, TypeAlias
@@ -452,6 +452,10 @@ class TwoPointTrackerConfiguration:
     def __post_init__(self) -> None:
         if not isinstance(self.identity_binding, TwoPointIdentityBinding):
             raise TypeError("identity_binding must be a TwoPointIdentityBinding")
+        identity_binding = TwoPointIdentityBinding(
+            self.identity_binding.mode,
+            self.identity_binding.expected_resonance_ids,
+        )
         offset_fwhm_fraction = _positive_float(
             self.offset_fwhm_fraction, "offset_fwhm_fraction"
         )
@@ -495,6 +499,7 @@ class TwoPointTrackerConfiguration:
         object.__setattr__(
             self, "common_mode_limit_target_depths", common_mode_limit_target_depths
         )
+        object.__setattr__(self, "identity_binding", identity_binding)
 
 
 @dataclass(frozen=True, slots=True)
@@ -659,7 +664,12 @@ class TwoPointCalibrationSource:
         source_fit = _snapshot_spectrum_fit_result(self.source_fit)
         if not isinstance(self.fit_configuration, FitConfiguration):
             raise TypeError("fit_configuration must be a FitConfiguration")
-        fit_configuration = replace(self.fit_configuration)
+        fit_configuration = FitConfiguration(
+            **{
+                item.name: getattr(self.fit_configuration, item.name)
+                for item in fields(FitConfiguration)
+            }
+        )
         if not isinstance(self.identity_binding, TwoPointIdentityBinding):
             raise TypeError("identity_binding must be a TwoPointIdentityBinding")
         identity_binding = TwoPointIdentityBinding(
@@ -956,8 +966,8 @@ class TwoPointCalibration:
     identities: tuple[TwoPointIdentityCalibration, ...]
 
     def __post_init__(self) -> None:
-        if not isinstance(self.source, TwoPointCalibrationSource):
-            raise TypeError("source must be a TwoPointCalibrationSource")
+        if type(self.source) is not TwoPointCalibrationSource:
+            raise TypeError("source must be an exact TwoPointCalibrationSource")
         if not isinstance(self.configuration, TwoPointTrackerConfiguration):
             raise TypeError("configuration must be a TwoPointTrackerConfiguration")
         configuration = _snapshot_tracker_configuration(self.configuration)
@@ -983,7 +993,15 @@ class TwoPointCalibration:
             raise TypeError(
                 "identities must contain TwoPointIdentityCalibration values"
             )
-        identities = tuple(replace(item) for item in supplied_identities)
+        identities = tuple(
+            TwoPointIdentityCalibration(
+                **{
+                    field_item.name: getattr(item, field_item.name)
+                    for field_item in fields(TwoPointIdentityCalibration)
+                }
+            )
+            for item in supplied_identities
+        )
         if len(identities) != 8:
             raise ValueError("identities must contain exactly eight calibrations")
         identity_ids = tuple(item.resonance_id for item in identities)

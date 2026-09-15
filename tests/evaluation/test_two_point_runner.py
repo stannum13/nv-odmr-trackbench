@@ -1662,6 +1662,74 @@ def test_fifth_observation_expected_only_corruption_retains_physical_midpoint(
     assert build_two_point_evaluator_resources(runner) is None
 
 
+def test_live_clock_only_divergence_aborts_before_tracker_update(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument, tracker = _conditional_tracking_inputs(monkeypatch)
+    original_query = ODMRInstrument.query
+    update_calls = 0
+    assert tracker.choose_next_query() is not None
+    estimate_before = tracker.estimate()
+
+    def diverge_live_clock(
+        self: ODMRInstrument,
+        frequency_hz: float,
+        integration_time_s: float,
+    ) -> InstrumentObservation:
+        observation = original_query(self, frequency_hz, integration_time_s)
+        object.__setattr__(
+            self,
+            "_virtual_time_s",
+            math.nextafter(observation.timestamp_s, math.inf),
+        )
+        return observation
+
+    original_update = CalibratedTwoPointTracker.update
+
+    def count_update(
+        self: CalibratedTwoPointTracker,
+        observation: EstimatorObservation,
+    ) -> TwoPointUpdate:
+        nonlocal update_calls
+        update_calls += 1
+        return original_update(self, observation)
+
+    monkeypatch.setattr(ODMRInstrument, "query", diverge_live_clock)
+    monkeypatch.setattr(CalibratedTwoPointTracker, "update", count_update)
+
+    aborted = runner.step()
+
+    assert type(aborted) is TwoPointRunnerAborted
+    assert aborted.resources is not None
+    assert aborted.abort.reason == "tracker_observation_validation_error"
+    assert aborted.abort.exception_type == "TwoPointObservationValidationError"
+    assert aborted.abort.exception_message
+    acquisition = aborted.abort.unaccepted_acquisition
+    assert acquisition.resource_join_status == "authenticated"
+    assert acquisition.measurement_midpoint_s is None
+    assert acquisition.full_observation.timestamp_s == (
+        acquisition.query.expected_end_timestamp_s
+    )
+    assert instrument.virtual_time_s == math.nextafter(
+        acquisition.full_observation.timestamp_s, math.inf
+    )
+    assert tracker.estimate() is estimate_before
+    assert aborted.abort.tracker_estimate_before is estimate_before
+    assert aborted.abort.tracker_estimate_after is estimate_before
+    assert runner.state.normal_tracking_trace == ()
+    assert update_calls == 0
+    terminal_state = runner.state
+
+    def reject_later_call(*args: object, **kwargs: object) -> object:
+        raise AssertionError((args, kwargs))
+
+    monkeypatch.setattr(ODMRInstrument, "query", reject_later_call)
+    monkeypatch.setattr(CalibratedTwoPointTracker, "update", reject_later_call)
+    with pytest.raises(TwoPointRunnerStateError):
+        runner.step()
+    assert runner.state is terminal_state
+
+
 @pytest.mark.parametrize(
     "boundary",
     ["before_pair", "accepted_first", "pending_second", "instrument_failure"],

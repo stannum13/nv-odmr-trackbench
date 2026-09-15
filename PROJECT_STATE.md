@@ -419,6 +419,20 @@ estimation to Stage 6.4 and matched-budget comparison to Stage 6.5 without a
 performance claim. Focused gates pass 32 tests, the affected estimator/evaluator
 suite passes 248 tests, the complete repository passes 1,209 tests, and Ruff
 passes.
+Task 20's second integrated re-review found two Important transaction and
+capability gaps. A post-query live-clock-only divergence is now authenticated
+before `tracker.update`: the runner retains the joined full/safe/resource atom
+with no physical midpoint, performs no estimator update or normal-trace append,
+and enters a typed terminal validation abort whose exact resource totals remain
+available. The evaluator resource validator checks the live instrument endpoint
+separately from ledger elapsed and accepts that one timing-invalid terminal atom
+without weakening exact ledger joins. Foundational nested estimator records now
+defensively reconstruct exact identity bindings, fit configurations,
+fluorescence provenance, clock mappings, and calibration identities; aggregate
+calibration rejects a capable source subclass because source identity is
+semantically retained. Focused wave-two coverage passes 3 tests, the affected
+estimator/evaluator suite passes 263 tests, and the full repository passes 1,212
+tests.
 
 ## Completed work
 
@@ -712,7 +726,9 @@ passes.
 
 ## Tests currently passing
 
-- Full repository suite including the Task 20 integrated fixes: 1209 passed.
+- Full repository suite including both Task 20 integrated fix waves: 1212 passed.
+- Task 20 wave-two focused transaction/capability gate: 3 passed.
+- Task 20 wave-two affected estimator/evaluator integration gate: 263 passed.
 - Task 20 focused scientific/capability regression gate: 32 passed.
 - Task 20 affected estimator/evaluator integration gate: 248 passed.
 - Task 19 import, out-of-tree example, and guidance nodes: 3 passed.

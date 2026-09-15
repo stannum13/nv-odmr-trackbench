@@ -480,12 +480,14 @@ def _validate_unaccepted_midpoint(
     ),
     *,
     expected_midpoint_s: float,
+    instrument_endpoint_s: float,
 ) -> None:
     full_observation = acquisition.full_observation
     query = acquisition.query
     timing_matches = (
         full_observation.integration_time_s == query.integration_time_s
         and full_observation.timestamp_s == query.expected_end_timestamp_s
+        and instrument_endpoint_s == query.expected_end_timestamp_s
     )
     expected_measurement_midpoint_s = (
         expected_midpoint_s if timing_matches else None
@@ -541,6 +543,7 @@ def _validate_unavailable_abort_context(
     _validate_unaccepted_midpoint(
         acquisition,
         expected_midpoint_s=expected_midpoint_s,
+        instrument_endpoint_s=state.current_virtual_time_s,
     )
     if (
         estimate.pending_query is None
@@ -655,6 +658,11 @@ def _build_two_point_evaluator_resources_from_context(
         _validate_unaccepted_midpoint(
             acquisition,
             expected_midpoint_s=expected_midpoint_s,
+            instrument_endpoint_s=(
+                state.current_virtual_time_s
+                if state.phase == "aborted"
+                else runner._instrument.virtual_time_s
+            ),
         )
         if (
             acquisition.instrument_resources_before != physical_resources
@@ -722,14 +730,25 @@ def _build_two_point_evaluator_resources_from_context(
         final_sequence if state_has_final_atom else accepted_sequence
     )
     expected_state_time_s = (
-        final_time_s if state_has_final_atom else accepted_time_s
+        live_time_s
+        if state_has_final_atom
+        and authenticated_unaccepted is not None
+        and authenticated_unaccepted.measurement_midpoint_s is None
+        else final_time_s
+        if state_has_final_atom
+        else accepted_time_s
     )
+    live_time_matches_final = (
+        state_has_final_atom
+        and authenticated_unaccepted is not None
+        and authenticated_unaccepted.measurement_midpoint_s is None
+    ) or live_time_s == final_time_s
     if (
         state.instrument_resources_current != expected_state_resources
         or live_resources != final_physical_resources
         or state.instrument_current_sequence_index != expected_state_sequence
         or state.current_virtual_time_s != expected_state_time_s
-        or live_time_s != final_time_s
+        or not live_time_matches_final
     ):
         _invalid_context("final instrument boundary")
     return TwoPointEvaluatorResources(

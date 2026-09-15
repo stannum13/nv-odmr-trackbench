@@ -384,6 +384,29 @@ class TwoPointEvaluatorRunner:
                     resources_after=resources_after,
                     virtual_time_after=virtual_time_after,
                 )
+            if acquisition.measurement_midpoint_s is None:
+                error = TwoPointObservationValidationError(
+                    "endpoint_mismatch",
+                    "instrument endpoint or live clock does not match "
+                    "the pending query",
+                )
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                exception_type, exception_message = _safe_exception_strings(error)
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason="tracker_observation_validation_error",
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    tracker_estimate_before=tracker_estimate_before,
+                    tracker_estimate_after=tracker_estimate_before,
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
             try:
                 update = tracker.update(acquisition.safe_observation)
             except Exception as error:
@@ -415,20 +438,6 @@ class TwoPointEvaluatorRunner:
                     tracker_estimate_after=tracker_estimate_after,
                     resources_after=resources_after,
                     virtual_time_after=virtual_time_after,
-                )
-
-            if acquisition.measurement_midpoint_s is None:
-                if (
-                    full_observation.integration_time_s != query.integration_time_s
-                    or full_observation.timestamp_s != query.expected_end_timestamp_s
-                    or virtual_time_after != query.expected_end_timestamp_s
-                ):
-                    raise RuntimeError(
-                        "accepted observation must retain its instrument midpoint"
-                    )
-                acquisition = replace(
-                    acquisition,
-                    measurement_midpoint_s=expected_midpoint_s,
                 )
 
             pair_timings = state_before.pair_timings

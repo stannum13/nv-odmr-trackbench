@@ -10,6 +10,13 @@ once a package version is introduced.
 
 ### Changed
 
+- Closed the second Stage 6.3 integrated-review wave. A live-clock-only
+  post-query divergence now becomes a lossless typed terminal abort before any
+  estimator update, retaining its exact joined acquisition resources while
+  withholding an unauthenticated physical midpoint. Nested estimator records
+  are defensively reconstructed as exact public types, and a subclass of the
+  identity-retained calibration source is rejected, preventing slotted callback
+  capabilities from entering the tracker graph.
 - Closed the first Stage 6.3 integrated-review wave. Common-mode and capture
   losses retain all finite pre-gate discriminator and center-step diagnostics
   while applying zero correction; fifth-observation midpoint authentication

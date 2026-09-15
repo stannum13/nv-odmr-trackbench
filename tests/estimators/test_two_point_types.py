@@ -146,6 +146,84 @@ def test_foundational_literal_fields_drop_string_subclass_capabilities() -> None
     assert all(not hasattr(value, "callback") for value in values)
 
 
+def test_foundational_nested_records_drop_subclass_capabilities() -> None:
+    from odmr_bench.estimators import (
+        FitConfiguration,
+        NormalizedFluorescenceProvenance,
+        TwoPointCalibration,
+        TwoPointCalibrationSource,
+        TwoPointClockMapping,
+        TwoPointIdentityCalibration,
+    )
+
+    def values(record: object) -> dict[str, object]:
+        return {item.name: getattr(record, item.name) for item in fields(record)}
+
+    class FluorescenceCarrier(NormalizedFluorescenceProvenance):
+        __slots__ = ("callback",)
+
+    class ClockCarrier(TwoPointClockMapping):
+        __slots__ = ("callback",)
+
+    class FitConfigurationCarrier(FitConfiguration):
+        __slots__ = ("callback",)
+
+    class IdentityCarrier(TwoPointIdentityCalibration):
+        __slots__ = ("callback",)
+
+    base_source = make_legal_caller_asserted_source()
+    fluorescence = FluorescenceCarrier(**values(base_source.fluorescence_provenance))
+    clock = ClockCarrier(**values(base_source.clock_mapping))
+    fit_configuration = FitConfigurationCarrier(**values(base_source.fit_configuration))
+    first_identity = make_legal_identity_calibrations(base_source)[0]
+    identity = IdentityCarrier(**values(first_identity))
+    for record in (fluorescence, clock, fit_configuration, identity):
+        object.__setattr__(record, "callback", lambda: None)
+
+    source = replace(
+        base_source,
+        fluorescence_provenance=fluorescence,
+        clock_mapping=clock,
+        fit_configuration=fit_configuration,
+    )
+    identities = (identity, *make_legal_identity_calibrations(source)[1:])
+    calibration = TwoPointCalibration(
+        source,
+        make_legal_tracker_configuration(),
+        "conditional_free_precalibration",
+        identities,
+    )
+
+    assert type(source.fluorescence_provenance) is NormalizedFluorescenceProvenance
+    assert type(source.clock_mapping) is TwoPointClockMapping
+    assert type(source.fit_configuration) is FitConfiguration
+    assert all(
+        type(item) is TwoPointIdentityCalibration for item in calibration.identities
+    )
+    assert all(
+        not hasattr(record, "callback")
+        for record in (
+            source.fluorescence_provenance,
+            source.clock_mapping,
+            source.fit_configuration,
+            *calibration.identities,
+        )
+    )
+
+    class SourceCarrier(TwoPointCalibrationSource):
+        __slots__ = ("callback",)
+
+    capable_source = SourceCarrier(**values(source))
+    object.__setattr__(capable_source, "callback", lambda: None)
+    with pytest.raises(TypeError, match="exact TwoPointCalibrationSource"):
+        TwoPointCalibration(
+            capable_source,
+            make_legal_tracker_configuration(),
+            "conditional_free_precalibration",
+            make_legal_identity_calibrations(source),
+        )
+
+
 def test_two_point_state_record_names_are_public() -> None:
     from odmr_bench.estimators import (
         TwoPointEstimate,
