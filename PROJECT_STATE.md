@@ -5,17 +5,18 @@ Last updated: 2026-09-15
 ## Current stage
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
-twenty-task detailed TDD implementation plan pending independent plan review.
-The plan decomposes estimator contracts, canonical source-model extraction,
-fit geometry and gates, composite fast/sparse scheduling, provenance, evaluator
-resources and runner transitions, deterministic linewidth dynamics, closed
-scientific acceptance, documentation/package smoke, and integrated closeout.
-Every independently reviewable task names exact files and interfaces, observes
-a focused RED before minimal GREEN, runs repository gates, records evidence,
-and commits atomically. Global constraints preserve Stage 6.3 semantics,
-truth isolation, exact arrival-order accounting, signed-Q conventions, and the
-Stage 6.5/6.6 scope boundary. No Stage 6.4 production code or Stage 6.5 claim
-has been added.
+twenty-task detailed TDD implementation plan whose first dependency review has
+been repaired; independent re-review is pending. Pure fit geometry is now
+separate from stateful scheduler-owned query clocks, reset precedes fast update
+and due-scan behavior, and evaluator value types precede the sparse runner class
+that enables exact calibration-authority registration. Calibration/start,
+initial resources, accepted resource integration, and terminal behavior then
+form a forward-only runner chain. Production truth lookup and public linewidth-
+dynamics additions have been removed: release-gated truth evaluation and
+linewidth drift exist only as test fixtures. The plan also uses configured
+`max_nfev`, stops fit CPU timing before result construction, and keeps private
+authority tests in the existing calibration test module. No Stage 6.4
+production code or Stage 6.5 claim has been added.
 
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated

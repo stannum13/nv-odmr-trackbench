@@ -10,6 +10,14 @@ once a package version is introduced.
 
 ### Changed
 
+- Repaired the Stage 6.4 implementation-plan dependency graph after review.
+  Pure fit geometry now precedes scheduler-owned clocked queries; fast updates
+  precede due-scan construction; evaluator values and the sparse runner shell
+  precede exact calibration-authority registration, start, resources, accepted
+  steps, and terminals. The plan removes production truth lookup and public
+  linewidth dynamics in favor of release-gated test-only fixtures, honors
+  non-default `max_nfev`, ends fit CPU timing before result construction, and
+  assigns private provenance tests to the existing calibration test module.
 - Wrote the detailed twenty-task TDD implementation plan for Stage 6.4 sparse
   five-point linewidth/Q tracking. The plan assigns exact files and interfaces,
   focused RED/GREEN evidence, atomic task commits, Stage 6.3 differential
