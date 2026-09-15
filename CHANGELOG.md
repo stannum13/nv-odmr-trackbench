@@ -123,6 +123,14 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed the Stage 6.4 Task 13 conditional-provenance vulnerability. A sparse
+  ready runner now accepts an external verified calibration only when the
+  binding's exact registered issuer, live runner/instrument/configuration,
+  token, successful retained outcomes, empty tracker slot, and registry entry
+  all agree, with the runner class tied to its corresponding exact state class.
+  Mutated bindings—including transfer to another registered runner—invalidated
+  source-runner state, and cross-class state transplants fail before reset with
+  `run_provenance_mismatch`; Stage 6.3 behavior remains unchanged.
 - Closed the Stage 6.4 Task 9 review evidence gaps without changing production
   behavior. Sparse validation precedence plus ordinary and identical
   process-control rollback now run at accepted prefix lengths zero through

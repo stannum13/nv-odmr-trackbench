@@ -26,6 +26,7 @@ from odmr_bench.estimators.two_point_types import (
 from odmr_bench.estimators.types import FitConfiguration
 from odmr_bench.evaluation.two_point.provenance import (
     _TOKEN_CONSTRUCTION_KEY,
+    _is_exact_registered_runner,
     _lookup_run_token_binding,
     _lookup_verified_calibration_issuer,
     _mint_verified_instrument_run_token,
@@ -39,6 +40,7 @@ from odmr_bench.evaluation.two_point.resource_accounting import (
 from odmr_bench.evaluation.two_point.types import (
     TwoPointCalibrationPreflightError,
     TwoPointEvaluatorInstrumentConfiguration,
+    TwoPointEvaluatorRunnerState,
     VerifiedTwoPointCalibrationOutcome,
     VerifiedTwoPointCalibrationSuccess,
 )
@@ -371,14 +373,51 @@ def _validate_run_provenance(
         and binding.instrument is instrument
         and binding.instrument_configuration is state_before.instrument_configuration
     )
-    other_runner_success = (
-        state_before.phase == "ready"
-        and binding.issuer_runner is not runner
-        and own_binding is not binding
-        and own_binding is not None
-        and own_binding.success is None
-        and own_binding.source is None
-    )
+    other_runner_success = False
+    if state_before.phase == "ready":
+        from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
+
+        source_runner = binding.issuer_runner
+        try:
+            source_issuer = _lookup_verified_calibration_issuer(source_runner)
+            source_state = source_runner._state
+            source_instrument = source_runner._instrument
+            source_tracker = source_runner._tracker
+            source_state_type_matches = (
+                type(source_runner) is SparseLinewidthEvaluatorRunner
+                and type(source_state) is SparseEvaluatorRunnerState
+            ) or (
+                type(source_runner) is TwoPointEvaluatorRunner
+                and type(source_state) is TwoPointEvaluatorRunnerState
+            )
+            other_runner_success = (
+                _is_exact_registered_runner(source_runner)
+                and source_runner is not runner
+                and source_state_type_matches
+                and type(source_instrument) is ODMRInstrument
+                and type(source_state.instrument_configuration)
+                is TwoPointEvaluatorInstrumentConfiguration
+                and source_issuer._runner is source_runner
+                and source_issuer._instrument is source_instrument
+                and source_issuer._run_token is verified_calibration.run_token
+                and source_issuer._instrument_configuration
+                is source_state.instrument_configuration
+                and own_binding is not binding
+                and own_binding is not None
+                and own_binding.success is None
+                and own_binding.source is None
+                and source_state.phase == "calibration_succeeded"
+                and source_state.run_token is verified_calibration.run_token
+                and source_state.calibration_outcome is verified_calibration
+                and source_state.verified_calibration is verified_calibration
+                and source_instrument is binding.instrument
+                and source_state.instrument_configuration
+                is binding.instrument_configuration
+                and _lookup_run_token_binding(source_state.run_token) is binding
+                and source_tracker is None
+            )
+        except (AttributeError, TypeError):
+            other_runner_success = False
     treatment = calibration.budget_treatment
     valid_treatment = type(treatment) is str and treatment in (
         "included_same_run",

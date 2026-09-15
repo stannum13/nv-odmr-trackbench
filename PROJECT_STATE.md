@@ -112,6 +112,19 @@ other-runner conditional source, restores all three tracker slots on ordinary
 or process-control reset failure, and commits an empty tracking audit state
 whose calibration, estimate, resources, and independent CPU totals are the
 exact reset products. Step/resource/terminal transitions remain Tasks 14–16.
+Task 13's independent review found that conditional other-runner start joined
+the outcome/source pair but did not authenticate the source runner's complete
+live private identity graph. The fix now requires the exact registered issuer,
+runner, instrument, instrument configuration, token, successful phase, retained
+calibration outcome, retained verified outcome, empty tracker slot, and binding
+registry entry to agree before metadata checks or reset. Ten adversarial REDs
+cover mutated binding runner/instrument/configuration (including another exact
+registered runner) and source-runner token/instrument/configuration/phase/
+outcome disagreements. An eleventh RED requires the exact runner class to match
+its corresponding exact runner-state class, rejecting a structurally valid
+cross-class state transplant. All fail atomically with
+`run_provenance_mismatch` while the valid conditional path remains accepted.
+Stage 6.3 code remains unchanged.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1019,11 +1032,12 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 13 focused calibration/start contract gate: 28 passed.
+- Stage 6.4 Task 13 conditional provenance review-fix gate: 12 passed.
+- Stage 6.4 Task 13 focused calibration/start contract gate: 39 passed.
 - Stage 6.4 Task 13 sparse runner plus complete Stage 6.3 calibration/runner
-  compatibility gate: 179 passed.
-- Stage 6.4 Task 13 estimator/evaluation/emulator gate: 1,637 passed.
-- Stage 6.4 Task 13 full repository gate: 1,738 passed.
+  compatibility gate: 190 passed.
+- Stage 6.4 Task 13 estimator/evaluation/emulator gate: 1,648 passed.
+- Stage 6.4 Task 13 full repository gate: 1,749 passed.
 - Stage 6.4 Task 13 Ruff gate: All checks passed.
 - Stage 6.4 Task 12 focused sparse shell plus complete Stage 6.3 calibration/
   runner compatibility gate: 152 passed.

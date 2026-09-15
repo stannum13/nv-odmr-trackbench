@@ -31,6 +31,7 @@ from odmr_bench.evaluation.sparse_linewidth.runner import (
 )
 from odmr_bench.evaluation.two_point.types import (
     TwoPointEvaluatorInstrumentConfiguration,
+    TwoPointEvaluatorRunnerState,
     VerifiedTwoPointCalibrationSuccess,
 )
 from odmr_bench.models import Baseline, Resonance
@@ -524,6 +525,186 @@ def test_sparse_start_allows_authenticated_conditional_other_runner_source(
         0, 0.0, 0.0, 0.0, 0, 0, 0.0
     )
     assert source_runner.state.phase == "calibration_succeeded"
+
+
+@pytest.mark.parametrize(
+    "attack",
+    [
+        "binding_runner_object",
+        "binding_runner_registered",
+        "binding_instrument",
+        "binding_configuration",
+        "source_token",
+        "source_instrument",
+        "source_configuration",
+        "source_phase",
+        "source_calibration_outcome",
+        "source_verified_calibration",
+        "source_cross_class_state",
+    ],
+)
+def test_conditional_start_rejects_broken_live_source_identity_graph_before_reset(
+    attack: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point.provenance import _lookup_run_token_binding
+
+    source_runner, source_instrument, success = _verified_success(
+        monkeypatch,
+        source_clock_id="source-clock",
+        tracker_clock_id="tracking-clock",
+        source_to_tracker_offset_s=-0.012,
+    )
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    target_instrument = _instrument()
+    target_runner = SparseLinewidthEvaluatorRunner.bind(target_instrument)
+    tracker = SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="tracking-clock",
+        current_sequence_index=None,
+        current_timestamp_s=0.0,
+        nominal_photon_rate_hz=target_instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=target_instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    binding = _lookup_run_token_binding(success.run_token)
+    assert binding is not None
+    assert binding.issuer_runner is source_runner
+    assert binding.instrument is source_instrument
+    assert binding.instrument_configuration is (
+        source_runner.state.instrument_configuration
+    )
+    assert binding.success is success
+    assert binding.source is success.source
+
+    restoration: tuple[object, str, object] | None
+    if attack == "binding_runner_object":
+        restoration = (binding, "issuer_runner", binding.issuer_runner)
+        object.__setattr__(binding, "issuer_runner", object())
+    elif attack == "binding_runner_registered":
+        other_runner = SparseLinewidthEvaluatorRunner.bind(_instrument())
+        restoration = (binding, "issuer_runner", binding.issuer_runner)
+        object.__setattr__(binding, "issuer_runner", other_runner)
+    elif attack == "binding_instrument":
+        restoration = (binding, "instrument", binding.instrument)
+        object.__setattr__(binding, "instrument", _instrument())
+    elif attack == "binding_configuration":
+        restoration = (
+            binding,
+            "instrument_configuration",
+            binding.instrument_configuration,
+        )
+        object.__setattr__(
+            binding,
+            "instrument_configuration",
+            TwoPointEvaluatorInstrumentConfiguration(3.0e6, 0.002),
+        )
+    elif attack == "source_token":
+        other_runner = SparseLinewidthEvaluatorRunner.bind(_instrument())
+        restoration = (source_runner.state, "run_token", source_runner.state.run_token)
+        object.__setattr__(
+            source_runner.state, "run_token", other_runner.state.run_token
+        )
+    elif attack == "source_instrument":
+        restoration = (source_runner, "_instrument", source_runner._instrument)
+        object.__setattr__(source_runner, "_instrument", _instrument())
+    elif attack == "source_configuration":
+        restoration = (
+            source_runner.state,
+            "instrument_configuration",
+            source_runner.state.instrument_configuration,
+        )
+        object.__setattr__(
+            source_runner.state,
+            "instrument_configuration",
+            TwoPointEvaluatorInstrumentConfiguration(3.0e6, 0.002),
+        )
+    elif attack == "source_phase":
+        restoration = (source_runner.state, "phase", source_runner.state.phase)
+        object.__setattr__(source_runner.state, "phase", "calibration_failed")
+    elif attack == "source_calibration_outcome":
+        restoration = (
+            source_runner.state,
+            "calibration_outcome",
+            source_runner.state.calibration_outcome,
+        )
+        object.__setattr__(
+            source_runner.state, "calibration_outcome", replace(success)
+        )
+    elif attack == "source_verified_calibration":
+        restoration = (
+            source_runner.state,
+            "verified_calibration",
+            source_runner.state.verified_calibration,
+        )
+        object.__setattr__(
+            source_runner.state, "verified_calibration", replace(success)
+        )
+    else:
+        source_state = source_runner.state
+        restoration = (source_runner, "_state", source_state)
+        object.__setattr__(
+            source_runner,
+            "_state",
+            TwoPointEvaluatorRunnerState(
+                phase=source_state.phase,
+                run_token=source_state.run_token,
+                instrument_configuration=source_state.instrument_configuration,
+                calibration_outcome=source_state.calibration_outcome,
+                verified_calibration=source_state.verified_calibration,
+                calibration=source_state.calibration,
+                tracker_estimate=None,
+                normal_tracking_trace=(),
+                pair_timings=(),
+                instrument_resources_at_bind=source_state.instrument_resources_at_bind,
+                tracking_resources_before=None,
+                instrument_resources_current=source_state.instrument_resources_current,
+                instrument_current_sequence_index=(
+                    source_state.instrument_current_sequence_index
+                ),
+                current_virtual_time_s=source_state.current_virtual_time_s,
+                last_instrument_failure=None,
+                terminal_abort=None,
+            ),
+        )
+
+    attacked_source_state = source_runner.state
+    target_state_before = target_runner.state
+    source_resources_before = source_instrument.resources
+    source_time_before = source_instrument.virtual_time_s
+    target_resources_before = target_instrument.resources
+    target_time_before = target_instrument.virtual_time_s
+    reset_calls = 0
+
+    def reset_spy(*args: object, **kwargs: object) -> None:
+        nonlocal reset_calls
+        reset_calls += 1
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_spy)
+    try:
+        with pytest.raises(SparseStartError) as raised:
+            target_runner.start_tracking(
+                tracker,
+                calibration,
+                success,
+                metadata,
+                TwoPointBudgetCeiling(100, None, None, None),
+                seed=9,
+            )
+        assert raised.value.code == "run_provenance_mismatch"
+        assert reset_calls == 0
+        assert target_runner.state is target_state_before
+        assert source_runner.state is attacked_source_state
+        assert source_instrument.resources == source_resources_before
+        assert source_instrument.virtual_time_s == source_time_before
+        assert target_instrument.resources == target_resources_before
+        assert target_instrument.virtual_time_s == target_time_before
+    finally:
+        object.__setattr__(restoration[0], restoration[1], restoration[2])
 
 
 @pytest.mark.parametrize(
