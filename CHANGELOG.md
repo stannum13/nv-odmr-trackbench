@@ -20,6 +20,12 @@ once a package version is introduced.
 
 ### Fixed
 
+- Completed the second Stage 6.4 Task 2 record-contract review: sparse
+  acquisitions are contiguous and aggregate traces retain their declared
+  acquisition order; empty accepted traces may retain their available reset
+  boundary; exact resource replay excludes unretained frequency overhead;
+  pending identities/source snapshots and latest-success source selection are
+  exact; and zero-observation CPU ledgers are exactly zero.
 - Hardened Stage 6.4 sparse record validation after review: five-point public
   epochs now retain the exact ordered mean; optimizer failures retain signed
   SciPy statuses; retained observation traces replay each resource ledger in

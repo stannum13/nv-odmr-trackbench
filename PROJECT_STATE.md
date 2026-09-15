@@ -771,9 +771,9 @@ superiority result.
 
 ## Tests currently passing
 
-- Stage 6.4 Task 2 reviewed sparse record contracts: 70 passed.
-- Stage 6.4 Task 2 reviewed estimator/evaluator/emulator gate: 1,182 passed.
-- Stage 6.4 Task 2 reviewed full repository gate: 1,283 passed.
+- Stage 6.4 Task 2 second-review sparse record contracts: 73 passed.
+- Stage 6.4 Task 2 second-review estimator/evaluator/emulator gate: 1,185 passed.
+- Stage 6.4 Task 2 second-review full repository gate: 1,286 passed.
 - Stage 6.4 Task 1 focused sparse primitive contracts: 50 passed.
 - Stage 6.4 Task 1 estimator/evaluator/emulator gate: 1,162 passed.
 - Stage 6.4 Task 1 full repository gate: 1,263 passed.

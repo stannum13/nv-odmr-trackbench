@@ -193,10 +193,94 @@ def test_composite_rejects_pending_sparse_query_that_repeats_partial_point() -> 
         )
 
 
+def test_sparse_scan_requires_adjacent_acquisition_indices() -> None:
+    partial = make_partial_scan()
+    second = make_sparse_query(
+        acquisition_index=2,
+        point_index=1,
+        offset_multiplier=-1.0,
+        frequency_hz=2.869e9,
+        expected_sequence_index=1,
+        expected_end_timestamp_s=0.010,
+    )
+    observation = EstimatorObservation(1, 0.010, 2.869e9, 1.0, 0.005, 1.0)
+    with pytest.raises(ValueError):
+        make_partial_scan(
+            queries=(partial.queries[0], second),
+            observations=(partial.observations[0], observation),
+        )
+
+
+def test_empty_trace_retains_available_calibration_boundary_and_zero_cpu() -> None:
+    identities = tuple(
+        make_composite_identity(
+            resonance_id=f"r{index}",
+            center_age_s=0.1,
+            fwhm_age_s=0.1,
+            center_release_age_s=0.1,
+            fwhm_release_age_s=0.1,
+        )
+        for index in range(8)
+    )
+    estimate = make_composite_estimate(
+        calibration_budget_treatment="included_same_run",
+        identities=identities,
+        current_sequence_index=7,
+        current_timestamp_s=0.1,
+    )
+    assert estimate.current_sequence_index == 7
+    with pytest.raises(ValueError, match="zero"):
+        make_composite_estimate(
+            fast_update_cpu_time_s=0.001, total_update_cpu_time_s=0.001
+        )
+
+
+def test_nonzero_frequency_overhead_is_not_replayed_from_observations() -> None:
+    pair, estimate = _completed_fast_estimate()
+    overhead = PublicAcquisitionResources(2, 0.01, 25_000.0, 24_625, 0, 0.25)
+    accepted = make_composite_estimate(
+        identities=estimate.identities,
+        fast_pair_history=(pair,),
+        accepted_observations=2,
+        completed_fast_pairs=1,
+        fast_pairs_since_scan=1,
+        current_sequence_index=pair.release_sequence_index,
+        current_timestamp_s=pair.release_timestamp_s,
+        fast_tracking_resources=overhead,
+        tracking_resources=overhead,
+        charged_resources=overhead,
+    )
+    assert accepted.tracking_resources.virtual_elapsed_time_s == 0.25
+
+
+def test_pending_sparse_query_must_extend_partial_acquisition_sequence() -> None:
+    partial = make_partial_scan()
+    pending = make_sparse_query(
+        acquisition_index=3,
+        point_index=1,
+        offset_multiplier=-1.0,
+        frequency_hz=2.869e9,
+        expected_sequence_index=1,
+        expected_end_timestamp_s=0.010,
+    )
+    one = _one_observation_resources()
+    with pytest.raises(ValueError, match="pending sparse"):
+        make_composite_estimate(
+            pending_mode="sparse_scan",
+            pending_query=pending,
+            incomplete_sparse_scan=partial,
+            accepted_observations=1,
+            current_sequence_index=0,
+            current_timestamp_s=0.005,
+            sparse_tracking_resources=one,
+            tracking_resources=one,
+            charged_resources=one,
+        )
+
+
 @pytest.mark.parametrize(
     "overrides",
     (
-        {"current_sequence_index": 0},
         {"fast_pairs_since_scan": 1},
         {"fast_update_cpu_time_s": 1.0, "total_update_cpu_time_s": 0.5},
         {"sparse_update_cpu_time_s": 1.0, "total_update_cpu_time_s": 0.5},
