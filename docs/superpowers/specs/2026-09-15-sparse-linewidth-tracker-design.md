@@ -164,6 +164,25 @@ indices, expected endpoints, and nominal exposures are constructed and frozen
 before the first query. No result from points one through four changes point
 five or starts a fast pair.
 
+### Stateful query-constructor interface correction
+
+The original implementation ledger listed the private stateful query
+constructor without any input carrying the sparse integration time. That
+signature was insufficient: `_SparseFitGeometry` is intentionally pure and
+retains no scheduler policy, `TwoPointRunMetadata` contains rate/overhead but
+not sparse integration time, and `SparseLinewidthConfiguration.integration_time_s`
+is explicitly configurable. Inferring the default `0.005` would silently break
+legal non-default configurations; adding scheduler policy to pure fit geometry
+would weaken the model/scheduling separation.
+
+The stateful constructor therefore receives one additional private keyword,
+`integration_time_s: float`, supplied from the tracker-owned immutable sparse
+configuration. This makes the dependency explicit and testable while leaving
+the public API and pure geometry unchanged. The constructor still obtains the
+nominal photon rate and frequency overhead from public run metadata. The
+tradeoff is a one-argument extension of a private helper signature relative to
+the original ledger; no estimator-facing contract changes.
+
 ## Canonical local model
 
 For source baseline `B`, source-ordered resonances, target `i`, source mixture

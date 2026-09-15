@@ -48,6 +48,15 @@ or consuming verified-source authority. Focused corruption witnesses map these
 failures to `calibration_mismatch` with value-atomic rollback. The cumulative
 re-review approved Task 7 with no Critical or Important findings.
 
+Task 8 planning exposed an impossible private-helper signature: the stateful
+sparse-query constructor was required to freeze a configurable integration time
+but neither its pure geometry nor its listed arguments carried that value. The
+implementation correction adds an explicit private `integration_time_s`
+keyword supplied by the tracker-owned immutable sparse configuration. This
+preserves non-default policies and keeps scheduler facts out of pure fit
+geometry at the cost of extending one private helper signature; the public API
+is unchanged.
+
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
 returned evaluation count at the configured, including non-default, limit is

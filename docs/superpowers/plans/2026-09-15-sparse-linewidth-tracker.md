@@ -181,6 +181,7 @@ def _construct_sparse_queries(
     identity: CompositeIdentityEstimate,
     public_metadata: TwoPointRunMetadata,
     *,
+    integration_time_s: float,
     first_acquisition_index: int,
     first_sequence_index: int,
     start_timestamp_s: float,
@@ -659,7 +660,8 @@ def test_reset_exposes_only_the_first_reserved_fast_query() -> None:
 **Interfaces:** Complete the fast branch of `update(observation) ->
 SparseLinewidthCompositeUpdate`; extend `choose_next_query` through completed
 fast pairs; and add stateful `_construct_sparse_queries(geometry, identity,
-public_metadata, *, first_acquisition_index, first_sequence_index,
+public_metadata, *, integration_time_s, first_acquisition_index,
+first_sequence_index,
 start_timestamp_s, scan_index, identity_scan_index) ->
 tuple[SparseLinewidthQuery, ...]`. This constructor alone adds current global
 acquisition indices, sequence indices, exact endpoint recurrence, integration
