@@ -33,11 +33,44 @@ from tests.two_point_helpers import (
 )
 
 
-def _profile(frequency_hz: float, resonance: Resonance, center_hz: float) -> float:
+def _analytic_profile(
+    frequency_hz: float, resonance: Resonance, center_hz: float
+) -> float:
     u = (frequency_hz - center_hz) / resonance.fwhm_hz
     return resonance.eta / (1.0 + 4.0 * u * u) + (
         1.0 - resonance.eta
     ) * math.exp(-4.0 * math.log(2.0) * u * u)
+
+
+def _canonical_target_model_value(
+    source_fit: object,
+    target_index: object,
+    frequency_hz: float,
+    center_hz: float,
+) -> float:
+    resonances = tuple(
+        replace(resonance, center_hz=center_hz)
+        if index == target_index
+        else resonance
+        for index, resonance in enumerate(source_fit.resonance_estimates)
+    )
+    return float(
+        multi_resonance_spectrum(
+            np.asarray([frequency_hz], dtype=np.float64),
+            resonances,
+            source_fit.baseline_estimate,
+        )[0]
+    )
+
+
+def _canonical_source_model_value(source_fit: object, frequency_hz: float) -> float:
+    return float(
+        multi_resonance_spectrum(
+            np.asarray([frequency_hz], dtype=np.float64),
+            source_fit.resonance_estimates,
+            source_fit.baseline_estimate,
+        )[0]
+    )
 
 
 def _model_fixture() -> tuple[object, int]:
@@ -72,14 +105,9 @@ def test_target_only_model_and_center_derivative_are_canonical() -> None:
     center_hz = target.center_hz + 0.07 * target.fwhm_hz
     frequency_hz = center_hz - 0.31 * target.fwhm_hz
 
-    expected = float(source_fit.baseline_estimate.evaluate(frequency_hz))
-    for index, resonance in enumerate(source_fit.resonance_estimates):
-        evaluated_center_hz = (
-            center_hz if index == target_index else resonance.center_hz
-        )
-        expected -= resonance.amplitude * _profile(
-            frequency_hz, resonance, evaluated_center_hz
-        )
+    expected = _canonical_target_model_value(
+        source_fit, target_index, frequency_hz, center_hz
+    )
     assert (
         _evaluate_target_only_model(
             source_fit, target_index, frequency_hz, center_hz
@@ -244,11 +272,7 @@ def test_target_only_model_retains_legacy_nonmatching_index_behavior(
 ) -> None:
     source_fit, _ = _model_fixture()
     frequency_hz = 2.882e9
-    expected = float(source_fit.baseline_estimate.evaluate(frequency_hz))
-    for resonance in source_fit.resonance_estimates:
-        expected -= resonance.amplitude * _profile(
-            frequency_hz, resonance, resonance.center_hz
-        )
+    expected = _canonical_source_model_value(source_fit, frequency_hz)
 
     assert (
         _evaluate_target_only_model(
@@ -297,15 +321,6 @@ def _discriminator(
         source_fit, target_index, plus_frequency_hz, center_hz
     )
     return (minus - plus) / (minus + plus)
-
-
-def _independent_model_value(source_fit: object, frequency_hz: float) -> float:
-    value = float(source_fit.baseline_estimate.evaluate(frequency_hz))
-    for resonance in source_fit.resonance_estimates:
-        value -= resonance.amplitude * _profile(
-            frequency_hz, resonance, resonance.center_hz
-        )
-    return value
 
 
 def test_calibration_builds_analytic_slope_depth_and_all_fixed_cells() -> None:
@@ -372,12 +387,12 @@ def test_calibration_builds_analytic_slope_depth_and_all_fixed_cells() -> None:
         )
 
         target_pair_depth = resonance.amplitude * (
-            _profile(
+            _analytic_profile(
                 resonance.center_hz - delta_hz,
                 resonance,
                 resonance.center_hz,
             )
-            + _profile(
+            + _analytic_profile(
                 resonance.center_hz + delta_hz,
                 resonance,
                 resonance.center_hz,
@@ -400,10 +415,10 @@ def test_calibration_builds_analytic_slope_depth_and_all_fixed_cells() -> None:
             resonance.center_hz,
         )
         zero_discriminator = (mu_minus - mu_plus) / (mu_minus + mu_plus)
-        expected_mu_minus = _independent_model_value(
+        expected_mu_minus = _canonical_source_model_value(
             source.source_fit, minus_frequency_hz
         )
-        expected_mu_plus = _independent_model_value(
+        expected_mu_plus = _canonical_source_model_value(
             source.source_fit, plus_frequency_hz
         )
         expected_zero_discriminator = (
