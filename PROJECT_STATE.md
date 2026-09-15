@@ -6,25 +6,39 @@ Last updated: 2026-09-15
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Task 1 adds frozen/slotted sparse-linewidth
-configuration and geometry-unavailability diagnostic primitives, closed public
-aliases and typed errors, and exact estimator-package exports; fitting,
-scheduling, and evaluator behavior remain unimplemented. Pure fit geometry is now
-separate from stateful scheduler-owned query clocks, reset precedes fast update
-and due-scan behavior, and evaluator value types precede the sparse runner class
-that enables exact calibration-authority registration. Calibration/start,
-initial resources, accepted resource integration, and terminal behavior then
-form a forward-only runner chain. Production truth lookup and public linewidth-
-dynamics additions have been removed: release-gated truth evaluation and
-linewidth drift exist only as test fixtures. The plan also uses configured
-`max_nfev`, stops fit CPU timing before result construction, and keeps private
-authority tests in the existing calibration test module. No Stage 6.5 claim has
-been added. Final plan review also closes
+which is in task-by-task execution. Tasks 1–7 now provide the immutable sparse
+record layer, canonical bound-source model, pure fit geometry, ordered fit
+outcomes, and the first composite scheduler boundary. Fast observation updates
+and due-scan selection remain deferred to Tasks 8–10. Pure fit geometry remains
+separate from scheduler-owned query clocks, and evaluator value types still
+precede the sparse runner class that enables exact calibration authority.
+Calibration/start, initial resources, accepted resource integration, and
+terminal behavior then form a forward-only runner chain. Production truth
+lookup and public linewidth-dynamics additions remain absent: release-gated
+truth evaluation and linewidth drift exist only as future test fixtures. The
+plan uses configured `max_nfev`, stops fit CPU timing before result
+construction, and keeps private authority tests in the existing calibration
+test module. No Stage 6.5 claim has been added. Final plan review also closes
 resource-builder phase semantics: pre-start calls raise the public state error,
 public evaluator resources begin only after successful tracking start, and
 `None` is exclusive to an unavailable terminal resource join. Timing isolation
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
+
+Task 7 adds the exact public `SparseLinewidthCompositeTracker` shell. Reset
+enforces declaration-order typed precedence, validates the tracker-held sparse
+configuration against its independent constructor snapshot, revalidates the
+complete calibration graph, maps calibration epochs, calls the Task 4
+prospective geometry validator for all eight identities, checks the charged
+starting budget, and constructs every calibration-seeded center/FWHM/live-Q
+source before one commit. Initial selection freezes both adjacent fast queries,
+replays two atomic charges without multiplication, subtraction, subtotals, or
+`sum`, and exposes only query one; the five-atom sequential helper is reserved
+for later due scans. Exact ceilings pass, one-ULP-lower ceilings produce an
+atomic `budget_exhausted` boundary, repeated selection returns the identical
+pending object, and reservation charges no public resource ledger. The
+composite never wraps a running Stage 6.3 tracker. The observation-update method
+is intentionally a Task 8 placeholder, and no due-scan branch is implemented.
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
@@ -826,6 +840,11 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 7 focused tracker/atomicity files: 28 passed.
+- Stage 6.4 Task 7 sparse types/fit/tracker compatibility gate: 201 passed.
+- Stage 6.4 Task 7 estimator/evaluator/emulator integration gate: 1,367 passed.
+- Stage 6.4 Task 7 full repository gate: 1,468 passed.
+- Stage 6.4 Task 7 Ruff gate: All checks passed.
 - Stage 6.4 Task 6 review-fix focused sparse fit file: 81 passed.
 - Stage 6.4 Task 6 review-fix estimator/evaluator/emulator integration gate:
   1,339 passed.
@@ -913,7 +932,7 @@ superiority result.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 7's composite tracker reset, initial fast-block
-   reservation, and estimator exports.
+1. Continue Stage 6.4 with Task 8's exact fast-pair updates and due-scan
+   selection.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

@@ -10,6 +10,14 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's composite tracker reset and initial scheduling shell. Reset
+  now preserves exact typed precedence and commit-last rollback, prospectively
+  validates all eight calibration-seeded sparse geometries, seeds independent
+  center/FWHM source epochs and live Q, and verifies the charged starting
+  budget. Initial selection freezes one complete two-query fast block, replays
+  its atomic charges sequentially at exact ceilings, exposes an idempotent first
+  query, and stops cleanly when the block is unaffordable; observation updates
+  and due-scan selection remain explicitly deferred to Tasks 8–10.
 - Added Stage 6.4's exact ordered sparse-fit outcome gates and diagnostic
   presence rows. Returned optimizer status/count, malformed/non-finite
   solutions, scaled bound margin, rank, condition, resolved amplitude, and

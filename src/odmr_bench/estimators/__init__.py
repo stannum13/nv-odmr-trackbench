@@ -6,6 +6,9 @@ from odmr_bench.estimators.fitting import (
 )
 from odmr_bench.estimators.full_sweep import RepeatedFullSweepEstimator
 from odmr_bench.estimators.initialization import initialize_spectrum
+from odmr_bench.estimators.sparse_linewidth_tracker import (
+    SparseLinewidthCompositeTracker,
+)
 from odmr_bench.estimators.sparse_linewidth_types import (
     CompositeIdentityEstimate,
     CompositeMode,
@@ -101,6 +104,7 @@ __all__ = [
     "SparseGeometryFailureCode",
     "SparseGeometryUnavailableDiagnostic",
     "SparseLinewidthCompositeEstimate",
+    "SparseLinewidthCompositeTracker",
     "SparseLinewidthCompositeUpdate",
     "SparseLinewidthConfiguration",
     "SparseLinewidthFailureCode",
