@@ -104,6 +104,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added the Stage 6.4 sparse five-point linewidth/Q tracker design. It selects
+  an additive composite tracker/evaluator without changing Stage 6.3 records;
+  fixes pair-boundary five-point block reservation, exact frozen-prior-FWHM
+  offsets and alternating time-reversed acquisition, the four-parameter local
+  model and frozen source terms, ordered rank/condition/bounds/quality gates,
+  diagnostic-only local center correction, separate live-Q and scan-Q source
+  epochs, public/truth timing, arrival-order resource ledgers, transactional
+  failures, verification coverage, and explicit affine-baseline and
+  within-scan-motion limitations. No implementation or Stage 6.5 comparative
+  claim is included.
 - Published calibrated two-point researcher guidance and a download-free
   public-API example. The documentation distinguishes verified from
   caller-asserted provenance, both mandatory calibration-budget treatments,
