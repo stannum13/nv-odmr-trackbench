@@ -10,6 +10,15 @@ once a package version is introduced.
 
 ### Changed
 
+- Hardened the Stage 6.4 design after review. The composite runner now owns
+  verified calibration through a private runner-neutral, exact-allowlisted
+  core without changing Stage 6.3 pair behavior; due invalid sparse geometry
+  is a diagnostic clean stop; the scan order is the exact time-balanced
+  sequence and reversal; queries retain both frozen source epochs; and estimate
+  provenance is complete. Raised numerical/solver exceptions now roll back to
+  typed aborts, returned solver failures remain scientific results, solver and
+  process-CPU presence is exact, evaluator state/outcome/resource joins are
+  fully specified, and live Q is consistently an asynchronous projection.
 - Closed Stage 6.3 after an exact `9f829ed..1c7fc67` integrated scientific and
   software review, three atomic fix waves, and clean final re-reviews. The
   deterministic focused and full suites passed twice, Ruff and diff checks are

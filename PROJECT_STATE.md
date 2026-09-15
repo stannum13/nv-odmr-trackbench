@@ -4,17 +4,16 @@ Last updated: 2026-09-15
 
 ## Current stage
 
-Stage 6.4 sparse five-point linewidth/Q tracking design is complete. The
-approved additive architecture preserves every Stage 6.3 public record and
-adds a composite tracker/evaluator with one global causal schedule. It reserves
-periodic indivisible five-observation scans only at fast-pair boundaries, uses
-the exact frozen-prior-FWHM offsets and alternating time-reversed order, fits
-only local center correction/FWHM/amplitude/constant baseline offset, and keeps
-center feedback separate from linewidth updates. The design fixes numerical
-rank, condition, bounds, residual-quality gates; live-Q and scan-Q meanings;
-separate center/FWHM and public/truth epochs; exact arrival-order resource
-ledgers; transactional failures; tests; limitations; and non-goals. No Stage
-6.4 production code or Stage 6.5 comparative claim has been added.
+Stage 6.4 sparse five-point linewidth/Q tracking design has completed its first
+review-fix pass and is ready for independent re-review. The hardened additive
+architecture preserves Stage 6.3 pair semantics while extracting a private,
+exact-allowlisted verified-calibration core for both runners. It now fixes the
+clean `sparse_geometry_unavailable` stop, exact time-balanced scan order,
+frozen center/FWHM source snapshots, configuration/source provenance, exception
+rollback, solver/CPU diagnostic presence, complete evaluator contracts, and
+the asynchronous live-Q projection. Exact block reservation, fit gates,
+separate public/truth timing, arrival-order resources, limitations, tests, and
+non-goals remain explicit. No Stage 6.4 code or Stage 6.5 claim has been added.
 
 Stage 6.2 synchronized and CI-green — The causal warm-started sweep estimator,
 generated drift regression, documentation, package smoke, and integrated
