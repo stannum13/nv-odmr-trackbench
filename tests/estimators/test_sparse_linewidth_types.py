@@ -258,28 +258,8 @@ def test_nonzero_frequency_overhead_is_not_replayed_from_observations() -> None:
 
 
 def test_pending_sparse_query_must_extend_partial_acquisition_sequence() -> None:
-    partial = make_partial_scan()
-    pending = make_sparse_query(
-        acquisition_index=3,
-        point_index=1,
-        offset_multiplier=-1.0,
-        frequency_hz=2.869e9,
-        expected_sequence_index=1,
-        expected_end_timestamp_s=0.010,
-    )
-    one = _one_observation_resources()
     with pytest.raises(ValueError, match="pending sparse"):
-        make_composite_estimate(
-            pending_mode="sparse_scan",
-            pending_query=pending,
-            incomplete_sparse_scan=partial,
-            accepted_observations=1,
-            current_sequence_index=0,
-            current_timestamp_s=0.005,
-            sparse_tracking_resources=one,
-            tracking_resources=one,
-            charged_resources=one,
-        )
+        _sparse_partial_at_due_cadence(pending_acquisition_index=5)
 
 
 def _one_fast_partial_estimate(*, resonance_id: str, pending: bool) -> object:
@@ -383,6 +363,147 @@ def _one_sparse_partial_estimate(
         tracking_resources=resource,
         charged_resources=resource,
     )
+
+
+def _fast_partial_at_due_cadence() -> object:
+    pair, estimate = _completed_fast_estimate()
+    first_query = make_legal_query(
+        query_index=2,
+        pair_index=1,
+        identity_pair_index=0,
+        resonance_id="r1",
+        interrogation_center_hz=2.87e9,
+        expected_sequence_index=2,
+        expected_end_timestamp_s=0.018,
+    )
+    partial = replace(
+        make_legal_partial_pair(),
+        pair_index=1,
+        identity_pair_index=0,
+        resonance_id="r1",
+        interrogation_center_hz=2.87e9,
+        first_query=first_query,
+        first_observation=EstimatorObservation(
+            2, 0.018, first_query.frequency_hz, 0.98, 0.005, 12_500.0, 12_250
+        ),
+    )
+    current_timestamp_s = 0.018
+    identities = tuple(
+        replace(
+            identity,
+            center_age_s=current_timestamp_s
+            - identity.fast_center_reference_timestamp_s,
+            fwhm_age_s=current_timestamp_s - identity.fwhm_reference_timestamp_s,
+            center_release_age_s=current_timestamp_s
+            - identity.fast_center_release_timestamp_s,
+            fwhm_release_age_s=current_timestamp_s
+            - identity.fwhm_release_timestamp_s,
+        )
+        for identity in estimate.identities
+    )
+    resources = PublicAcquisitionResources(3, 0.015, 37_500.0, 36_875, 0, 0.015)
+    return make_composite_estimate(
+        configuration=SparseLinewidthConfiguration(scan_period_fast_pairs=1),
+        identities=identities,
+        incomplete_fast_pair=partial,
+        fast_pair_history=(pair,),
+        accepted_observations=3,
+        completed_fast_pairs=1,
+        fast_pairs_since_scan=1,
+        current_sequence_index=2,
+        current_timestamp_s=current_timestamp_s,
+        fast_tracking_resources=resources,
+        tracking_resources=resources,
+        charged_resources=resources,
+    )
+
+
+def _sparse_partial_at_due_cadence(*, pending_acquisition_index: int) -> object:
+    pair, estimate = _completed_fast_estimate()
+    identity = estimate.identities[0]
+    first_query = make_sparse_query(
+        acquisition_index=2,
+        frozen_fast_center_hz=identity.fast_center_hz,
+        frozen_fast_center_source_kind="pair",
+        frozen_fast_center_source_pair_index=0,
+        frozen_fast_center_reference_timestamp_s=pair.pair_reference_timestamp_s,
+        frozen_fast_center_release_sequence_index=pair.release_sequence_index,
+        frozen_fast_center_release_timestamp_s=pair.release_timestamp_s,
+        frequency_hz=identity.fast_center_hz + 0.5e6,
+        expected_sequence_index=2,
+        expected_end_timestamp_s=0.017,
+    )
+    observation = EstimatorObservation(
+        2, 0.017, first_query.frequency_hz, 1.0, 0.005, 1.0
+    )
+    partial = make_partial_scan(
+        frozen_fast_center_hz=identity.fast_center_hz,
+        frozen_fast_center_source_kind="pair",
+        frozen_fast_center_source_pair_index=0,
+        frozen_fast_center_reference_timestamp_s=pair.pair_reference_timestamp_s,
+        frozen_fast_center_release_sequence_index=pair.release_sequence_index,
+        frozen_fast_center_release_timestamp_s=pair.release_timestamp_s,
+        queries=(first_query,),
+        observations=(observation,),
+    )
+    current_timestamp_s = 0.017
+    identities = tuple(
+        replace(
+            item,
+            center_age_s=current_timestamp_s - item.fast_center_reference_timestamp_s,
+            fwhm_age_s=current_timestamp_s - item.fwhm_reference_timestamp_s,
+            center_release_age_s=current_timestamp_s
+            - item.fast_center_release_timestamp_s,
+            fwhm_release_age_s=current_timestamp_s - item.fwhm_release_timestamp_s,
+        )
+        for item in estimate.identities
+    )
+    fast_resources = PublicAcquisitionResources(2, 0.01, 25_000.0, 24_625, 0, 0.01)
+    sparse_resources = _one_observation_resources()
+    tracking_resources = PublicAcquisitionResources(
+        3, 0.015, 25_001.0, 24_625, 1, 0.015
+    )
+    pending = make_sparse_query(
+        acquisition_index=pending_acquisition_index,
+        point_index=1,
+        offset_multiplier=-1.0,
+        frozen_fast_center_hz=identity.fast_center_hz,
+        frozen_fast_center_source_kind="pair",
+        frozen_fast_center_source_pair_index=0,
+        frozen_fast_center_reference_timestamp_s=pair.pair_reference_timestamp_s,
+        frozen_fast_center_release_sequence_index=pair.release_sequence_index,
+        frozen_fast_center_release_timestamp_s=pair.release_timestamp_s,
+        frequency_hz=identity.fast_center_hz - 1.0e6,
+        expected_sequence_index=3,
+        expected_end_timestamp_s=0.022,
+    )
+    return make_composite_estimate(
+        configuration=SparseLinewidthConfiguration(scan_period_fast_pairs=1),
+        identities=identities,
+        pending_mode="sparse_scan",
+        pending_query=pending,
+        incomplete_sparse_scan=partial,
+        fast_pair_history=(pair,),
+        accepted_observations=3,
+        completed_fast_pairs=1,
+        fast_pairs_since_scan=1,
+        current_sequence_index=2,
+        current_timestamp_s=current_timestamp_s,
+        fast_tracking_resources=fast_resources,
+        sparse_tracking_resources=sparse_resources,
+        tracking_resources=tracking_resources,
+        charged_resources=tracking_resources,
+    )
+
+
+def test_incomplete_fast_pair_cannot_start_at_due_sparse_cadence() -> None:
+    with pytest.raises(ValueError, match="cadence"):
+        _fast_partial_at_due_cadence()
+
+
+def test_incomplete_sparse_scan_cannot_start_before_due_cadence() -> None:
+    with pytest.raises(ValueError, match="cadence"):
+        _one_sparse_partial_estimate(resonance_id="r0", pending=False)
 
 
 @pytest.mark.parametrize("pending", (False, True))

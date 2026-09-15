@@ -20,6 +20,10 @@ once a package version is introduced.
 
 ### Fixed
 
+- Completed the Stage 6.4 Task 2 cadence review: incomplete fast blocks cannot
+  begin when a sparse scan is due, and incomplete sparse blocks cannot begin
+  before that cadence boundary; pending sparse continuations are exercised from
+  an authenticated due-state trace.
 - Completed the final Stage 6.4 Task 2 record-contract review: incomplete fast
   and sparse blocks are authenticated against their scheduled identity before a
   post-update snapshot can clear its pending query, including sparse frozen

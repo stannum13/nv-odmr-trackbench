@@ -1633,9 +1633,9 @@ class SparseLinewidthCompositeEstimate:
                 != current_sequence_index
                 or partial_fast.first_query.expected_end_timestamp_s
                 != current_timestamp_s
-            ):
+            ) or fast_pairs_since_scan >= self.configuration.scan_period_fast_pairs:
                 raise ValueError(
-                    "incomplete fast pair must match the scheduled identity"
+                    "incomplete fast pair must match the scheduled identity and cadence"
                 )
         if self.incomplete_sparse_scan is not None:
             partial_sparse = self.incomplete_sparse_scan
@@ -1651,9 +1651,10 @@ class SparseLinewidthCompositeEstimate:
                 or partial_sparse.observations[-1].sequence_index
                 != current_sequence_index
                 or partial_sparse.observations[-1].timestamp_s != current_timestamp_s
-            ):
+            ) or fast_pairs_since_scan != self.configuration.scan_period_fast_pairs:
                 raise ValueError(
-                    "incomplete sparse scan must match the scheduled identity"
+                    "incomplete sparse scan must match the scheduled identity "
+                    "and cadence"
                 )
         if not _resources_match_replay(self.fast_tracking_resources, fast_trace):
             raise ValueError("fast tracking resources must replay the fast trace")
