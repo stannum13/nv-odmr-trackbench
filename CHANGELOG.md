@@ -10,6 +10,11 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's pure sparse linewidth-fit geometry constructor and
+  prospective calibration validation. It freezes the exact five-point
+  time-symmetric order, source/cell/domain facts, and scaled bounded-fit setup
+  without retaining scheduler, query-clock, or resource state; no fit attempt
+  or tracker behavior is added.
 - Added Stage 6.4's immutable sparse estimator record layer: validated,
   frozen/slotted five-point queries, partial scans, completed scan results,
   asynchronous identity estimates, composite snapshots, and update echoes.

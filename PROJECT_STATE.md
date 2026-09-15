@@ -26,7 +26,14 @@ public evaluator resources begin only after successful tracking start, and
 uses a query-scoped test dynamics spy rather than a nonexistent instrument
 counter, without pinning configurable quadrature call counts.
 
-Task 3 now extracts a private, source-bound spectral-model evaluator for the
+Task 4 now constructs pure frozen sparse fit geometry and validates every
+calibration-seeded identity prospectively. It fixes the exact even five-point
+order and odd reversal, checks finite lower then upper frequency envelopes,
+intersects scaled optimizer bounds with the source fit, requires a strictly
+interior initial guess, and applies empty-bounds, calibration-cell, then
+source-domain failures in that order. The geometry retains no acquisition,
+sequence, endpoint, exposure, resource, or mutable-clock fact; query scheduling
+and fitting remain deferred. Task 3 extracts a private, source-bound spectral-model evaluator for the
 sparse estimator while preserving the Stage 6.3 scalar calibration path exactly.
 It evaluates the frozen baseline once, adds only the caller-provided constant
 offset, and subtracts the immutable source tuple in order; only the target
