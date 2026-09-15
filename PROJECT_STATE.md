@@ -6,7 +6,10 @@ Last updated: 2026-09-15
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is ready for task-by-task execution. Pure fit geometry is now
+which is in task-by-task execution. Task 1 adds frozen/slotted sparse-linewidth
+configuration and geometry-unavailability diagnostic primitives, closed public
+aliases and typed errors, and exact estimator-package exports; fitting,
+scheduling, and evaluator behavior remain unimplemented. Pure fit geometry is now
 separate from stateful scheduler-owned query clocks, reset precedes fast update
 and due-scan behavior, and evaluator value types precede the sparse runner class
 that enables exact calibration-authority registration. Calibration/start,
@@ -15,8 +18,8 @@ form a forward-only runner chain. Production truth lookup and public linewidth-
 dynamics additions have been removed: release-gated truth evaluation and
 linewidth drift exist only as test fixtures. The plan also uses configured
 `max_nfev`, stops fit CPU timing before result construction, and keeps private
-authority tests in the existing calibration test module. No Stage 6.4
-production code or Stage 6.5 claim has been added. Final plan review also closes
+authority tests in the existing calibration test module. No Stage 6.5 claim has
+been added. Final plan review also closes
 resource-builder phase semantics: pre-start calls raise the public state error,
 public evaluator resources begin only after successful tracking start, and
 `None` is exclusive to an unavailable terminal resource join. Timing isolation
@@ -768,6 +771,9 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 1 focused sparse primitive contracts: 50 passed.
+- Stage 6.4 Task 1 estimator/evaluator/emulator gate: 1,162 passed.
+- Stage 6.4 Task 1 full repository gate: 1,263 passed.
 - Full repository suite including all three Task 20 fix waves: 1213 passed.
 - Task 20 wave-three focused composition gate: 4 passed.
 - Task 20 wave-three affected estimator/evaluator gate: 249 passed.
@@ -836,7 +842,7 @@ superiority result.
 
 ## Next actions
 
-1. Write and independently review the Stage 6.4 implementation plan, then
-   implement sparse local linewidth/FWHM/Q estimation behind focused gates.
+1. Continue Stage 6.4 with Task 2's immutable sparse query, partial, result,
+   identity, aggregate, and update contracts.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

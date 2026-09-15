@@ -8,6 +8,16 @@ once a package version is introduced.
 
 ## [Unreleased]
 
+### Added
+
+- Added Stage 6.4's first estimator contract layer: closed sparse-linewidth
+  failure, mode, source, stop, geometry, reset, observation, and construction
+  aliases; typed reset/observation/update errors; validated frozen/slotted
+  configuration; and immutable geometry-unavailability diagnostics with exact
+  proposed-envelope presence semantics. This is a primitive-only addition: it
+  performs no sparse fitting, scheduling, evaluator operation, or Stage 6.5
+  comparison.
+
 ### Changed
 
 - Closed the Stage 6.4 implementation-plan review. The evaluator resource

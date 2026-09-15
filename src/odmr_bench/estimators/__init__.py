@@ -6,6 +6,21 @@ from odmr_bench.estimators.fitting import (
 )
 from odmr_bench.estimators.full_sweep import RepeatedFullSweepEstimator
 from odmr_bench.estimators.initialization import initialize_spectrum
+from odmr_bench.estimators.sparse_linewidth_types import (
+    CompositeMode,
+    CompositeStopReason,
+    SparseGeometryFailureCode,
+    SparseGeometryUnavailableDiagnostic,
+    SparseLinewidthConfiguration,
+    SparseLinewidthFailureCode,
+    SparseLinewidthObservationValidationError,
+    SparseLinewidthResetError,
+    SparseLinewidthSourceKind,
+    SparseLinewidthUpdateConstructionError,
+    SparseObservationValidationCode,
+    SparseResetFailureCode,
+    SparseUpdateConstructionCode,
+)
 from odmr_bench.estimators.two_point_calibration import (
     bind_caller_asserted_two_point_calibration_source,
     calibrate_two_point,
@@ -66,6 +81,8 @@ __all__ = [
     "CalibrationSourceProvenance",
     "ClockMappingKind",
     "CompleteSweep",
+    "CompositeMode",
+    "CompositeStopReason",
     "FitConfiguration",
     "FitInitialGuess",
     "FitUncertainty",
@@ -74,6 +91,17 @@ __all__ = [
     "PairSide",
     "PublicAcquisitionResources",
     "RepeatedFullSweepEstimator",
+    "SparseGeometryFailureCode",
+    "SparseGeometryUnavailableDiagnostic",
+    "SparseLinewidthConfiguration",
+    "SparseLinewidthFailureCode",
+    "SparseLinewidthObservationValidationError",
+    "SparseLinewidthResetError",
+    "SparseLinewidthSourceKind",
+    "SparseLinewidthUpdateConstructionError",
+    "SparseObservationValidationCode",
+    "SparseResetFailureCode",
+    "SparseUpdateConstructionCode",
     "SpectrumFitResult",
     "SweepEstimate",
     "SweepFitAttempt",
