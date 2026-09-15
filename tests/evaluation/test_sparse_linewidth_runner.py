@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import gc
 import inspect
+import weakref
 from contextlib import AbstractContextManager, contextmanager
 from dataclasses import dataclass, replace
 
@@ -35,7 +37,11 @@ from odmr_bench.evaluation.sparse_linewidth.runner import (
     SparseLinewidthEvaluatorRunner,
 )
 from odmr_bench.evaluation.sparse_linewidth.types import (
+    SparseRunnerAborted,
     SparseRunnerAccepted,
+    SparseRunnerBudgetStopped,
+    SparseRunnerExternallyStopped,
+    SparseRunnerGeometryStopped,
     SparseRunnerInstrumentFailure,
 )
 from odmr_bench.evaluation.two_point.types import (
@@ -134,6 +140,7 @@ def _started_runner(
     *,
     scan_period_fast_pairs: int = 8,
     dynamics: SpectralDynamics | None = None,
+    budget_ceiling: TwoPointBudgetCeiling | None = None,
 ) -> tuple[SparseLinewidthEvaluatorRunner, ODMRInstrument]:
     from odmr_bench.evaluation.two_point import calibration as calibration_module
 
@@ -179,10 +186,18 @@ def _started_runner(
         calibration,
         success,
         metadata,
-        TwoPointBudgetCeiling(100, None, None, None),
+        budget_ceiling or TwoPointBudgetCeiling(100, None, None, None),
         seed=17,
     )
     return runner, instrument
+
+
+def _accept_steps(
+    runner: SparseLinewidthEvaluatorRunner, count: int
+) -> tuple[SparseRunnerAccepted, ...]:
+    outcomes = tuple(runner.step() for _ in range(count))
+    assert all(type(outcome) is SparseRunnerAccepted for outcome in outcomes)
+    return outcomes  # type: ignore[return-value]
 
 
 def _ordered_mean(values: tuple[float, ...]) -> float:
@@ -486,9 +501,7 @@ def test_sparse_calibration_rolls_back_private_success_binding_before_failure(
         original_bind(*args, **kwargs)
         raise RuntimeError("success binding exploded")
 
-    monkeypatch.setattr(
-        calibration_module, "_bind_run_token_success", commit_then_fail
-    )
+    monkeypatch.setattr(calibration_module, "_bind_run_token_success", commit_then_fail)
 
     outcome = runner.acquire_verified_calibration(**arguments)  # type: ignore[arg-type]
 
@@ -535,9 +548,7 @@ def test_sparse_start_rejects_calibration_mismatch_before_tracker_reset(
 
     monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_spy)
     with pytest.raises(SparseStartError) as caught:
-        runner.start_tracking(
-            tracker, mismatched, success, metadata, budget, seed=0
-        )
+        runner.start_tracking(tracker, mismatched, success, metadata, budget, seed=0)
     assert caught.value.code == "calibration_mismatch"
     assert reset_calls == 0
     assert runner.state.phase == "calibration_succeeded"
@@ -739,9 +750,7 @@ def test_conditional_start_rejects_broken_live_source_identity_graph_before_rese
             "calibration_outcome",
             source_runner.state.calibration_outcome,
         )
-        object.__setattr__(
-            source_runner.state, "calibration_outcome", replace(success)
-        )
+        object.__setattr__(source_runner.state, "calibration_outcome", replace(success))
     elif attack == "source_verified_calibration":
         restoration = (
             source_runner.state,
@@ -1057,9 +1066,7 @@ def test_sparse_start_reset_process_control_restores_tracker_and_reraises(
         object.__setattr__(tracker, "_state", object())
         raise stop
 
-    monkeypatch.setattr(
-        SparseLinewidthCompositeTracker, "reset", reset_then_stop
-    )
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "reset", reset_then_stop)
 
     with pytest.raises(StopNow) as raised:
         runner.start_tracking(
@@ -1199,9 +1206,7 @@ def test_completed_scan_retains_timing_without_out_of_query_dynamics(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     spy = QueryScopedDynamicsSpy(StationaryDynamics(_snapshot()))
-    runner, _ = _started_runner(
-        monkeypatch, scan_period_fast_pairs=1, dynamics=spy
-    )
+    runner, _ = _started_runner(monkeypatch, scan_period_fast_pairs=1, dynamics=spy)
     original_query = ODMRInstrument.query
 
     def query_in_declared_signal_scope(
@@ -1236,3 +1241,722 @@ def test_completed_scan_retains_timing_without_out_of_query_dynamics(
     assert timing.release_timestamp_s == outcome.update.observation.timestamp_s
     assert spy.calls
     assert all(call.inside_instrument_query for call in spy.calls)
+
+
+def test_budget_stop_is_clean_before_query_and_preserves_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument = _started_runner(
+        monkeypatch,
+        budget_ceiling=TwoPointBudgetCeiling(2, None, None, None),
+    )
+    state_before = runner.state
+    resources_before = instrument.resources
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerBudgetStopped
+    assert outcome.state.phase == "budget_stopped"
+    assert outcome.state.tracker_estimate is not None
+    assert outcome.state.tracker_estimate.stopped_reason == "budget_exhausted"
+    assert instrument.resources == resources_before
+    assert outcome.state.normal_tracking_trace == state_before.normal_tracking_trace
+    assert outcome.resources.unaccepted_observations == 0
+    with pytest.raises(SparseRunnerStateError):
+        runner.step()
+
+
+def test_due_geometry_stop_is_clean_and_retains_exact_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.estimators import sparse_linewidth_tracker as tracker_module
+
+    runner, instrument = _started_runner(monkeypatch)
+    _accept_steps(runner, 16)
+    resources_before = instrument.resources
+
+    def fail_geometry(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise tracker_module._SparseGeometryConstructionError(
+            "empty_fit_bounds",
+            "injected due geometry",
+            proposed_frequency_min_hz=1.0,
+            proposed_frequency_max_hz=2.0,
+        )
+
+    monkeypatch.setattr(tracker_module, "_construct_sparse_fit_geometry", fail_geometry)
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerGeometryStopped
+    assert outcome.state.phase == "geometry_stopped"
+    assert outcome.state.tracker_estimate is not None
+    assert (
+        outcome.diagnostic is outcome.state.tracker_estimate.sparse_geometry_diagnostic
+    )
+    assert instrument.resources == resources_before
+    assert outcome.resources.unaccepted_observations == 0
+
+
+def test_external_stop_performs_no_query_and_preserves_partial_pair(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument = _started_runner(monkeypatch)
+    _accept_steps(runner, 1)
+    state_before = runner.state
+    resources_before = instrument.resources
+
+    outcome = runner.stop_external()
+
+    assert type(outcome) is SparseRunnerExternallyStopped
+    assert outcome.state.phase == "externally_stopped"
+    assert outcome.state.tracker_estimate is state_before.tracker_estimate
+    assert outcome.state.normal_tracking_trace == state_before.normal_tracking_trace
+    assert outcome.resources.incomplete_fast_pair_observations == 1
+    assert instrument.resources == resources_before
+    with pytest.raises(SparseRunnerStateError):
+        runner.stop_external()
+
+
+def test_external_stop_preserves_partial_sparse_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument = _started_runner(
+        monkeypatch, scan_period_fast_pairs=1
+    )
+    _accept_steps(runner, 3)
+    estimate_before = runner.state.tracker_estimate
+    resources_before = instrument.resources
+    assert estimate_before is not None
+    assert estimate_before.incomplete_sparse_scan is not None
+    assert estimate_before.pending_query is None
+
+    outcome = runner.stop_external()
+
+    assert outcome.state.tracker_estimate is estimate_before
+    assert outcome.state.tracker_estimate.incomplete_sparse_scan is not None
+    assert outcome.resources.incomplete_sparse_scan_observations == 1
+    assert instrument.resources == resources_before
+
+
+def test_run_until_event_continues_only_accepted_steps_to_budget_stop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _ = _started_runner(
+        monkeypatch,
+        budget_ceiling=TwoPointBudgetCeiling(4, None, None, None),
+    )
+
+    outcome = runner.run_until_event()
+
+    assert type(outcome) is SparseRunnerBudgetStopped
+    assert len(outcome.state.normal_tracking_trace) == 2
+
+
+def test_run_until_event_returns_first_instrument_failure_without_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _ = _started_runner(monkeypatch)
+    calls = 0
+
+    def fail_once(*args: object, **kwargs: object) -> object:
+        nonlocal calls
+        del args, kwargs
+        calls += 1
+        raise RuntimeError("instrument unavailable")
+
+    monkeypatch.setattr(ODMRInstrument, "query", fail_once)
+
+    outcome = runner.run_until_event()
+
+    assert type(outcome) is SparseRunnerInstrumentFailure
+    assert calls == 1
+    assert outcome.state.phase == "tracking"
+    assert outcome.state.tracker_estimate is not None
+    assert outcome.state.tracker_estimate.pending_query == outcome.failure.query
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "reason"),
+    [
+        (
+            lambda: __import__(
+                "odmr_bench.estimators.sparse_linewidth_types",
+                fromlist=["SparseLinewidthObservationValidationError"],
+            ).SparseLinewidthObservationValidationError(
+                "endpoint_mismatch", "injected validation"
+            ),
+            "tracker_observation_validation_error",
+        ),
+        (
+            lambda: __import__(
+                "odmr_bench.estimators.sparse_linewidth_types",
+                fromlist=["SparseLinewidthUpdateConstructionError"],
+            ).SparseLinewidthUpdateConstructionError(
+                "update_construction_failed", "injected construction"
+            ),
+            "tracker_update_construction_error",
+        ),
+        (
+            lambda: RuntimeError("injected unexpected"),
+            "tracker_update_unexpected_error",
+        ),
+    ],
+)
+def test_returned_authenticated_observation_aborts_with_one_uncharged_cpu_atom(
+    monkeypatch: pytest.MonkeyPatch,
+    error_factory,
+    reason: str,
+) -> None:
+    runner, instrument = _started_runner(monkeypatch)
+    state_before = runner.state
+    estimate_before = state_before.tracker_estimate
+    assert estimate_before is not None
+    error = error_factory()
+
+    def reject_update(self: object, observation: object) -> object:
+        del self, observation
+        raise error
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "update", reject_update)
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.abort.reason == reason
+    assert outcome.abort.exception_type == type(error).__name__
+    assert outcome.abort.exception_message == str(error)
+    assert outcome.abort.tracker_estimate_before.pending_query is not None
+    assert outcome.abort.tracker_estimate_after == outcome.abort.tracker_estimate_before
+    assert outcome.resources is not None
+    assert outcome.resources.unaccepted_observations == 1
+    assert len(outcome.resources.unaccepted_tracking_observations) == 1
+    assert outcome.resources.charged_resources.observations == (
+        outcome.resources.accepted_charged_resources.observations + 1
+    )
+    assert outcome.state.total_update_cpu_time_s == state_before.total_update_cpu_time_s
+    assert instrument.resources == outcome.state.instrument_resources_current
+
+
+@pytest.mark.parametrize(
+    "reserved_name",
+    [
+        "SparseLinewidthObservationValidationError",
+        "SparseLinewidthUpdateConstructionError",
+    ],
+)
+def test_foreign_reserved_exception_name_retains_unexpected_abort_evidence(
+    reserved_name: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _ = _started_runner(monkeypatch)
+    foreign_type = type(reserved_name, (RuntimeError,), {})
+    error = foreign_type("foreign same-name exception")
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker,
+        "update",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.abort.reason == "tracker_update_unexpected_error"
+    assert outcome.abort.exception_type == reserved_name
+    assert outcome.abort.exception_message == str(error)
+
+
+@pytest.mark.parametrize(
+    ("base_name", "reason"),
+    [
+        (
+            "SparseLinewidthObservationValidationError",
+            "tracker_observation_validation_error",
+        ),
+        (
+            "SparseLinewidthUpdateConstructionError",
+            "tracker_update_construction_error",
+        ),
+    ],
+)
+def test_public_sparse_error_subclass_retains_documented_abort_classification(
+    base_name: str,
+    reason: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.estimators import sparse_linewidth_types as error_types
+
+    runner, _ = _started_runner(monkeypatch)
+    base = getattr(error_types, base_name)
+    subclass = type(f"Derived{base_name}", (base,), {})
+    code = (
+        "endpoint_mismatch"
+        if base_name == "SparseLinewidthObservationValidationError"
+        else "update_construction_failed"
+    )
+    error = subclass(code, "derived public error")
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker,
+        "update",
+        lambda *args, **kwargs: (_ for _ in ()).throw(error),
+    )
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.abort.reason == reason
+    assert outcome.abort.exception_type == subclass.__name__
+    assert outcome.abort.exception_message == str(error)
+
+
+@pytest.mark.parametrize("failure_site", ["resources", "outcome"])
+def test_terminal_construction_failure_does_not_overwrite_tracker_exception(
+    failure_site: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth import (
+        resource_accounting as resource_module,
+    )
+    from odmr_bench.evaluation.sparse_linewidth import runner as runner_module
+
+    runner, _ = _started_runner(monkeypatch)
+    original = RuntimeError("original tracker exception")
+    construction = RuntimeError(f"injected terminal {failure_site} failure")
+    original_resource_builder = (
+        resource_module.build_sparse_linewidth_evaluator_resources
+    )
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker,
+        "update",
+        lambda *args, **kwargs: (_ for _ in ()).throw(original),
+    )
+    if failure_site == "resources":
+        monkeypatch.setattr(
+            resource_module,
+            "build_sparse_linewidth_evaluator_resources",
+            lambda *args, **kwargs: (_ for _ in ()).throw(construction),
+        )
+    else:
+        monkeypatch.setattr(
+            runner_module,
+            "SparseRunnerAborted",
+            lambda *args, **kwargs: (_ for _ in ()).throw(construction),
+        )
+
+    with pytest.raises(RuntimeError) as raised:
+        runner.step()
+
+    assert raised.value is construction
+    assert runner.state.phase == "aborted"
+    abort = runner.state.terminal_abort
+    assert abort is not None
+    assert abort.reason == "tracker_update_unexpected_error"
+    assert abort.exception_type == "RuntimeError"
+    assert abort.exception_message == str(original)
+    if failure_site == "resources":
+        monkeypatch.setattr(
+            resource_module,
+            "build_sparse_linewidth_evaluator_resources",
+            original_resource_builder,
+        )
+    first = original_resource_builder(runner)
+    second = original_resource_builder(runner)
+    assert first is not None
+    assert second == first
+
+
+@pytest.mark.parametrize("abort_kind", ["authenticated", "unavailable"])
+def test_discarded_aborted_runners_do_not_leave_global_causal_retention(
+    abort_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point.provenance import (
+        _rollback_run_token_registration,
+    )
+
+    original_query = ODMRInstrument.query
+    corrupt_instruments: set[ODMRInstrument] = set()
+    if abort_kind == "authenticated":
+        monkeypatch.setattr(
+            SparseLinewidthCompositeTracker,
+            "update",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                RuntimeError("discarded authenticated abort")
+            ),
+        )
+    else:
+
+        def query_then_corrupt_ledger(
+            self: ODMRInstrument,
+            frequency_hz: float,
+            integration_time_s: float,
+        ):
+            observation = original_query(self, frequency_hz, integration_time_s)
+            if self in corrupt_instruments:
+                object.__setattr__(
+                    self._ledger,
+                    "_observations",
+                    self._ledger._observations + 1,
+                )
+            return observation
+
+        monkeypatch.setattr(ODMRInstrument, "query", query_then_corrupt_ledger)
+
+    dynamics_refs: list[weakref.ReferenceType[QueryScopedDynamicsSpy]] = []
+    for _ in range(4):
+        dynamics = QueryScopedDynamicsSpy(StationaryDynamics(_snapshot()))
+        runner, instrument = _started_runner(monkeypatch, dynamics=dynamics)
+        corrupt_instruments.add(instrument)
+        outcome = runner.step()
+        assert type(outcome) is SparseRunnerAborted
+        corrupt_instruments.discard(instrument)
+        _rollback_run_token_registration(runner.state.run_token)
+        dynamics_refs.append(weakref.ref(dynamics))
+        del outcome, runner, instrument, dynamics
+
+    gc.collect()
+
+    assert all(reference() is None for reference in dynamics_refs)
+
+
+def test_unavailable_join_aborts_without_fabricated_resources(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument = _started_runner(monkeypatch)
+    original_query = ODMRInstrument.query
+
+    def query_then_corrupt_ledger(
+        self: ODMRInstrument, frequency_hz: float, integration_time_s: float
+    ):
+        observation = original_query(self, frequency_hz, integration_time_s)
+        object.__setattr__(
+            self._ledger, "_observations", self._ledger._observations + 1
+        )
+        return observation
+
+    monkeypatch.setattr(ODMRInstrument, "query", query_then_corrupt_ledger)
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.abort.reason == "resource_join_unavailable"
+    assert outcome.abort.exception_type is None
+    assert outcome.abort.exception_message is None
+    assert outcome.resources is None
+    assert outcome.abort.tracker_estimate_before == outcome.abort.tracker_estimate_after
+    assert outcome.state.instrument_resources_current == instrument.resources
+
+
+def test_returned_endpoint_mismatch_is_authenticated_validation_abort(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, instrument = _started_runner(monkeypatch)
+    original_query = ODMRInstrument.query
+
+    def query_with_wrong_returned_endpoint(
+        self: ODMRInstrument, frequency_hz: float, integration_time_s: float
+    ):
+        observation = original_query(self, frequency_hz, integration_time_s)
+        return replace(observation, timestamp_s=observation.timestamp_s + 1.0)
+
+    monkeypatch.setattr(
+        ODMRInstrument, "query", query_with_wrong_returned_endpoint
+    )
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.abort.reason == "tracker_observation_validation_error"
+    assert outcome.abort.unaccepted_acquisition.measurement_midpoint_s is None
+    assert outcome.resources is not None
+    assert outcome.resources.unaccepted_observations == 1
+    assert outcome.resources.charged_resources.observations == (
+        outcome.resources.accepted_charged_resources.observations + 1
+    )
+    assert outcome.state.current_virtual_time_s == instrument.virtual_time_s
+
+
+@pytest.mark.parametrize("echo_field", ["sequence_index", "frequency_hz"])
+def test_returned_echo_mismatch_is_charged_validation_abort_with_timing_midpoint(
+    echo_field: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _ = _started_runner(monkeypatch)
+    original_query = ODMRInstrument.query
+
+    def query_with_wrong_echo(
+        self: ODMRInstrument, frequency_hz: float, integration_time_s: float
+    ):
+        observation = original_query(self, frequency_hz, integration_time_s)
+        replacement = (
+            observation.sequence_index + 1
+            if echo_field == "sequence_index"
+            else observation.frequency_hz + 1.0
+        )
+        return replace(observation, **{echo_field: replacement})
+
+    monkeypatch.setattr(ODMRInstrument, "query", query_with_wrong_echo)
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.state.phase == "aborted"
+    assert outcome.abort.reason == "tracker_observation_validation_error"
+    acquisition = outcome.abort.unaccepted_acquisition
+    assert (
+        acquisition.measurement_midpoint_s
+        == acquisition.expected_measurement_midpoint_s
+    )
+    assert outcome.resources is not None
+    assert outcome.resources.unaccepted_observations == 1
+    assert outcome.resources.charged_resources.observations == (
+        outcome.resources.accepted_charged_resources.observations + 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("construction_site", "accepted_prefix"),
+    [
+        ("pair_timing", 1),
+        ("scan_timing", 6),
+        ("runner_state", 0),
+        ("accepted_outcome", 0),
+    ],
+)
+def test_ordinary_post_return_construction_fault_becomes_unexpected_abort(
+    construction_site: str,
+    accepted_prefix: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth import runner as runner_module
+
+    runner, _ = _started_runner(monkeypatch, scan_period_fast_pairs=1)
+    for _ in range(accepted_prefix):
+        assert type(runner.step()) is SparseRunnerAccepted
+    state_before = runner.state
+    tracker = runner._tracker
+    assert tracker is not None
+    update_slots: list[tuple[object, object, object]] = []
+    original_update = SparseLinewidthCompositeTracker.update
+
+    def capture_update_boundary(
+        self: SparseLinewidthCompositeTracker, observation: object
+    ):
+        update_slots.append(
+            (self._configuration, self._configuration_snapshot, self._state)
+        )
+        return original_update(self, observation)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker, "update", capture_update_boundary
+    )
+    error = RuntimeError(f"injected {construction_site}")
+
+    if construction_site == "pair_timing":
+        monkeypatch.setattr(
+            runner_module,
+            "TwoPointEvaluatorPairTiming",
+            lambda *args, **kwargs: (_ for _ in ()).throw(error),
+        )
+    elif construction_site == "scan_timing":
+        monkeypatch.setattr(
+            runner_module,
+            "SparseLinewidthEvaluatorScanTiming",
+            lambda *args, **kwargs: (_ for _ in ()).throw(error),
+        )
+    elif construction_site == "runner_state":
+        original_replace = runner_module.replace
+        failed = False
+
+        def fail_accepted_state(instance: object, **changes: object):
+            nonlocal failed
+            if not failed and "normal_tracking_trace" in changes:
+                failed = True
+                raise error
+            return original_replace(instance, **changes)
+
+        monkeypatch.setattr(runner_module, "replace", fail_accepted_state)
+    else:
+        monkeypatch.setattr(
+            runner_module,
+            "SparseRunnerAccepted",
+            lambda *args, **kwargs: (_ for _ in ()).throw(error),
+        )
+
+    outcome = runner.step()
+
+    assert type(outcome) is SparseRunnerAborted
+    assert outcome.state.phase == "aborted"
+    assert outcome.abort.reason == "tracker_update_unexpected_error"
+    assert outcome.abort.exception_type == "RuntimeError"
+    assert outcome.abort.exception_message == str(error)
+    assert (
+        outcome.abort.tracker_estimate_before
+        == outcome.abort.tracker_estimate_after
+    )
+    assert outcome.state.fast_update_cpu_time_s == state_before.fast_update_cpu_time_s
+    assert (
+        outcome.state.sparse_update_cpu_time_s
+        == state_before.sparse_update_cpu_time_s
+    )
+    assert (
+        outcome.state.total_update_cpu_time_s
+        == state_before.total_update_cpu_time_s
+    )
+    assert update_slots
+    assert (
+        tracker._configuration,
+        tracker._configuration_snapshot,
+        tracker._state,
+    ) == update_slots[-1]
+    assert outcome.resources is not None
+    assert outcome.resources.unaccepted_observations == 1
+    assert outcome.resources.charged_resources.observations == (
+        outcome.resources.accepted_charged_resources.observations + 1
+    )
+
+
+@pytest.mark.parametrize(
+    ("accepted_prefix", "scan_period_fast_pairs"),
+    [(0, 8), (1, 8), (3, 1)],
+)
+def test_retryable_failure_resources_and_external_stop_preserve_causal_evidence(
+    accepted_prefix: int,
+    scan_period_fast_pairs: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth.resource_accounting import (
+        build_sparse_linewidth_evaluator_resources,
+    )
+
+    runner, _ = _started_runner(
+        monkeypatch, scan_period_fast_pairs=scan_period_fast_pairs
+    )
+    for _ in range(accepted_prefix):
+        assert type(runner.step()) is SparseRunnerAccepted
+
+    def fail_query(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise RuntimeError("instrument unavailable")
+
+    monkeypatch.setattr(ODMRInstrument, "query", fail_query)
+    failed = runner.step()
+    assert type(failed) is SparseRunnerInstrumentFailure
+    failure = failed.failure
+    pending = failed.state.tracker_estimate.pending_query
+    resources_before_stop = build_sparse_linewidth_evaluator_resources(runner)
+    assert resources_before_stop is not None
+    assert resources_before_stop.unaccepted_observations == 0
+    assert resources_before_stop.charged_resources == (
+        resources_before_stop.accepted_charged_resources
+    )
+
+    stopped = runner.stop_external()
+
+    assert stopped.state.phase == "externally_stopped"
+    assert stopped.state.last_instrument_failure is failure
+    assert stopped.state.tracker_estimate.pending_query == pending
+    assert stopped.resources == resources_before_stop
+    assert stopped.state.fast_update_cpu_time_s == failed.state.fast_update_cpu_time_s
+    assert (
+        stopped.state.sparse_update_cpu_time_s
+        == failed.state.sparse_update_cpu_time_s
+    )
+    assert (
+        stopped.state.total_update_cpu_time_s
+        == failed.state.total_update_cpu_time_s
+    )
+
+
+def test_returned_observation_process_control_restores_tracker_and_reraises_identically(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class StopNow(BaseException):
+        pass
+
+    runner, instrument = _started_runner(monkeypatch)
+    tracker = runner._tracker
+    assert tracker is not None
+    state_before = runner.state
+    tracker_slots_before = (
+        tracker._configuration,
+        tracker._configuration_snapshot,
+        tracker._state,
+    )
+    stop = StopNow()
+
+    def mutate_then_stop(self: SparseLinewidthCompositeTracker, observation: object):
+        del observation
+        object.__setattr__(self, "_state", object())
+        raise stop
+
+    monkeypatch.setattr(SparseLinewidthCompositeTracker, "update", mutate_then_stop)
+
+    with pytest.raises(StopNow) as raised:
+        runner.step()
+
+    assert raised.value is stop
+    assert runner.state is state_before
+    assert (
+        tracker._configuration,
+        tracker._configuration_snapshot,
+        tracker._state,
+    ) == tracker_slots_before
+    assert instrument.resources.observations == (
+        state_before.instrument_resources_current.observations + 1
+    )
+
+
+@pytest.mark.parametrize(
+    "phase",
+    [
+        "ready",
+        "calibration_succeeded",
+        "calibration_failed",
+        "tracking",
+        "budget_stopped",
+        "geometry_stopped",
+        "externally_stopped",
+        "aborted",
+    ],
+)
+def test_all_eight_phases_reject_every_illegal_operation_before_side_effects(
+    phase: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if phase == "ready":
+        runner = SparseLinewidthEvaluatorRunner.bind(_instrument())
+    else:
+        runner, _ = _started_runner(monkeypatch)
+        object.__setattr__(runner.state, "phase", phase)
+    state_before = runner.state
+    instrument = runner._instrument
+    resources_before = instrument.resources
+    time_before = instrument.virtual_time_s
+
+    if phase != "ready":
+        with pytest.raises(SparsePreflightError) as raised:
+            runner.acquire_verified_calibration(  # type: ignore[arg-type]
+                **_calibration_arguments()
+            )
+        assert raised.value.code == "invalid_runner_phase"
+    if phase not in {"ready", "calibration_succeeded"}:
+        with pytest.raises(SparseStartError) as raised:
+            runner.start_tracking(  # type: ignore[arg-type]
+                object(), object(), object(), object(), object(), seed=0
+            )
+        assert raised.value.code == "invalid_runner_phase"
+    if phase != "tracking":
+        for operation in (
+            runner.step,
+            runner.run_until_event,
+            runner.stop_external,
+        ):
+            with pytest.raises(SparseRunnerStateError):
+                operation()
+
+    assert runner.state is state_before
+    assert instrument.resources == resources_before
+    assert instrument.virtual_time_s == time_before

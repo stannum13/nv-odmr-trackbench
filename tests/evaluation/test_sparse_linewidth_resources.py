@@ -25,13 +25,19 @@ from odmr_bench.estimators import (
     TwoPointTrackerConfiguration,
     calibrate_two_point,
 )
+from odmr_bench.estimators.sparse_linewidth_types import (
+    SparseLinewidthObservationValidationError,
+)
 from odmr_bench.evaluation.sparse_linewidth.resource_accounting import (
     build_sparse_linewidth_evaluator_resources,
 )
 from odmr_bench.evaluation.sparse_linewidth.runner import (
     SparseLinewidthEvaluatorRunner,
 )
-from odmr_bench.evaluation.sparse_linewidth.types import SparseRunnerStateError
+from odmr_bench.evaluation.sparse_linewidth.types import (
+    SparseRunnerAborted,
+    SparseRunnerStateError,
+)
 from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
 from odmr_bench.evaluation.two_point.types import (
     VerifiedTwoPointCalibrationFailure,
@@ -248,8 +254,7 @@ def _replay(
         result = ResourceSnapshot(
             result.observations + 1,
             result.integration_time_s + observation.integration_time_s,
-            result.nominal_exposure_photons
-            + observation.nominal_exposure_photons,
+            result.nominal_exposure_photons + observation.nominal_exposure_photons,
             result.expected_photons + observation.expected_photons,
             result.realized_photons
             + (
@@ -343,10 +348,14 @@ def test_started_resource_builder_replays_source_and_respects_treatment(
     )
     assert resources is not None
     assert resources.calibration_observations == success.full_observations
-    assert tuple(
-        observation.estimator_view()
-        for observation in resources.calibration_observations
-    ) == success.safe_observations == success.source.source_observations
+    assert (
+        tuple(
+            observation.estimator_view()
+            for observation in resources.calibration_observations
+        )
+        == success.safe_observations
+        == success.source.source_observations
+    )
     assert resources.calibration_resources == expected_calibration
     assert resources.accepted_fast_observations == ()
     assert resources.accepted_sparse_observations == ()
@@ -367,8 +376,7 @@ def test_started_resource_builder_replays_source_and_respects_treatment(
         )
     else:
         assert (
-            resources.calibration_budget_treatment
-            == "conditional_free_precalibration"
+            resources.calibration_budget_treatment == "conditional_free_precalibration"
         )
         assert resources.accepted_charged_resources == zero
         assert resources.charged_resources == zero
@@ -780,3 +788,156 @@ def test_scientifically_failed_scan_is_fully_accepted_and_charged(
     assert len(resources.accepted_tracking_observations) == 7
     assert resources.incomplete_fast_pair_observations == 0
     assert resources.incomplete_sparse_scan_observations == 0
+
+
+def test_authenticated_abort_resource_view_separates_accepted_and_final_charge(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_included(monkeypatch)
+
+    def reject_returned_observation(*args: object, **kwargs: object) -> object:
+        del args, kwargs
+        raise SparseLinewidthObservationValidationError(
+            "endpoint_mismatch", "injected returned-observation rejection"
+        )
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker,
+        "update",
+        reject_returned_observation,
+    )
+
+    outcome = runner.step()
+    rebuilt = build_sparse_linewidth_evaluator_resources(runner)
+
+    assert type(outcome) is SparseRunnerAborted
+    assert rebuilt == outcome.resources
+    assert rebuilt is not None
+    assert rebuilt.accepted_tracking_observations == ()
+    assert len(rebuilt.unaccepted_tracking_observations) == 1
+    assert rebuilt.unaccepted_observations == 1
+    assert rebuilt.accepted_charged_resources.observations + 1 == (
+        rebuilt.charged_resources.observations
+    )
+    assert rebuilt.fast_tracking_resources.observations == 0
+    assert rebuilt.sparse_tracking_resources.observations == 0
+    assert rebuilt.tracking_resources.observations == 0
+
+
+@pytest.mark.parametrize("join_kind", ["authenticated", "unavailable"])
+def test_abort_resource_builder_authenticates_unaccepted_midpoint_recurrence(
+    join_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_included(monkeypatch)
+    if join_kind == "authenticated":
+        monkeypatch.setattr(
+            SparseLinewidthCompositeTracker,
+            "update",
+            lambda *args, **kwargs: (_ for _ in ()).throw(
+                SparseLinewidthObservationValidationError(
+                    "endpoint_mismatch", "injected rejection"
+                )
+            ),
+        )
+    else:
+        original_query = ODMRInstrument.query
+
+        def query_then_corrupt(
+            self: ODMRInstrument, frequency_hz: float, integration_time_s: float
+        ):
+            observation = original_query(self, frequency_hz, integration_time_s)
+            object.__setattr__(
+                self._ledger, "_observations", self._ledger._observations + 1
+            )
+            return observation
+
+        monkeypatch.setattr(ODMRInstrument, "query", query_then_corrupt)
+
+    outcome = runner.step()
+    assert type(outcome) is SparseRunnerAborted
+    acquisition = outcome.abort.unaccepted_acquisition
+    original_midpoint = acquisition.expected_measurement_midpoint_s
+    object.__setattr__(
+        acquisition,
+        "expected_measurement_midpoint_s",
+        original_midpoint + 1.0,
+    )
+    try:
+        with pytest.raises(ValueError, match="resource context"):
+            build_sparse_linewidth_evaluator_resources(runner)
+    finally:
+        object.__setattr__(
+            acquisition,
+            "expected_measurement_midpoint_s",
+            original_midpoint,
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "reason",
+        "exception_type",
+        "exception_message",
+        "unaccepted_count",
+        "estimate_before",
+        "estimate_after",
+        "phase",
+        "pending_query",
+    ],
+)
+def test_authenticated_abort_resource_builder_reauthenticates_terminal_record(
+    mutation: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runner, _, _ = _start_included(monkeypatch)
+
+    monkeypatch.setattr(
+        SparseLinewidthCompositeTracker,
+        "update",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            SparseLinewidthObservationValidationError(
+                "endpoint_mismatch", "injected rejection"
+            )
+        ),
+    )
+    outcome = runner.step()
+    assert type(outcome) is SparseRunnerAborted
+    abort = outcome.abort
+    acquisition = abort.unaccepted_acquisition
+
+    target: object
+    attribute: str
+    replacement: object
+    if mutation == "reason":
+        target, attribute, replacement = (
+            abort,
+            "reason",
+            "tracker_update_construction_error",
+        )
+    elif mutation == "exception_type":
+        target, attribute, replacement = abort, "exception_type", None
+    elif mutation == "exception_message":
+        target, attribute, replacement = abort, "exception_message", None
+    elif mutation == "unaccepted_count":
+        target, attribute, replacement = abort, "unaccepted_observation_count", 0
+    elif mutation == "estimate_before":
+        target, attribute, replacement = abort, "tracker_estimate_before", object()
+    elif mutation == "estimate_after":
+        target, attribute, replacement = abort, "tracker_estimate_after", object()
+    elif mutation == "phase":
+        target, attribute, replacement = outcome.state, "phase", "tracking"
+    else:
+        target, attribute = acquisition, "query"
+        replacement = replace(
+            acquisition.query,
+            frequency_hz=acquisition.query.frequency_hz + 1.0,
+        )
+    original = getattr(target, attribute)
+    object.__setattr__(target, attribute, replacement)
+    try:
+        with pytest.raises(ValueError, match="resource context"):
+            build_sparse_linewidth_evaluator_resources(runner)
+    finally:
+        object.__setattr__(target, attribute, original)

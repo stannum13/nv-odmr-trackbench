@@ -23,6 +23,7 @@ from odmr_bench.evaluation.two_point.resource_accounting import (
     _advance_full_resources,
     _project_full_resources,
     _replay_full_resources,
+    _resource_mismatch_fields,
     _zero_full_resources,
 )
 from odmr_bench.evaluation.two_point.types import (
@@ -30,10 +31,13 @@ from odmr_bench.evaluation.two_point.types import (
 )
 
 from .types import (
+    SparseAbortedRun,
     SparseEvaluatorRunnerState,
     SparseLinewidthEvaluatorResources,
     SparseLinewidthEvaluatorScanTiming,
+    SparseResourceJoinUnavailableAcquisition,
     SparseRunnerStateError,
+    SparseTrackingAcquisition,
 )
 
 if TYPE_CHECKING:
@@ -70,10 +74,14 @@ def _authenticate_started_context(
         raise SparseRunnerStateError(
             "resource accounting requires a runner that has started tracking"
         )
-    if state.phase != "tracking":
-        raise SparseRunnerStateError(
-            "resource accounting phase is not implemented by this task"
-        )
+    if state.phase not in {
+        "tracking",
+        "budget_stopped",
+        "geometry_stopped",
+        "externally_stopped",
+        "aborted",
+    }:
+        raise SparseRunnerStateError("resource accounting requires a started runner")
 
     try:
         instrument = runner._instrument
@@ -215,9 +223,7 @@ def _replay_and_validate_calibration(
     expected_midpoints: list[float] = []
     previous_endpoint_s = source.source_start_timestamp_s
     for observation in full_observations:
-        integration_start_s = (
-            previous_endpoint_s + source.source_frequency_overhead_s
-        )
+        integration_start_s = previous_endpoint_s + source.source_frequency_overhead_s
         expected_midpoints.append(
             integration_start_s + observation.integration_time_s / 2.0
         )
@@ -251,6 +257,8 @@ def _validate_start_boundary(
     calibration: TwoPointCalibration,
     estimate: SparseLinewidthCompositeEstimate,
     calibration_resources: ResourceSnapshot,
+    *,
+    unaccepted: SparseTrackingAcquisition | None = None,
 ) -> ResourceSnapshot:
     zero = _zero_full_resources()
     same_runner = state.run_token is verified.run_token
@@ -258,17 +266,21 @@ def _validate_start_boundary(
     expected_sequence = (
         verified.source.availability_sequence_index if same_runner else None
     )
-    expected_time_s = (
-        verified.source.availability_timestamp_s if same_runner else 0.0
-    )
+    expected_time_s = verified.source.availability_timestamp_s if same_runner else 0.0
     expected_charged = (
         calibration_resources
         if calibration.budget_treatment == "included_same_run"
         else zero
     )
+    expected_current = expected_boundary
+    expected_current_sequence = expected_sequence
+    expected_current_time_s = expected_time_s
+    if unaccepted is not None:
+        expected_current = unaccepted.instrument_resources_after
+        expected_current_sequence = unaccepted.full_observation.sequence_index
+        expected_current_time_s = state.current_virtual_time_s
     if (
-        bool(same_runner)
-        != (calibration.budget_treatment == "included_same_run")
+        bool(same_runner) != (calibration.budget_treatment == "included_same_run")
         or (
             same_runner
             and (
@@ -279,14 +291,13 @@ def _validate_start_boundary(
         )
         or (not same_runner and state.calibration_outcome is not None)
         or state.tracking_resources_before != expected_boundary
-        or state.instrument_resources_current != expected_boundary
-        or state.instrument_current_sequence_index != expected_sequence
-        or state.current_virtual_time_s != expected_time_s
+        or state.instrument_resources_current != expected_current
+        or state.instrument_current_sequence_index != expected_current_sequence
+        or state.current_virtual_time_s != expected_current_time_s
         or state.normal_tracking_trace != ()
         or state.pair_timings != ()
         or state.scan_timings != ()
-        or state.last_instrument_failure is not None
-        or state.terminal_abort is not None
+        or (state.terminal_abort is not None) != (unaccepted is not None)
         or estimate.accepted_observations != 0
         or estimate.fast_pair_history != ()
         or estimate.sparse_scan_history != ()
@@ -309,14 +320,189 @@ def _validate_start_boundary(
         or state.total_update_cpu_time_s != estimate.total_update_cpu_time_s
     ):
         _invalid_context("tracking start boundary")
+    _validate_retryable_failure(state, estimate, expected_current)
     return expected_charged
+
+
+def _validate_retryable_failure(
+    state: SparseEvaluatorRunnerState,
+    estimate: SparseLinewidthCompositeEstimate,
+    physical: ResourceSnapshot,
+) -> None:
+    failure = state.last_instrument_failure
+    if failure is None:
+        return
+    if (
+        state.phase not in {"tracking", "externally_stopped"}
+        or state.terminal_abort is not None
+        or failure.query is not estimate.pending_query
+        or failure.instrument_resources_before != physical
+        or failure.instrument_resources_after != physical
+        or state.instrument_resources_current != physical
+    ):
+        _invalid_context("retryable instrument failure")
+
+
+def _validate_unavailable_abort_context(
+    runner: SparseLinewidthEvaluatorRunner,
+    state: SparseEvaluatorRunnerState,
+    estimate: SparseLinewidthCompositeEstimate,
+) -> None:
+    abort = state.terminal_abort
+    if (
+        state.phase != "aborted"
+        or abort is None
+        or abort.reason != "resource_join_unavailable"
+        or abort.exception_type is not None
+        or abort.exception_message is not None
+        or type(abort.unaccepted_acquisition)
+        is not SparseResourceJoinUnavailableAcquisition
+        or abort.tracker_estimate_before != estimate
+        or abort.tracker_estimate_after != estimate
+    ):
+        _invalid_context("unavailable terminal abort")
+    acquisition = abort.unaccepted_acquisition
+    physical = (
+        state.normal_tracking_trace[-1].instrument_resources_after
+        if state.normal_tracking_trace
+        else state.tracking_resources_before
+    )
+    if physical is None:
+        _invalid_context("unavailable tracking boundary")
+    overhead_s = state.instrument_configuration.frequency_overhead_s
+    prospective = _advance_full_resources(
+        physical, acquisition.full_observation, overhead_s
+    )
+    verified = state.verified_calibration
+    if type(verified) is not VerifiedTwoPointCalibrationSuccess:
+        _invalid_context("unavailable verified calibration")
+    prior_endpoint_s = (
+        state.normal_tracking_trace[-1].full_observation.timestamp_s
+        if state.normal_tracking_trace
+        else (
+            verified.source.availability_timestamp_s
+            if state.run_token is verified.run_token
+            else 0.0
+        )
+    )
+    _validate_unaccepted_midpoint(
+        acquisition,
+        expected_midpoint_s=(
+            prior_endpoint_s + overhead_s + acquisition.query.integration_time_s / 2.0
+        ),
+        instrument_endpoint_s=state.current_virtual_time_s,
+    )
+    mismatch_fields = _resource_mismatch_fields(
+        prospective, acquisition.instrument_resources_after
+    )
+    if (
+        estimate.pending_query != acquisition.query
+        or acquisition.instrument_resources_before != physical
+        or acquisition.full_observation.estimator_view() != acquisition.safe_observation
+        or not mismatch_fields
+        or mismatch_fields != acquisition.resource_mismatch_fields
+        or state.instrument_resources_current != acquisition.instrument_resources_after
+        or runner._instrument.resources != acquisition.instrument_resources_after
+        or state.current_virtual_time_s != runner._instrument.virtual_time_s
+        or state.instrument_current_sequence_index
+        != acquisition.full_observation.sequence_index
+        or any(
+            acquisition.full_observation is item.full_observation
+            for item in state.normal_tracking_trace
+        )
+    ):
+        _invalid_context("unavailable resource join")
+
+
+def _validate_unaccepted_midpoint(
+    acquisition: SparseTrackingAcquisition | SparseResourceJoinUnavailableAcquisition,
+    *,
+    expected_midpoint_s: float,
+    instrument_endpoint_s: float,
+) -> None:
+    full = acquisition.full_observation
+    query = acquisition.query
+    timing_matches = (
+        full.integration_time_s == query.integration_time_s
+        and full.timestamp_s == query.expected_end_timestamp_s
+        and instrument_endpoint_s == query.expected_end_timestamp_s
+    )
+    expected_measurement = expected_midpoint_s if timing_matches else None
+    if (
+        acquisition.expected_measurement_midpoint_s != expected_midpoint_s
+        or acquisition.measurement_midpoint_s != expected_measurement
+    ):
+        _invalid_context("unaccepted acquisition midpoint")
+
+
+def _validate_authenticated_abort_context(
+    state: SparseEvaluatorRunnerState,
+    estimate: SparseLinewidthCompositeEstimate,
+    acquisition: SparseTrackingAcquisition,
+) -> None:
+    abort = state.terminal_abort
+    if (
+        state.phase != "aborted"
+        or abort is None
+        or abort.reason
+        not in {
+            "tracker_observation_validation_error",
+            "tracker_update_construction_error",
+            "tracker_update_unexpected_error",
+        }
+        or type(abort.exception_type) is not str
+        or not abort.exception_type
+        or type(abort.exception_message) is not str
+        or abort.unaccepted_acquisition is not acquisition
+        or abort.unaccepted_observation_count != 1
+        or abort.tracker_estimate_before is not estimate
+        or abort.tracker_estimate_after is not estimate
+        or estimate.pending_query is not acquisition.query
+        or state.last_instrument_failure is not None
+    ):
+        _invalid_context("authenticated terminal abort")
+
+
+def _validate_abort_causal_binding(
+    runner: SparseLinewidthEvaluatorRunner,
+    abort: object,
+) -> None:
+    from .runner import _lookup_abort_causal_binding
+
+    if type(abort) is not SparseAbortedRun:
+        _invalid_context("terminal abort type")
+    binding = _lookup_abort_causal_binding(runner, abort)
+    if (
+        binding is None
+        or binding.reason != abort.reason
+        or binding.exception_type != abort.exception_type
+        or binding.exception_message != abort.exception_message
+        or binding.acquisition is not abort.unaccepted_acquisition
+        or binding.tracker_estimate_before is not abort.tracker_estimate_before
+        or binding.tracker_estimate_after is not abort.tracker_estimate_after
+    ):
+        _invalid_context("terminal abort causal binding")
 
 
 def build_sparse_linewidth_evaluator_resources(
     runner: SparseLinewidthEvaluatorRunner,
 ) -> SparseLinewidthEvaluatorResources | None:
-    """Build the exact full-resource view through accepted tracking atoms."""
+    """Build the exact full-resource view through accepted and terminal atoms."""
     state, verified, calibration, estimate = _authenticate_started_context(runner)
+    abort = state.terminal_abort
+    unaccepted: SparseTrackingAcquisition | None = None
+    if abort is not None:
+        _validate_abort_causal_binding(runner, abort)
+        if (
+            type(abort.unaccepted_acquisition)
+            is SparseResourceJoinUnavailableAcquisition
+        ):
+            _validate_unavailable_abort_context(runner, state, estimate)
+            return None
+        if type(abort.unaccepted_acquisition) is not SparseTrackingAcquisition:
+            _invalid_context("terminal unaccepted acquisition type")
+        unaccepted = abort.unaccepted_acquisition
+        _validate_authenticated_abort_context(state, estimate, unaccepted)
     calibration_resources = _replay_and_validate_calibration(state, verified)
     if not state.normal_tracking_trace:
         charged_resources = _validate_start_boundary(
@@ -325,6 +511,7 @@ def build_sparse_linewidth_evaluator_resources(
             calibration,
             estimate,
             calibration_resources,
+            unaccepted=unaccepted,
         )
         accepted_fast: tuple[InstrumentObservation, ...] = ()
         accepted_sparse: tuple[InstrumentObservation, ...] = ()
@@ -334,6 +521,9 @@ def build_sparse_linewidth_evaluator_resources(
         tracking_resources = _zero_full_resources()
         incomplete_fast = 0
         incomplete_sparse = 0
+        physical = state.tracking_resources_before
+        if physical is None:
+            _invalid_context("tracking resource boundary")
     else:
         (
             accepted_fast,
@@ -352,23 +542,62 @@ def build_sparse_linewidth_evaluator_resources(
             calibration,
             estimate,
             calibration_resources,
+            unaccepted=unaccepted,
         )
+        physical = state.normal_tracking_trace[-1].instrument_resources_after
+    accepted_charged = charged_resources
+    unaccepted_observations: tuple[InstrumentObservation, ...] = ()
+    if unaccepted is not None:
+        overhead_s = state.instrument_configuration.frequency_overhead_s
+        full = unaccepted.full_observation
+        expected_after = _advance_full_resources(physical, full, overhead_s)
+        prior_endpoint_s = (
+            accepted_tracking[-1].timestamp_s
+            if accepted_tracking
+            else (
+                verified.source.availability_timestamp_s
+                if state.run_token is verified.run_token
+                else 0.0
+            )
+        )
+        _validate_unaccepted_midpoint(
+            unaccepted,
+            expected_midpoint_s=(
+                prior_endpoint_s
+                + overhead_s
+                + unaccepted.query.integration_time_s / 2.0
+            ),
+            instrument_endpoint_s=state.current_virtual_time_s,
+        )
+        if (
+            unaccepted.instrument_resources_before != physical
+            or unaccepted.instrument_resources_after != expected_after
+            or unaccepted.instrument_resource_delta
+            != _advance_full_resources(_zero_full_resources(), full, overhead_s)
+            or full.estimator_view() != unaccepted.safe_observation
+            or state.instrument_resources_current != expected_after
+            or runner._instrument.resources != expected_after
+            or state.current_virtual_time_s != runner._instrument.virtual_time_s
+        ):
+            _invalid_context("authenticated unaccepted acquisition join")
+        charged_resources = _advance_full_resources(charged_resources, full, overhead_s)
+        unaccepted_observations = (full,)
     return SparseLinewidthEvaluatorResources(
         calibration_observations=verified.full_observations,
         accepted_fast_observations=accepted_fast,
         accepted_sparse_observations=accepted_sparse,
         accepted_tracking_observations=accepted_tracking,
-        unaccepted_tracking_observations=(),
+        unaccepted_tracking_observations=unaccepted_observations,
         calibration_resources=calibration_resources,
         fast_tracking_resources=fast_resources,
         sparse_tracking_resources=sparse_resources,
         tracking_resources=tracking_resources,
-        accepted_charged_resources=charged_resources,
+        accepted_charged_resources=accepted_charged,
         charged_resources=charged_resources,
         calibration_budget_treatment=calibration.budget_treatment,
         incomplete_fast_pair_observations=incomplete_fast,  # type: ignore[arg-type]
         incomplete_sparse_scan_observations=incomplete_sparse,  # type: ignore[arg-type]
-        unaccepted_observations=0,
+        unaccepted_observations=len(unaccepted_observations),  # type: ignore[arg-type]
     )
 
 
@@ -397,9 +626,7 @@ def _safe_arrivals(
     for scan in estimate.sparse_scan_history:
         arrivals.extend(
             (query, observation, "sparse_scan")
-            for query, observation in zip(
-                scan.queries, scan.observations, strict=True
-            )
+            for query, observation in zip(scan.queries, scan.observations, strict=True)
         )
     if estimate.incomplete_sparse_scan is not None:
         partial_scan = estimate.incomplete_sparse_scan
@@ -420,6 +647,8 @@ def _validate_accepted_context(
     calibration: TwoPointCalibration,
     estimate: SparseLinewidthCompositeEstimate,
     calibration_resources: ResourceSnapshot,
+    *,
+    unaccepted: SparseTrackingAcquisition | None = None,
 ) -> tuple[
     tuple[InstrumentObservation, ...],
     tuple[InstrumentObservation, ...],
@@ -492,22 +721,32 @@ def _validate_accepted_context(
         charged_resources = _advance_full_resources(
             charged_resources, observation, overhead_s
         )
+    live_physical = physical
+    live_sequence_index = accepted[-1].sequence_index
+    live_endpoint_s = previous_endpoint_s
+    if unaccepted is not None:
+        live_physical = _advance_full_resources(
+            physical, unaccepted.full_observation, overhead_s
+        )
+        live_sequence_index = unaccepted.full_observation.sequence_index
+        live_endpoint_s = state.current_virtual_time_s
     if (
         _project_full_resources(fast_resources) != estimate.fast_tracking_resources
         or _project_full_resources(sparse_resources)
         != estimate.sparse_tracking_resources
         or _project_full_resources(tracking_resources) != estimate.tracking_resources
         or _project_full_resources(charged_resources) != estimate.charged_resources
-        or state.instrument_resources_current != physical
-        or runner._instrument.resources != physical
-        or state.current_virtual_time_s != previous_endpoint_s
-        or runner._instrument.virtual_time_s != previous_endpoint_s
-        or state.instrument_current_sequence_index != accepted[-1].sequence_index
+        or state.instrument_resources_current != live_physical
+        or runner._instrument.resources != live_physical
+        or state.current_virtual_time_s != live_endpoint_s
+        or runner._instrument.virtual_time_s != live_endpoint_s
+        or state.instrument_current_sequence_index != live_sequence_index
         or state.fast_update_cpu_time_s != estimate.fast_update_cpu_time_s
         or state.sparse_update_cpu_time_s != estimate.sparse_update_cpu_time_s
         or state.total_update_cpu_time_s != estimate.total_update_cpu_time_s
     ):
         _invalid_context("accepted ledgers, boundary, or CPU totals")
+    _validate_retryable_failure(state, estimate, live_physical)
     _validate_timing_context(state, estimate)
     incomplete_fast = int(estimate.incomplete_fast_pair is not None)
     incomplete_sparse = (
@@ -539,10 +778,9 @@ def _validate_timing_context(
     state: SparseEvaluatorRunnerState,
     estimate: SparseLinewidthCompositeEstimate,
 ) -> None:
-    if (
-        len(state.pair_timings) != len(estimate.fast_pair_history)
-        or len(state.scan_timings) != len(estimate.sparse_scan_history)
-    ):
+    if len(state.pair_timings) != len(estimate.fast_pair_history) or len(
+        state.scan_timings
+    ) != len(estimate.sparse_scan_history):
         _invalid_context("completed timing cardinality")
     acquisition_by_sequence = {
         acquisition.full_observation.sequence_index: acquisition
@@ -574,8 +812,7 @@ def _validate_timing_context(
             or timing.second_measurement_midpoint_s != second_midpoint
             or timing.truth_reference_timestamp_s
             != first_midpoint + (second_midpoint - first_midpoint) / 2.0
-            or timing.public_reference_timestamp_s
-            != pair.pair_reference_timestamp_s
+            or timing.public_reference_timestamp_s != pair.pair_reference_timestamp_s
             or timing.release_sequence_index != pair.release_sequence_index
             or timing.release_timestamp_s != pair.release_timestamp_s
         ):
@@ -603,8 +840,7 @@ def _validate_timing_context(
             or timing.resonance_id != scan.resonance_id
             or timing.measurement_midpoints_s != exact_midpoints
             or timing.truth_reference_timestamp_s != _ordered_mean(exact_midpoints)
-            or timing.public_reference_timestamp_s
-            != scan.public_reference_timestamp_s
+            or timing.public_reference_timestamp_s != scan.public_reference_timestamp_s
             or timing.release_sequence_index != scan.release_sequence_index
             or timing.release_timestamp_s != scan.release_timestamp_s
         ):

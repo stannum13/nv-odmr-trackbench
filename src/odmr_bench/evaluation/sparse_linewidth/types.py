@@ -892,8 +892,14 @@ class SparseEvaluatorRunnerState:
             raise ValueError("pre-tracking phases require zero CPU totals")
         if (self.terminal_abort is not None) != (phase == "aborted"):
             raise ValueError("terminal_abort must be present exactly when aborted")
-        if self.last_instrument_failure is not None and phase != "tracking":
-            raise ValueError("instrument failure may appear only while tracking")
+        if self.last_instrument_failure is not None and phase not in {
+            "tracking",
+            "externally_stopped",
+        }:
+            raise ValueError(
+                "instrument failure may appear only while tracking or after an "
+                "external stop"
+            )
         if self.last_instrument_failure is not None and (
             self.tracker_estimate is None
             or self.tracker_estimate.pending_query

@@ -16,7 +16,9 @@ from odmr_bench.estimators.sparse_linewidth_tracker import (
     SparseLinewidthCompositeTracker,
 )
 from odmr_bench.estimators.sparse_linewidth_types import (
+    SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
+    SparseLinewidthUpdateConstructionError,
 )
 from odmr_bench.estimators.two_point_types import (
     TwoPointBudgetCeiling,
@@ -53,12 +55,17 @@ from odmr_bench.evaluation.two_point.types import (
 )
 
 from .types import (
+    SparseAbortedRun,
     SparseEvaluatorRunnerState,
     SparseInstrumentQueryFailure,
     SparseLinewidthEvaluatorScanTiming,
     SparsePreflightError,
+    SparseResourceJoinUnavailableAcquisition,
+    SparseRunnerAborted,
     SparseRunnerAccepted,
+    SparseRunnerBudgetStopped,
     SparseRunnerExternallyStopped,
+    SparseRunnerGeometryStopped,
     SparseRunnerInstrumentFailure,
     SparseRunnerRunOutcome,
     SparseRunnerStateError,
@@ -74,10 +81,57 @@ class _StartTrackingPlan:
     tracking_resources_before: ResourceSnapshot
 
 
+@dataclass(frozen=True, slots=True)
+class _AbortCausalBinding:
+    """Private runtime-type classification retained for one terminal abort."""
+
+    runner: object
+    abort: SparseAbortedRun
+    reason: str
+    exception_type: str | None
+    exception_message: str | None
+    acquisition: object
+    tracker_estimate_before: object
+    tracker_estimate_after: object
+
+
+def _build_abort_causal_binding(
+    runner: SparseLinewidthEvaluatorRunner,
+    abort: SparseAbortedRun,
+) -> _AbortCausalBinding:
+    return _AbortCausalBinding(
+        runner=runner,
+        abort=abort,
+        reason=abort.reason,
+        exception_type=abort.exception_type,
+        exception_message=abort.exception_message,
+        acquisition=abort.unaccepted_acquisition,
+        tracker_estimate_before=abort.tracker_estimate_before,
+        tracker_estimate_after=abort.tracker_estimate_after,
+    )
+
+
+def _lookup_abort_causal_binding(
+    runner: SparseLinewidthEvaluatorRunner,
+    abort: SparseAbortedRun,
+) -> _AbortCausalBinding | None:
+    try:
+        binding = runner._abort_causal_binding
+    except AttributeError:
+        return None
+    if (
+        type(binding) is not _AbortCausalBinding
+        or binding.runner is not runner
+        or binding.abort is not abort
+    ):
+        return None
+    return binding
+
+
 class SparseLinewidthEvaluatorRunner:
     """Own one instrument association for sparse-linewidth evaluation."""
 
-    __slots__ = ("_instrument", "_state", "_tracker")
+    __slots__ = ("_abort_causal_binding", "_instrument", "_state", "_tracker")
 
     @classmethod
     def bind(cls, instrument: ODMRInstrument) -> SparseLinewidthEvaluatorRunner:
@@ -131,6 +185,7 @@ class SparseLinewidthEvaluatorRunner:
         runner = object.__new__(cls)
         object.__setattr__(runner, "_instrument", instrument)
         object.__setattr__(runner, "_tracker", None)
+        object.__setattr__(runner, "_abort_causal_binding", None)
         object.__setattr__(
             runner,
             "_state",
@@ -270,7 +325,41 @@ class SparseLinewidthEvaluatorRunner:
         try:
             query = tracker.choose_next_query()
             if query is None:
-                raise RuntimeError("terminal sparse evaluator steps are not installed")
+                estimate = tracker.estimate()
+                if estimate.stopped_reason == "budget_exhausted":
+                    phase = "budget_stopped"
+                elif estimate.stopped_reason == "sparse_geometry_unavailable":
+                    phase = "geometry_stopped"
+                else:
+                    raise RuntimeError("tracker stopped without a declared reason")
+                state_after = replace(
+                    state_before,
+                    phase=phase,
+                    tracker_estimate=estimate,
+                )
+                object.__setattr__(self, "_state", state_after)
+                try:
+                    from .resource_accounting import (
+                        build_sparse_linewidth_evaluator_resources,
+                    )
+
+                    resources = build_sparse_linewidth_evaluator_resources(self)
+                    if resources is None:
+                        raise RuntimeError("clean stop requires evaluator resources")
+                    if phase == "budget_stopped":
+                        return SparseRunnerBudgetStopped(
+                            "budget_stopped", resources, state_after
+                        )
+                    diagnostic = estimate.sparse_geometry_diagnostic
+                    if diagnostic is None:
+                        raise RuntimeError("geometry stop requires a diagnostic")
+                    return SparseRunnerGeometryStopped(
+                        "geometry_stopped", diagnostic, resources, state_after
+                    )
+                except BaseException:
+                    object.__setattr__(self, "_state", state_before)
+                    _restore_tracker_slots(tracker, tracker_slots)
+                    raise
             estimate_before = tracker.estimate()
             if estimate_before.pending_query is not query:
                 raise RuntimeError("tracker estimate must retain the issued query")
@@ -344,9 +433,69 @@ class SparseLinewidthEvaluatorRunner:
                 virtual_time_after=virtual_time_after,
                 overhead_s=state_before.instrument_configuration.frequency_overhead_s,
             )
+            if type(acquisition) is SparseResourceJoinUnavailableAcquisition:
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason="resource_join_unavailable",
+                    exception_type=None,
+                    exception_message=None,
+                    tracker_estimate_before=estimate_before,
+                    tracker_estimate_after=estimate_before,
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
             if acquisition.measurement_midpoint_s is None:
-                raise RuntimeError("returned observation does not match pending query")
-            update = tracker.update(acquisition.safe_observation)
+                error = SparseLinewidthObservationValidationError(
+                    "endpoint_mismatch",
+                    "instrument endpoint or live clock does not match "
+                    "the pending query",
+                )
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                exception_type, exception_message = _safe_exception_strings(error)
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason="tracker_observation_validation_error",
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    tracker_estimate_before=estimate_before,
+                    tracker_estimate_after=estimate_before,
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
+            try:
+                update = tracker.update(acquisition.safe_observation)
+            except Exception as error:
+                _restore_tracker_slots(tracker, update_slots)
+                from odmr_bench.evaluation.two_point.calibration import (
+                    _safe_exception_strings,
+                )
+
+                if isinstance(error, SparseLinewidthObservationValidationError):
+                    reason = "tracker_observation_validation_error"
+                elif isinstance(error, SparseLinewidthUpdateConstructionError):
+                    reason = "tracker_update_construction_error"
+                else:
+                    reason = "tracker_update_unexpected_error"
+                exception_type, exception_message = _safe_exception_strings(error)
+                return _finish_aborted_step(
+                    self,
+                    state_before=state_before,
+                    acquisition=acquisition,
+                    reason=reason,
+                    exception_type=exception_type,
+                    exception_message=exception_message,
+                    tracker_estimate_before=estimate_before,
+                    tracker_estimate_after=tracker.estimate(),
+                    resources_after=resources_after,
+                    virtual_time_after=virtual_time_after,
+                )
             pair_timings = state_before.pair_timings
             if update.completed_fast_pair is not None:
                 first_acquisition = state_before.normal_tracking_trace[-1]
@@ -366,9 +515,7 @@ class SparseLinewidthEvaluatorRunner:
                             first_midpoint_s
                             + (second_midpoint_s - first_midpoint_s) / 2.0
                         ),
-                        public_reference_timestamp_s=(
-                            pair.pair_reference_timestamp_s
-                        ),
+                        public_reference_timestamp_s=(pair.pair_reference_timestamp_s),
                         release_sequence_index=pair.release_sequence_index,
                         release_timestamp_s=pair.release_timestamp_s,
                     ),
@@ -424,24 +571,71 @@ class SparseLinewidthEvaluatorRunner:
                 update=update,
                 state=state_after,
             )
+        except Exception as error:
+            if self._state is not state_before and self._state.phase == "aborted":
+                raise
+            _restore_tracker_slots(tracker, update_slots)
+            from odmr_bench.evaluation.two_point.calibration import (
+                _safe_exception_strings,
+            )
+
+            exception_type, exception_message = _safe_exception_strings(error)
+            return _finish_aborted_step(
+                self,
+                state_before=state_before,
+                acquisition=acquisition,
+                reason="tracker_update_unexpected_error",
+                exception_type=exception_type,
+                exception_message=exception_message,
+                tracker_estimate_before=estimate_before,
+                tracker_estimate_after=tracker.estimate(),
+                resources_after=resources_after,
+                virtual_time_after=virtual_time_after,
+            )
         except BaseException:
             object.__setattr__(self, "_state", state_before)
-            _restore_tracker_slots(tracker, update_slots)
+            _restore_tracker_slots(tracker, tracker_slots)
             raise
         object.__setattr__(self, "_state", state_after)
         return outcome
 
     def run_until_event(self) -> SparseRunnerRunOutcome:
-        """Reject runs until a later task installs tracking transitions."""
-        raise SparseRunnerStateError(
-            "run_until_event requires a runner in the tracking phase"
-        )
+        """Advance through accepted observations to the first non-accept event."""
+        if self._state.phase != "tracking" or self._tracker is None:
+            raise SparseRunnerStateError(
+                "run_until_event requires a runner in the tracking phase"
+            )
+        while True:
+            outcome = self.step()
+            if type(outcome) is not SparseRunnerAccepted:
+                return outcome
 
     def stop_external(self) -> SparseRunnerExternallyStopped:
-        """Reject stops until a later task installs tracking transitions."""
-        raise SparseRunnerStateError(
-            "stop_external requires a runner in the tracking phase"
+        """Stop tracking at the current causal boundary without acquisition."""
+        state_before = self._state
+        if state_before.phase != "tracking" or self._tracker is None:
+            raise SparseRunnerStateError(
+                "stop_external requires a runner in the tracking phase"
+            )
+        state_after = replace(
+            state_before,
+            phase="externally_stopped",
         )
+        object.__setattr__(self, "_state", state_after)
+        try:
+            from .resource_accounting import (
+                build_sparse_linewidth_evaluator_resources,
+            )
+
+            resources = build_sparse_linewidth_evaluator_resources(self)
+            if resources is None:
+                raise RuntimeError("external stop requires evaluator resources")
+            return SparseRunnerExternallyStopped(
+                "externally_stopped", resources, state_after
+            )
+        except BaseException:
+            object.__setattr__(self, "_state", state_before)
+            raise
 
 
 def _preflight_start_tracking(
@@ -714,9 +908,9 @@ def _capture_tracking_boundary(
         raise SparseStartError("resource_boundary_mismatch") from error
 
 
-def _query_mode(query: TwoPointQuery | SparseLinewidthQuery) -> Literal[
-    "fast_pair", "sparse_scan"
-]:
+def _query_mode(
+    query: TwoPointQuery | SparseLinewidthQuery,
+) -> Literal["fast_pair", "sparse_scan"]:
     if type(query) is TwoPointQuery:
         return "fast_pair"
     if type(query) is SparseLinewidthQuery:
@@ -734,7 +928,7 @@ def _build_tracking_acquisition(
     resources_after: ResourceSnapshot,
     virtual_time_after: float,
     overhead_s: float,
-) -> SparseTrackingAcquisition:
+) -> SparseTrackingAcquisition | SparseResourceJoinUnavailableAcquisition:
     from odmr_bench.emulator.observations import InstrumentObservation
 
     if type(full_observation) is not InstrumentObservation:
@@ -749,15 +943,24 @@ def _build_tracking_acquisition(
     mismatch_fields = _resource_mismatch_fields(
         expected_resources_after, resources_after
     )
-    if mismatch_fields:
-        raise RuntimeError("returned observation resource join is unavailable")
     timing_matches = (
-        full_observation.sequence_index == query.expected_sequence_index
-        and full_observation.frequency_hz == query.frequency_hz
-        and full_observation.integration_time_s == query.integration_time_s
+        full_observation.integration_time_s == query.integration_time_s
         and full_observation.timestamp_s == query.expected_end_timestamp_s
         and virtual_time_after == query.expected_end_timestamp_s
     )
+    if mismatch_fields:
+        return SparseResourceJoinUnavailableAcquisition(
+            resource_join_status="unavailable",
+            mode=mode,
+            query=query,
+            expected_measurement_midpoint_s=expected_midpoint_s,
+            measurement_midpoint_s=(expected_midpoint_s if timing_matches else None),
+            full_observation=full_observation,
+            safe_observation=safe_observation,
+            resource_mismatch_fields=mismatch_fields,
+            instrument_resources_before=resources_before,
+            instrument_resources_after=resources_after,
+        )
     return SparseTrackingAcquisition(
         resource_join_status="authenticated",
         mode=mode,
@@ -770,6 +973,68 @@ def _build_tracking_acquisition(
         instrument_resources_after=resources_after,
         instrument_resource_delta=resource_delta,
     )
+
+
+def _finish_aborted_step(
+    runner: SparseLinewidthEvaluatorRunner,
+    *,
+    state_before: SparseEvaluatorRunnerState,
+    acquisition: SparseTrackingAcquisition | SparseResourceJoinUnavailableAcquisition,
+    reason: Literal[
+        "resource_join_unavailable",
+        "tracker_observation_validation_error",
+        "tracker_update_construction_error",
+        "tracker_update_unexpected_error",
+    ],
+    exception_type: str | None,
+    exception_message: str | None,
+    tracker_estimate_before: object,
+    tracker_estimate_after: object,
+    resources_after: ResourceSnapshot,
+    virtual_time_after: float,
+) -> SparseRunnerAborted:
+    from odmr_bench.estimators.sparse_linewidth_types import (
+        SparseLinewidthCompositeEstimate,
+    )
+
+    if (
+        type(tracker_estimate_before) is not SparseLinewidthCompositeEstimate
+        or type(tracker_estimate_after) is not SparseLinewidthCompositeEstimate
+    ):
+        raise TypeError("abort estimates must be composite estimates")
+    abort = SparseAbortedRun(
+        reason=reason,
+        exception_type=exception_type,
+        exception_message=exception_message,
+        unaccepted_acquisition=acquisition,
+        unaccepted_observation_count=1,
+        tracker_estimate_before=tracker_estimate_before,
+        tracker_estimate_after=tracker_estimate_after,
+    )
+    binding = _build_abort_causal_binding(runner, abort)
+    state_after = replace(
+        state_before,
+        phase="aborted",
+        tracker_estimate=tracker_estimate_after,
+        instrument_resources_current=resources_after,
+        instrument_current_sequence_index=(
+            acquisition.full_observation.sequence_index
+        ),
+        current_virtual_time_s=virtual_time_after,
+        last_instrument_failure=None,
+        terminal_abort=abort,
+    )
+    object.__setattr__(runner, "_abort_causal_binding", binding)
+    object.__setattr__(runner, "_state", state_after)
+    from .resource_accounting import build_sparse_linewidth_evaluator_resources
+
+    resources = build_sparse_linewidth_evaluator_resources(runner)
+    if type(acquisition) is SparseResourceJoinUnavailableAcquisition:
+        if resources is not None:
+            raise RuntimeError("unavailable abort must not fabricate resources")
+    elif resources is None:
+        raise RuntimeError("authenticated abort requires evaluator resources")
+    return SparseRunnerAborted("aborted", abort, resources, state_after)
 
 
 def _capture_tracker_slots(

@@ -6,7 +6,7 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–15 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–16 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -177,6 +177,59 @@ ledgers, including expected/realized photons, both calibration treatments,
 partial blocks of every legal length, and scientifically failed completed
 scans. Returned-observation aborts and clean terminal transitions remain solely
 Task 16 behavior.
+
+Task 16 completes the sparse evaluator terminal state machine. Pair and
+five-point budget exhaustion, plus due-scan geometry failure, stop before any
+instrument query; geometry outcomes retain the tracker's exact diagnostic.
+External stop performs no acquisition and preserves pending queries and partial
+fast/sparse blocks. `run_until_event` advances only through accepted outcomes
+and returns the first retryable or terminal event. Every returned-but-unaccepted
+observation is terminal: authenticated validation, construction, and unexpected
+update exceptions retain one full unaccepted atom with canonical exception
+strings, while an unavailable physical resource join retains no exception
+strings and returns `resources=None`. Tracker state and CPU totals roll back
+exactly; process-control `BaseException` values are re-raised identically after
+cleanup. Full-resource construction distinguishes the accepted charged prefix
+from the final charged ledger containing the authenticated unaccepted atom and
+authenticates the prior-endpoint midpoint recurrence. The eight-phase operation
+matrix rejects illegal calls before tracker or instrument side effects. No
+production truth lookup was added.
+
+Task 16's independent review exposed four audit gaps that the original green
+suite did not exercise. Returned sequence/frequency echo corruption now keeps
+its timing-derived midpoint and terminates as a charged validation abort;
+unaccepted physical authentication no longer incorrectly requires a rejected
+tracker echo. Ordinary failures while constructing pair/scan timing, runner
+state, or the accepted outcome after a returned observation now roll back the
+tracker update and become a typed unexpected abort, while `BaseException`
+identity semantics remain unchanged. Retryable query-failure evidence is now
+resource-auditable at zero and nonempty prefixes and survives an external stop,
+including partial fast-pair and sparse-scan reservations. The authenticated
+abort resource branch now reauthenticates phase, reason/exception class,
+unaccepted cardinality, estimate identities, and the pending-query join before
+publishing the accepted/final charged split. These corrections preserve all
+three estimator CPU totals and add no truth access.
+
+The final Task 16 re-review found that exception class names are not type
+identities: a foreign exception may legitimately share either reserved sparse
+error name, and public subclasses must retain the Stage 6.3-compatible
+`isinstance` classification. Terminal aborts now receive a private exact-
+identity causal binding to their runner, reason, canonical exception strings,
+acquisition, and before/after estimates. Resource authentication validates that
+binding rather than inferring causality from a lossy public name. Foreign
+same-name exceptions therefore retain unexpected-error evidence, public sparse
+error subclasses retain validation/construction classification, and a later
+terminal resource or outcome construction failure re-raises without replacing
+the already committed tracker exception evidence.
+
+The causal binding is owned by one private runner slot rather than a process-
+global registry. Its lifetime is therefore bounded by the runner, with no
+integer-ID reuse or shared mutable registry across independent runs. GC
+regressions create and discard multiple authenticated and unavailable aborted
+runs after revoking their separate calibration authority and prove their
+instrument/dynamics graphs are collectible. A live terminal runner continues
+to authenticate repeated resource builds, including after injected terminal
+resource or outcome construction failures.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1084,12 +1137,23 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 16 review-fix sparse evaluator types/resources/runner gate:
+  141 passed.
+- Stage 6.4 Task 16 review-fix sparse/Stage 6.3 runner-resource compatibility
+  gate: 300
+  passed.
+- Stage 6.4 Task 16 review-fix estimator/evaluation/emulator affected gate:
+  1,722 passed.
+- Stage 6.4 Task 16 review-fix full repository gate: 1,823 passed.
+- Stage 6.4 Task 16 Ruff and diff-check gates: All checks passed.
 - Stage 6.4 Task 15 focused sparse runner/resource gate: 69 passed.
 - Stage 6.4 Task 15 sparse/Stage 6.3 runner-resource compatibility gate: 229
   passed.
 - Stage 6.4 Task 15 estimator/evaluation/emulator affected gate: 1,674 passed.
 - Stage 6.4 Task 15 full repository gate: 1,775 passed.
 - Stage 6.4 Task 15 Ruff and diff-check gates: All checks passed.
+- Stage 6.4 Task 15 review head `806eb64` passed GitHub Actions on Python 3.11
+  and Python 3.12 (run 35034957158).
 - Stage 6.4 Task 14 review-fix focused resource-builder gate: 13 passed.
 - Stage 6.4 Task 14 review-fix sparse/two-point runner-resource compatibility
   gate: 240 passed.
@@ -1244,13 +1308,14 @@ superiority result.
   independent review found the production contracts conformant.
 - The Stage 6.4 sparse evaluator runner now implements clean bind, verified
   calibration acquisition, authenticated tracking start, accepted/retryable
-  acquisition transitions, timing retention, and full accepted-resource
-  construction. Returned-observation aborts and clean terminal transitions
-  remain Task 16; the complete package export remains Task 19.
+  acquisition transitions, timing retention, clean terminal transitions,
+  returned-observation aborts, and lossless terminal resource construction.
+  Deterministic linewidth-drift acceptance fixtures remain Task 17; the
+  complete package export remains Task 19.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 16's clean budget/geometry/external stops,
-   returned-observation aborts, and run-loop behavior.
+1. Continue Stage 6.4 with Task 17's test-only deterministic linewidth-drift
+   fixture and its scientific invariant tests.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

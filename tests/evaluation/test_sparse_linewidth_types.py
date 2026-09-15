@@ -1031,5 +1031,7 @@ def test_accepted_and_instrument_failure_outcomes_match_tracking_state() -> None
         "instrument_failure", failure, failure_state
     )
     assert outcome.state.last_instrument_failure is failure
+    externally_stopped = replace(failure_state, phase="externally_stopped")
+    assert externally_stopped.last_instrument_failure is failure
     with pytest.raises(ValueError):
         replace(outcome, failure=replace(failure))

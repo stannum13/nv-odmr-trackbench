@@ -10,6 +10,17 @@ once a package version is introduced.
 
 ### Added
 
+- Completed the Stage 6.4 sparse evaluator state machine. Clean budget and
+  geometry stops occur before acquisition, external stops preserve partial
+  blocks, and the run loop advances only across accepted outcomes. Returned
+  authenticated observations that cannot be accepted become typed terminal
+  aborts with one lossless unaccepted resource atom; unavailable physical joins
+  return no fabricated aggregate. Terminal resource views preserve exact
+  arrival-order full ledgers, separate accepted from final charged resources,
+  authenticate causal midpoint recurrence, add no CPU charge on failure, and
+  perform no spectral-truth lookup. Illegal operations are closed across all
+  eight runner phases, and process-control exceptions retain identity after
+  rollback.
 - Integrated Stage 6.4 accepted evaluator steps and retryable instrument
   failures. The runner now retains exact full/safe acquisition joins, causal
   midpoint and release timing, pair and five-point scan timing records, and
@@ -141,6 +152,26 @@ once a package version is introduced.
   or evaluator behavior is added.
 
 ### Fixed
+
+- Closed the Stage 6.4 Task 16 independent-review gaps. Returned sequence or
+  frequency echo mismatches now retain a timing-derived midpoint and one
+  authenticated unaccepted physical charge while terminating as typed
+  validation aborts. Ordinary post-return pair/scan timing, runner-state, and
+  accepted-outcome construction faults now roll back the tracker update and
+  become terminal unexpected aborts without changing CPU totals. Retryable
+  query-failure evidence is resource-auditable from zero and nonempty prefixes
+  and survives external stop across partial fast and sparse reservations. The
+  terminal resource join now reauthenticates the complete authenticated-abort
+  record through a private, runner-owned exact-identity causal binding while
+  preserving the accepted-versus-final charge split. Binding lifetime is
+  bounded by the runner; no process-global abort registry, integer-ID key, or
+  cross-run mutable authority remains. It does not infer causality from public
+  exception names: foreign same-name exceptions retain their original
+  unexpected-error evidence, subclasses of the public sparse errors retain
+  their documented classification, and later terminal construction faults
+  cannot overwrite already committed tracker exception evidence. Repeated
+  resource authentication remains valid for a live terminal runner, while
+  discarded authenticated and unavailable abort graphs remain collectible.
 
 - Closed three Stage 6.4 initial-resource authentication gaps. Calibration
   source phases now use exact runner-specific post-success allowlists while
