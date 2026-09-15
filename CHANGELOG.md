@@ -10,6 +10,16 @@ once a package version is introduced.
 
 ### Added
 
+- Added Stage 6.4's initial sparse evaluator resource builder. Before tracking,
+  all runner phases fail through the public state error without inspecting
+  resource inputs. At a successful start, the builder reauthenticates the
+  target and calibration-source identity graphs, joins full and estimator-safe
+  calibration traces/timing/resources, replays calibration atoms in exact
+  arrival order, and publishes zero fast/sparse/interleaved tracking ledgers.
+  Included calibration is charged exactly once; conditional precalibration is
+  reported but uncharged. Accepted acquisitions and terminal joins remain
+  assigned to Tasks 15–16, and package-level export remains deferred to Task
+  19.
 - Added Stage 6.4 verified calibration acquisition and authenticated sparse
   tracking start. The sparse runner delegates only through the private exact
   issuer, preserves successful and typed-failure calibration traces/boundaries,

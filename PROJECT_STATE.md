@@ -125,6 +125,28 @@ its corresponding exact runner-state class, rejecting a structurally valid
 cross-class state transplant. All fail atomically with
 `run_provenance_mismatch` while the valid conditional path remains accepted.
 Stage 6.3 code remains unchanged.
+The pushed Task 13 review head `bed4704` passed the complete native GitHub
+Linux x86 matrix on Python 3.11 and Python 3.12 (run 35031508425).
+
+Task 14 adds the first sparse evaluator full-resource record at the exact
+successful tracking-start boundary. All three pre-start phases raise the public
+state error before instrument, calibration, or resource inputs are read. A
+started builder reauthenticates the exact target runner/instrument/token/tracker
+graph and the issuing runner's retained verified source, then joins the full
+and estimator-safe calibration observations, midpoint/timestamp recurrence,
+source sampling rules, and full/safe resource boundaries. Calibration atoms
+are replayed left-associatively from zero; fast, sparse, interleaved tracking,
+and unaccepted ledgers begin at exact zero. Included same-run calibration is
+charged exactly once, while conditional precalibration is reported but not
+charged, and both treatments must equal their physical start boundary. The
+builder never returns `None` in this task. Accepted atoms and terminal joins
+remain Tasks 15–16. The resource builder remains a direct-module interface and
+is intentionally absent from package `__all__` until Task 19 publishes the
+complete Stage 6.4 surface. Scientific self-review found no truth path or
+future-data access: only immutable acquired calibration observations and
+resource metadata are replayed. Software self-review confirmed exact-type and
+identity joins, phase-first rejection, nonmutating construction, deterministic
+binary64 arrival order, and no Stage 6.3 production changes.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1032,6 +1054,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 14 focused resource-builder gate: 9 passed.
+- Stage 6.4 Task 14 sparse evaluator/Stage 6.3 resource compatibility gate: 80
+  passed.
+- Stage 6.4 Task 14 estimator/evaluation/emulator gate: 1,657 passed.
+- Stage 6.4 Task 14 full repository gate: 1,758 passed.
+- Stage 6.4 Task 14 Ruff gate: All checks passed.
 - Stage 6.4 Task 13 conditional provenance review-fix gate: 12 passed.
 - Stage 6.4 Task 13 focused calibration/start contract gate: 39 passed.
 - Stage 6.4 Task 13 sparse runner plus complete Stage 6.3 calibration/runner
@@ -1173,13 +1201,14 @@ superiority result.
   over/under-validation branch, or equal-but-distinct outcome identity join;
   independent review found the production contracts conformant.
 - The Stage 6.4 sparse evaluator runner now implements clean bind, verified
-  calibration acquisition, and authenticated tracking start. Initial resource
-  construction, accepted acquisition/resource integration, and terminal
-  transitions remain Tasks 14–16.
+  calibration acquisition, authenticated tracking start, and exact initial
+  evaluator resource construction. Accepted acquisition/resource integration
+  and terminal transitions remain Tasks 15–16; the complete package export
+  remains Task 19.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 14's authenticated evaluator resource builder
-   at the exact tracking-start boundary.
+1. Continue Stage 6.4 with Task 15's accepted fast/sparse steps, retry/timing
+   retention, and full-resource integration.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

@@ -1,4 +1,8 @@
-"""Public evaluator-owned value contracts for sparse-linewidth tracking."""
+"""Public evaluator-owned value contracts for sparse-linewidth tracking.
+
+The evaluator runner and resource builder currently remain direct-module
+interfaces rather than package exports.
+"""
 
 from odmr_bench.evaluation.sparse_linewidth.types import (
     SparseAbortedRun,
