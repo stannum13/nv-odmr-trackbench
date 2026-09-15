@@ -22,6 +22,7 @@ from odmr_bench.estimators import (
     SparseLinewidthObservationValidationError,
     SparseLinewidthQuery,
     SparseLinewidthResetError,
+    SparseLinewidthScanResult,
     TwoPointBudgetCeiling,
     TwoPointCalibration,
     TwoPointEstimate,
@@ -597,6 +598,155 @@ def _accept_fast_pairs(
         tracker.update(_fast_observation(calibration, query))
 
 
+def _install_completed_sparse_scan_fixture(
+    tracker: SparseLinewidthCompositeTracker,
+) -> None:
+    """Install one legal failed scan without exercising Task 9 update behavior."""
+    first = tracker.choose_next_query()
+    assert type(first) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    queries = state.reserved_sparse_queries
+    assert queries is not None
+    observations = tuple(
+        EstimatorObservation(
+            sequence_index=query.expected_sequence_index,
+            timestamp_s=query.expected_end_timestamp_s,
+            frequency_hz=query.frequency_hz,
+            fluorescence=1.0,
+            integration_time_s=query.integration_time_s,
+            nominal_exposure_photons=query.expected_nominal_exposure_photons,
+            realized_photons=None,
+        )
+        for query in queries
+    )
+    reference_timestamp_s = (
+        observations[0].timestamp_s - observations[0].integration_time_s / 2.0
+    )
+    for count, observation in enumerate(observations[1:], start=2):
+        midpoint_s = observation.timestamp_s - observation.integration_time_s / 2.0
+        reference_timestamp_s = reference_timestamp_s + (
+            midpoint_s - reference_timestamp_s
+        ) / count
+    scan = SparseLinewidthScanResult(
+        scan_index=first.scan_index,
+        identity_scan_index=first.identity_scan_index,
+        resonance_id=first.resonance_id,
+        frozen_fast_center_hz=first.frozen_fast_center_hz,
+        frozen_fast_center_source_kind=first.frozen_fast_center_source_kind,
+        frozen_fast_center_source_pair_index=(
+            first.frozen_fast_center_source_pair_index
+        ),
+        frozen_fast_center_reference_timestamp_s=(
+            first.frozen_fast_center_reference_timestamp_s
+        ),
+        frozen_fast_center_release_sequence_index=(
+            first.frozen_fast_center_release_sequence_index
+        ),
+        frozen_fast_center_release_timestamp_s=(
+            first.frozen_fast_center_release_timestamp_s
+        ),
+        frozen_prior_fwhm_hz=first.frozen_prior_fwhm_hz,
+        frozen_fwhm_source_kind=first.frozen_fwhm_source_kind,
+        frozen_fwhm_source_scan_index=first.frozen_fwhm_source_scan_index,
+        frozen_fwhm_reference_timestamp_s=(
+            first.frozen_fwhm_reference_timestamp_s
+        ),
+        frozen_fwhm_release_sequence_index=(
+            first.frozen_fwhm_release_sequence_index
+        ),
+        frozen_fwhm_release_timestamp_s=first.frozen_fwhm_release_timestamp_s,
+        queries=queries,
+        observations=observations,
+        public_reference_timestamp_s=reference_timestamp_s,
+        release_sequence_index=observations[-1].sequence_index,
+        release_timestamp_s=observations[-1].timestamp_s,
+        status="failure",
+        failure_code="model_evaluation_failed",
+        fitted_center_correction_hz=None,
+        fitted_local_center_hz=None,
+        fitted_fwhm_hz=None,
+        fitted_amplitude=None,
+        fitted_baseline_offset=None,
+        fitted_q=None,
+        rmse=None,
+        amplitude_normalized_rmse=None,
+        scaled_jacobian_rank=None,
+        scaled_jacobian_condition=None,
+        scipy_status=None,
+        scipy_message=None,
+        nfev=None,
+        fit_cpu_time_s=0.0,
+    )
+    endpoint_s = observations[-1].timestamp_s
+    identities = tuple(
+        replace(
+            identity,
+            center_age_s=endpoint_s - identity.fast_center_reference_timestamp_s,
+            fwhm_age_s=endpoint_s - identity.fwhm_reference_timestamp_s,
+            center_release_age_s=(
+                endpoint_s - identity.fast_center_release_timestamp_s
+            ),
+            fwhm_release_age_s=endpoint_s - identity.fwhm_release_timestamp_s,
+            completed_sparse_scans=(
+                identity.completed_sparse_scans
+                + int(identity.resonance_id == scan.resonance_id)
+            ),
+            latest_sparse_scan=(
+                scan
+                if identity.resonance_id == scan.resonance_id
+                else identity.latest_sparse_scan
+            ),
+        )
+        for identity in state.estimate.identities
+    )
+
+    def advance_resources(
+        resources: PublicAcquisitionResources,
+    ) -> PublicAcquisitionResources:
+        for observation in observations:
+            resources = tracker_module._advance_observation_resources(
+                resources, observation, state.metadata
+            )
+        return resources
+
+    sparse_resources = advance_resources(state.estimate.sparse_tracking_resources)
+    tracking_resources = advance_resources(state.estimate.tracking_resources)
+    estimate = tracker_module._replace_estimate(
+        state.estimate,
+        identities=identities,
+        pending_mode=None,
+        pending_query=None,
+        sparse_scan_history=(*state.estimate.sparse_scan_history, scan),
+        accepted_observations=state.estimate.accepted_observations + 5,
+        completed_sparse_scans=state.estimate.completed_sparse_scans + 1,
+        fast_pairs_since_scan=0,
+        current_sequence_index=observations[-1].sequence_index,
+        current_timestamp_s=endpoint_s,
+        sparse_tracking_resources=sparse_resources,
+        tracking_resources=tracking_resources,
+        charged_resources=tracking_resources,
+    )
+    object.__setattr__(
+        tracker,
+        "_state",
+        replace(state, reserved_sparse_queries=None, estimate=estimate),
+    )
+
+
+def _advance_to_due_sparse_scan(
+    tracker: SparseLinewidthCompositeTracker,
+    calibration: TwoPointCalibration,
+    *,
+    scan_index: int,
+) -> None:
+    _accept_fast_pairs(tracker, calibration, count=8)
+    for completed_scan_index in range(scan_index):
+        assert tracker.estimate().completed_sparse_scans == completed_scan_index
+        _install_completed_sparse_scan_fixture(tracker)
+        _accept_fast_pairs(tracker, calibration, count=8)
+
+
 def _project_composite_fast_view(
     composite: SparseLinewidthCompositeTracker,
     calibration: TwoPointCalibration,
@@ -1089,6 +1239,51 @@ def test_sparse_query_constructor_rotates_targets_orders_and_all_echoes(
         assert query.expected_sequence_index == 73 + point_index
         assert query.integration_time_s == 0.007
         assert query.expected_nominal_exposure_photons == 2.5e6 * 0.007
+
+
+@pytest.mark.parametrize(
+    ("scan_index", "resonance_id", "identity_scan_index", "expected_order"),
+    (
+        (1, "r1", 0, (0.5, -1.0, 0.0, 1.0, -0.5)),
+        (8, "r0", 1, (-0.5, 1.0, 0.0, -1.0, 0.5)),
+    ),
+)
+def test_due_scheduler_rotates_target_and_uses_identity_scan_order(
+    scan_index: int,
+    resonance_id: str,
+    identity_scan_index: int,
+    expected_order: tuple[float, ...],
+) -> None:
+    calibration = _calibration()
+    tracker = _reset_tracker(
+        calibration=calibration,
+        ceiling=TwoPointBudgetCeiling(1_000, None, None, None),
+    )
+    _advance_to_due_sparse_scan(
+        tracker,
+        calibration,
+        scan_index=scan_index,
+    )
+    before = tracker.estimate()
+    target = before.identities[scan_index % 8]
+    assert before.completed_sparse_scans == scan_index
+    assert before.fast_pairs_since_scan == 8
+    assert target.resonance_id == resonance_id
+    assert target.completed_sparse_scans == identity_scan_index
+
+    first = tracker.choose_next_query()
+
+    assert type(first) is SparseLinewidthQuery
+    state = tracker._state
+    assert state is not None
+    queries = state.reserved_sparse_queries
+    assert queries is not None
+    assert first is queries[0]
+    assert {
+        (query.scan_index, query.resonance_id, query.identity_scan_index)
+        for query in queries
+    } == {(scan_index, resonance_id, identity_scan_index)}
+    assert tuple(query.offset_multiplier for query in queries) == expected_order
 
 
 def test_due_sparse_block_does_not_fall_back_to_affordable_fast_work() -> None:

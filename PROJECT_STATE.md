@@ -82,15 +82,17 @@ reservation or partial state without consuming sparse work. A complete
 Stage 6.3 projection is compared after every accepted flank across all eight
 identities, repeated parity rounds, sources, epochs, ages, partial/query state,
 resources, metadata, and success/common-mode/capture/domain/step-limited/
-numerical-loss outcomes. Direct stateful-constructor witnesses pin r0/r1 target
-rotation, even and odd per-ID order, non-default integration policy, and every
-frozen center/FWHM echo across all five queries. The validation matrix now
+numerical-loss outcomes. Direct stateful-constructor witnesses pin even and odd
+per-ID order, non-default integration policy, and every frozen center/FWHM echo
+across all five queries. Separate legal due-state scheduler witnesses prove
+scan 1 targets r1 and scan 8 returns to r0 with r0's odd second-scan order. The
+validation matrix now
 covers every precedence row, while identical process-control exceptions are
 injected at every public construction stage on both fast sides and retain
-value-equal rollback. Focused review closure passed 153 Task 8 plus complete
-Stage 6.3 tracker/atomicity tests. The fresh combined mandatory gate passed
-1,425 estimator/evaluation/emulator tests and 1,526 repository tests; Ruff and
-`git diff --check` passed.
+value-equal rollback. Final scheduler re-review closure passed 155 Task 8 plus
+complete Stage 6.3 tracker/atomicity tests. The fresh combined mandatory gate
+passed 1,427 estimator/evaluation/emulator tests and 1,528 repository tests;
+Ruff and `git diff --check` passed.
 
 Task 6 completes the sparse fit's eight first-applicable scientific gates and
 exact diagnostic-presence rows. Only returned nonpositive solver status or a
