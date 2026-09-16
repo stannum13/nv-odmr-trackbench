@@ -6,7 +6,7 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–17 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–18 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -17,8 +17,8 @@ runner-neutral exact-identity verified-calibration authority, and authenticated
 calibration/start transitions. Initial resources, accepted resource
 integration, and terminal behavior then form a forward-only runner chain.
 Production truth lookup and public linewidth-dynamics additions remain absent:
-deterministic linewidth drift now exists only as test support, while release-
-gated truth evaluation remains a future test fixture. The plan uses configured
+deterministic linewidth drift and release-gated truth evaluation now exist only
+as closed test support. The plan uses configured
 `max_nfev`, stops fit CPU timing before result
 construction, and keeps private authority tests in the existing calibration
 test module. No Stage 6.5 claim has been added. Final plan review also closes
@@ -243,6 +243,32 @@ amplitudes, eta values, and baseline while replacing only FWHM with the explicit
 nonpositive, or generated-unphysical widths fail explicitly. This remains under
 `tests/evaluation`: no production dynamics API, stochastic state, callback,
 truth access, result claim, or Stage 6.5 comparison was added.
+
+Task 18 closes the generated scientific acceptance matrix with named,
+download-free public-input recipes. Exact static data recover all four local
+fit parameters; seeded Poisson data use fixed error bounds; composed center and
+linewidth drift retains exact release timing; and center/width sources retain
+independent epochs. Included calibration, tracking, photon, and CPU joins stay
+auditable. Scientific fit failure consumes the complete five-point block while
+retaining its prior width. Prospective invalid geometry is rejected before
+reset commits, and due invalid geometry stops cleanly before sparse reservation.
+Separate regressions preserve finite signed/zero asynchronous Q and state the
+affine-baseline and within-scan-dynamics mismatch limitations without claiming
+unbiased recovery. The test-only truth helper requires the exact completed
+release index, makes no call on rejection, and calls test-held dynamics exactly
+once at the recorded truth timestamp after release. A query-scoped spy proves
+all production signal evaluations after instrument construction occur inside
+instrument queries; no estimator or sparse evaluator production module invokes
+hidden dynamics.
+The Task 18 independent review found that runner/tracker CPU equality alone was
+tautological and that the two mismatch cases admitted negligible one-ULP
+differences or invariant-only failure records. Test support now returns every
+accepted outcome and independently left-folds all 21 update CPU atoms into
+fast, sparse, and global totals in exact arrival order. Affine-baseline and
+nonlinear-width cases now require success, positive normalized residual, and
+respective linewidth biases above 25 kHz and 3 kHz. Setting either dynamics
+strength to zero makes its named test fail before restoring the declared
+fixture. No production code changed.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1156,6 +1182,13 @@ superiority result.
   1,822 passed.
 - Stage 6.4 Task 17 full repository gate: 1,868 passed.
 - Stage 6.4 Task 17 Ruff and diff-check gates: All checks passed.
+- Stage 6.4 Task 18 closed acceptance regressions: 20 passed.
+- Stage 6.4 Task 18 regression plus focused sparse gate: 289 passed.
+- Stage 6.4 Task 18 dynamics/sparse compatibility gate: 227 passed.
+- Stage 6.4 Task 18 model/dynamics/emulator/estimator/evaluation affected gate:
+  1,842 passed.
+- Stage 6.4 Task 18 full repository gate: 1,888 passed.
+- Stage 6.4 Task 18 Ruff and diff-check gates: All checks passed.
 - Stage 6.4 Task 16 review-fix sparse evaluator types/resources/runner gate:
   141 passed.
 - Stage 6.4 Task 16 review-fix sparse/Stage 6.3 runner-resource compatibility
@@ -1329,13 +1362,12 @@ superiority result.
   calibration acquisition, authenticated tracking start, accepted/retryable
   acquisition transitions, timing retention, clean terminal transitions,
   returned-observation aborts, and lossless terminal resource construction.
-  Deterministic linewidth drift is now available only to tests; closed
-  acceptance regressions remain Task 18 and the complete package export remains
-  Task 19.
+  Deterministic linewidth drift and release-gated truth evaluation are available
+  only to tests; the complete package export remains Task 19.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 18's closed static/noisy/drift/model-mismatch
-   regressions and release-gated test-only truth oracle.
+1. Continue Stage 6.4 with Task 19's public export, example, and documentation
+   publication surface.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.

@@ -10,6 +10,20 @@ once a package version is introduced.
 
 ### Added
 
+- Added closed, download-free Stage 6.4 scientific acceptance regressions for
+  exact noiseless recovery, seeded Poisson tolerance, composed center/linewidth
+  drift, independent center/width epochs, included resource and CPU joins,
+  retained-width scientific failure, prospective and due geometry rejection,
+  five-point block indivisibility, affine-baseline and within-scan-dynamics
+  mismatch, and signed asynchronous Q. A test-only release-gated truth helper
+  rejects incomplete scan timing before making exactly one hidden-dynamics
+  call; a query-scoped audit proves production tracking makes no out-of-query
+  truth lookup. A trace-returning wrapper independently replays exact
+  arrival-order fast, sparse, and global CPU folds across all 21 accepted
+  updates. Both mismatch cases require deterministic fit success, positive
+  residual, and fixed nontrivial linewidth bias, with zero-strength mutation
+  witnesses. These fixtures establish contract behavior and known model
+  limitations, not experimental accuracy or matched-budget superiority.
 - Added a deterministic test-only linewidth-drift composition for Stage 6.4
   scientific regressions. Frozen scalar or exact-ID slew configurations are
   canonicalized without retaining mutable caller maps; valid snapshots preserve
