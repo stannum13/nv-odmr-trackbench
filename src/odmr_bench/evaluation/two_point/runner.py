@@ -123,32 +123,32 @@ class TwoPointEvaluatorRunner:
             raise TwoPointCalibrationPreflightError("unclean_instrument_boundary")
 
         token = _mint_verified_instrument_run_token(_TOKEN_CONSTRUCTION_KEY)
-        runner = object.__new__(cls)
-        object.__setattr__(runner, "_instrument", instrument)
-        object.__setattr__(runner, "_tracker", None)
-        object.__setattr__(
-            runner,
-            "_state",
-            TwoPointEvaluatorRunnerState(
-                phase="ready",
-                run_token=token,
-                instrument_configuration=instrument_configuration,
-                calibration_outcome=None,
-                verified_calibration=None,
-                calibration=None,
-                tracker_estimate=None,
-                normal_tracking_trace=(),
-                pair_timings=(),
-                instrument_resources_at_bind=resources,
-                tracking_resources_before=None,
-                instrument_resources_current=resources,
-                instrument_current_sequence_index=None,
-                current_virtual_time_s=current_virtual_time_s,
-                last_instrument_failure=None,
-                terminal_abort=None,
-            ),
-        )
         try:
+            runner = object.__new__(cls)
+            object.__setattr__(runner, "_instrument", instrument)
+            object.__setattr__(runner, "_tracker", None)
+            object.__setattr__(
+                runner,
+                "_state",
+                TwoPointEvaluatorRunnerState(
+                    phase="ready",
+                    run_token=token,
+                    instrument_configuration=instrument_configuration,
+                    calibration_outcome=None,
+                    verified_calibration=None,
+                    calibration=None,
+                    tracker_estimate=None,
+                    normal_tracking_trace=(),
+                    pair_timings=(),
+                    instrument_resources_at_bind=resources,
+                    tracking_resources_before=None,
+                    instrument_resources_current=resources,
+                    instrument_current_sequence_index=None,
+                    current_virtual_time_s=current_virtual_time_s,
+                    last_instrument_failure=None,
+                    terminal_abort=None,
+                ),
+            )
             _register_run_token(
                 token,
                 runner,

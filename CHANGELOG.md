@@ -189,6 +189,14 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed Task 20 software review node SW-20-I1 across both exact evaluator
+  runners. Their bind transactions now begin immediately after minting a
+  provisional run token, so any later runner allocation, slot assignment,
+  ready-state construction, or registration `BaseException` unconditionally
+  revokes the token and every partial authority record before reraising the
+  identical object. Symmetric ordinary- and process-control-fault regressions
+  require every provenance registry to remain unchanged and the captured token
+  to be neither minted nor bound.
 - Closed the Stage 6.4 Task 16 independent-review gaps. Returned sequence or
   frequency echo mismatches now retain a timing-derived midpoint and one
   authenticated unaccepted physical charge while terminating as typed

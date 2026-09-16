@@ -295,6 +295,18 @@ gives the complete compact diagnostic-presence table, including
 `nonfinite_solution` with solver fields present and fit/RMSE/rank/condition
 groups absent.
 
+Task 20 software review node SW-20-I1 exposed a bind-transaction gap shared by
+the Stage 6.3 two-point and Stage 6.4 sparse runners: a ready-state construction
+fault after token minting but before registration left the exact provisional
+capability in the process-global mint registry. Both bind transactions now
+begin immediately after minting and unconditionally revoke the token and any
+partial authority graph for every later `BaseException`. Symmetric named
+regressions inject both an ordinary exception and a process-control exception,
+prove identical-object propagation, and require all provenance registries to
+remain unchanged with the captured token neither minted nor bound. This node
+does not address the separately reviewed successful-run lifecycle, scientific,
+documentation, or wheel-isolation findings.
+
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
 advances the global sequence/endpoint and every identity age, and applies one
@@ -1201,6 +1213,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 20 SW-20-I1 bind-construction transaction regressions: 4
+  passed.
+- Stage 6.4 Task 20 SW-20-I1 combined Stage 6.3/sparse gate: 811 passed.
+- Stage 6.4 Task 20 SW-20-I1 estimator/evaluation/emulator/dynamics affected
+  gate: 1,812 passed.
+- Stage 6.4 Task 20 SW-20-I1 full repository gate: 1,896 passed.
 - Stage 6.4 Task 19 review-fix source package/example/guidance gate: 33 passed.
 - Stage 6.4 Task 19 review-fix estimator/evaluation/package affected gate:
   1,693 passed.

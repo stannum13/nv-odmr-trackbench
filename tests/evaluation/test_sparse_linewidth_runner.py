@@ -1621,6 +1621,53 @@ def test_discarded_aborted_runners_do_not_leave_global_causal_retention(
     assert all(reference() is None for reference in dynamics_refs)
 
 
+@pytest.mark.parametrize(
+    "fault_type",
+    (RuntimeError, KeyboardInterrupt),
+    ids=("exception", "baseexception"),
+)
+def test_sparse_bind_state_construction_fault_revokes_minted_token_and_reraises_identical_baseexception(  # noqa: E501
+    fault_type: type[BaseException],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth import runner as runner_module
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+
+    registries = (
+        provenance_module._MINTED_RUN_TOKEN_IDENTITIES,
+        provenance_module._RUN_TOKEN_BINDINGS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUERS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS,
+    )
+    registry_snapshots = tuple(tuple(registry.items()) for registry in registries)
+    captured_tokens: list[object] = []
+    fault = fault_type("ready-state construction exploded")
+
+    def fail_state_construction(*args: object, **kwargs: object) -> None:
+        del args
+        captured_tokens.append(kwargs["run_token"])
+        raise fault
+
+    monkeypatch.setattr(
+        runner_module,
+        "SparseEvaluatorRunnerState",
+        fail_state_construction,
+    )
+
+    with pytest.raises(fault_type) as raised:
+        SparseLinewidthEvaluatorRunner.bind(_instrument())
+
+    assert raised.value is fault
+    assert len(captured_tokens) == 1
+    token = captured_tokens[0]
+    assert tuple(tuple(registry.items()) for registry in registries) == (
+        registry_snapshots
+    )
+    assert provenance_module._MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is not token
+    assert provenance_module._lookup_run_token_binding(token) is None
+    assert token not in provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS
+
+
 def test_unavailable_join_aborts_without_fabricated_resources(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

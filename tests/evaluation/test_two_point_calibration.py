@@ -1724,6 +1724,53 @@ def test_runner_bind_rolls_back_every_provisional_token_identity(
     assert captured_runner.state.instrument_configuration is instrument_configuration
 
 
+@pytest.mark.parametrize(
+    "fault_type",
+    (RuntimeError, KeyboardInterrupt),
+    ids=("exception", "baseexception"),
+)
+def test_two_point_bind_state_construction_fault_revokes_minted_token_and_reraises_identical_baseexception(  # noqa: E501
+    fault_type: type[BaseException],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+    from odmr_bench.evaluation.two_point import runner as runner_module
+
+    registries = (
+        provenance_module._MINTED_RUN_TOKEN_IDENTITIES,
+        provenance_module._RUN_TOKEN_BINDINGS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUERS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS,
+    )
+    registry_snapshots = tuple(tuple(registry.items()) for registry in registries)
+    captured_tokens: list[object] = []
+    fault = fault_type("ready-state construction exploded")
+
+    def fail_state_construction(*args: object, **kwargs: object) -> None:
+        del args
+        captured_tokens.append(kwargs["run_token"])
+        raise fault
+
+    monkeypatch.setattr(
+        runner_module,
+        "TwoPointEvaluatorRunnerState",
+        fail_state_construction,
+    )
+
+    with pytest.raises(fault_type) as raised:
+        TwoPointEvaluatorRunner.bind(_instrument())
+
+    assert raised.value is fault
+    assert len(captured_tokens) == 1
+    token = captured_tokens[0]
+    assert tuple(tuple(registry.items()) for registry in registries) == (
+        registry_snapshots
+    )
+    assert provenance_module._MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is not token
+    assert provenance_module._lookup_run_token_binding(token) is None
+    assert token not in provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS
+
+
 @pytest.mark.parametrize("stage", ("post_query", "post_source"))
 def test_persistent_boundary_fault_terminates_with_bounded_resource_failure(
     stage: str,
