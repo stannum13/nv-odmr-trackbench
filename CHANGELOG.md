@@ -10,6 +10,14 @@ once a package version is introduced.
 
 ### Added
 
+- Added a deterministic test-only linewidth-drift composition for Stage 6.4
+  scientific regressions. Frozen scalar or exact-ID slew configurations are
+  canonicalized without retaining mutable caller maps; valid snapshots preserve
+  base resonance order, IDs, centers, amplitudes, eta, and baseline while
+  replacing only FWHM with `reference + slew * virtual time`. Tests reject
+  malformed mappings, invalid timestamps, nonfinite inputs, and generated
+  nonpositive/nonfinite widths. The helper is not a production export and makes
+  no experimental, benchmark, or matched-budget claim.
 - Completed the Stage 6.4 sparse evaluator state machine. Clean budget and
   geometry stops occur before acquisition, external stops preserve partial
   blocks, and the run loop advances only across accepted outcomes. Returned

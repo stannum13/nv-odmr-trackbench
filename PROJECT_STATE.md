@@ -6,7 +6,7 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–16 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–17 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -17,8 +17,9 @@ runner-neutral exact-identity verified-calibration authority, and authenticated
 calibration/start transitions. Initial resources, accepted resource
 integration, and terminal behavior then form a forward-only runner chain.
 Production truth lookup and public linewidth-dynamics additions remain absent:
-release-gated truth evaluation and linewidth drift exist only as future test
-fixtures. The plan uses configured `max_nfev`, stops fit CPU timing before result
+deterministic linewidth drift now exists only as test support, while release-
+gated truth evaluation remains a future test fixture. The plan uses configured
+`max_nfev`, stops fit CPU timing before result
 construction, and keeps private authority tests in the existing calibration
 test module. No Stage 6.5 claim has been added. Final plan review also closes
 resource-builder phase semantics: pre-start calls raise the public state error,
@@ -230,6 +231,18 @@ runs after revoking their separate calibration authority and prove their
 instrument/dynamics graphs are collectible. A live terminal runner continues
 to authenticate repeated resource builds, including after injected terminal
 resource or outcome construction failures.
+
+Task 17 adds a deterministic, test-only linewidth-drift composition for the
+closed scientific regressions. Its frozen/slotted configuration accepts either
+one finite scalar slew or an exact per-resonance-ID mapping, snapshots reference
+width and slew mappings into immutable canonical floats, and composes over an
+arbitrary `SpectralDynamics` provider at validated non-negative virtual time.
+It preserves the base snapshot's resonance tuple order, physical IDs, centers,
+amplitudes, eta values, and baseline while replacing only FWHM with the explicit
+`reference + slew * time` value. Missing/extra IDs and non-real, nonfinite,
+nonpositive, or generated-unphysical widths fail explicitly. This remains under
+`tests/evaluation`: no production dynamics API, stochastic state, callback,
+truth access, result claim, or Stage 6.5 comparison was added.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1137,6 +1150,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 17 deterministic linewidth-drift fixture: 45 passed.
+- Stage 6.4 Task 17 dynamics/sparse-evaluator compatibility gate: 207 passed.
+- Stage 6.4 Task 17 model/dynamics/emulator/estimator/evaluation affected gate:
+  1,822 passed.
+- Stage 6.4 Task 17 full repository gate: 1,868 passed.
+- Stage 6.4 Task 17 Ruff and diff-check gates: All checks passed.
 - Stage 6.4 Task 16 review-fix sparse evaluator types/resources/runner gate:
   141 passed.
 - Stage 6.4 Task 16 review-fix sparse/Stage 6.3 runner-resource compatibility
@@ -1310,12 +1329,13 @@ superiority result.
   calibration acquisition, authenticated tracking start, accepted/retryable
   acquisition transitions, timing retention, clean terminal transitions,
   returned-observation aborts, and lossless terminal resource construction.
-  Deterministic linewidth-drift acceptance fixtures remain Task 17; the
-  complete package export remains Task 19.
+  Deterministic linewidth drift is now available only to tests; closed
+  acceptance regressions remain Task 18 and the complete package export remains
+  Task 19.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 17's test-only deterministic linewidth-drift
-   fixture and its scientific invariant tests.
+1. Continue Stage 6.4 with Task 18's closed static/noisy/drift/model-mismatch
+   regressions and release-gated test-only truth oracle.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
