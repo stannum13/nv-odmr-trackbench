@@ -4,9 +4,9 @@ Last updated: 2026-09-16
 
 ## Current stage
 
-Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
-twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–19 now provide the immutable sparse
+Stage 6.4 sparse five-point linewidth/Q tracking is implemented and its
+twenty-task TDD plan and integrated scientific/software review are closed.
+Tasks 1–20 provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -362,6 +362,16 @@ the exact public/private export contract under isolated mode. A copied example
 runs from an unrelated directory with the checkout absent from `sys.path`, and
 the package must resolve beneath that environment's `site-packages`. This node
 changes no production or documentation API.
+
+Task 20 final closeout reran the Stage 6.3 calibration/tracker/runner/
+provenance and sparse acceptance gate (491 passed), two consecutive complete
+repository suites (1,950 passed each), repository-wide Ruff, an isolated sdist
+and wheel build, diff validation, and clean-status validation. The build
+produced `nv_odmr_trackbench-0.1.0.tar.gz` and
+`nv_odmr_trackbench-0.1.0-py3-none-any.whl` in an automatically removed
+temporary directory. The retained limitations and Stage 6.5/6.6 nonclaims
+remain unchanged; Stage 6.4 is complete rather than evidence of matched-budget
+estimator superiority.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1269,6 +1279,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 20 final Stage 6.3 compatibility plus sparse acceptance gate:
+  491 passed.
+- Stage 6.4 Task 20 final complete repository gates: 1,950 passed twice
+  consecutively.
+- Stage 6.4 Task 20 final Ruff, diff-check, clean-status, isolated sdist, and
+  isolated wheel build gates: passed.
 - Stage 6.4 Task 20 SW-20-I1 bind-construction transaction regressions: 4
   passed.
 - Stage 6.4 Task 20 SW-20-I1 combined Stage 6.3/sparse gate: 811 passed.
@@ -1488,6 +1504,7 @@ superiority result.
 
 ## Next actions
 
-1. Complete Stage 6.4 Task 20's integrated scientific/software review gates.
-2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
-   linewidth estimator exists.
+1. Begin Stage 6.5 matched-budget comparative benchmark orchestration using
+   the closed Stage 6.4 tracker/evaluator contracts.
+2. Preserve Stage 6.6 for generated benchmark artifacts and comparative
+   claims after Stage 6.5 establishes reproducible evidence.

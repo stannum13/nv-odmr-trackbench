@@ -189,6 +189,16 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed Stage 6.4 after the Task 20 integrated scientific and software review.
+  Four atomic review waves made bind-time token minting transactional, bounded
+  successful provenance lifetimes without a public close protocol, added a
+  mutation-tested recursive retained-truth-capability gate with precise parity
+  documentation, and replaced editable package smoke with a real fresh-wheel
+  test. The final closeout passed the 491-test Stage 6.3 compatibility and
+  sparse acceptance gate, two consecutive 1,950-test repository runs, Ruff,
+  diff and clean-status checks, and isolated sdist/wheel builds. This closes the
+  Stage 6.4 implementation contract; matched-budget comparative results and
+  generated artifacts remain Stage 6.5/6.6 work.
 - Closed Task 20 software review node SW-20-M1 with an actual installed-wheel
   regression rather than an editable-checkout smoke. The gate builds and
   inspects a temporary wheel for all seven sparse production modules and no
