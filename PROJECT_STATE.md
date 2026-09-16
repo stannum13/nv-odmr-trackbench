@@ -328,6 +328,31 @@ cleanup clears both private authority slots even when no weak index was ever
 published; ordinary and identical process-control faults cover both insertion
 seams for both runner types.
 
+Task 20 scientific review nodes SCI-20-001 and SCI-20-002 add no production
+behavior. A cycle-safe recursive regression now audits a completed sparse
+estimator graph through dataclass fields, instance dictionaries, inherited
+slots, mapping keys and values, and built-in containers. Its forbidden families
+cover full observations/resources, hidden spectral snapshots/dynamics,
+truth/future objects, evaluator/instrument/noise objects, callbacks, and the
+evaluator-only expected-photon capability; independent mutation witnesses cover
+every type family and storage form and prove cycle safety. Public estimator
+guidance now states that, for centered acquisition indices, each parity order
+independently has exact binary64 `sum(t*x) == 0`. Reversal balances only
+acquisition-order systematics across repeated scans and neither identifies nor
+corrects within-scan parameter dynamics nor establishes robustness to them.
+Scientific re-review node SCI-20-001-R1 closed a composed-storage blind spot:
+mapping and built-in-container traversal is now additive with dataclass,
+instance-dictionary, and inherited-slot traversal rather than returning early.
+Dict/list subclasses with an attached future capability are detected, while
+clean self-cyclic mapping/container subclasses terminate without a false hit.
+Final scientific review node SCI-20-001-R2 now reports each forbidden path once
+through deterministic first-discovery deduplication; identical field-name/type
+findings collapse without masking distinct paths or object identities. Bounded
+re-review node SCI-20-001-R3 removes the broad `evaluation` module-name token:
+clean cyclic carriers now scan identically under pytest's top-level loader and
+ordinary `tests.evaluation...` imports, while explicit evaluator runners,
+structural sentinels, and attached futures remain forbidden.
+
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
 advances the global sequence/endpoint and every identity age, and applies one
@@ -1246,6 +1271,12 @@ superiority result.
 - Stage 6.4 Task 20 SW-20-I2 estimator/evaluation/emulator/dynamics affected
   gate: 1,832 passed.
 - Stage 6.4 Task 20 SW-20-I2 full repository gate: 1,916 passed.
+- Stage 6.4 Task 20 SCI-20-001/002 truth-isolation and documentation focused
+  gate: 63 passed.
+- Stage 6.4 Task 20 SCI-20-001/002 integrated scientific gate: 669 passed.
+- Stage 6.4 Task 20 SCI-20-001/002 estimator/evaluation/emulator/dynamics
+  affected gate: 1,865 passed.
+- Stage 6.4 Task 20 SCI-20-001/002 full repository gate: 1,950 passed.
 - Stage 6.4 Task 19 review-fix source package/example/guidance gate: 33 passed.
 - Stage 6.4 Task 19 review-fix estimator/evaluation/package affected gate:
   1,693 passed.

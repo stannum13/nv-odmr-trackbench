@@ -189,6 +189,25 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed Task 20 scientific review nodes SCI-20-001 and SCI-20-002 without
+  changing production behavior. A cycle-safe retained-graph regression now
+  traverses dataclasses, instance dictionaries, inherited slots, mapping keys
+  and values, and built-in containers and rejects full observations/resources,
+  hidden snapshots/dynamics, truth/future objects, evaluator/instrument/noise
+  objects, callbacks, and evaluator-only expected-photon capabilities. Mutation
+  witnesses cover every forbidden family and storage form. Estimator guidance
+  now attributes exact binary64 `sum(t*x) == 0` to each parity order
+  independently, limits reversal to balancing repeated-scan acquisition-order
+  systematics, and denies within-scan dynamics identification, correction, or
+  robustness. Scientific re-review additionally made mapping/container element
+  traversal additive with `__dict__`, dataclass, and inherited-slot traversal;
+  attached capabilities on dict/list subclasses can no longer hide behind an
+  early return, and clean cyclic subclasses remain cycle-safe. Final re-review
+  deduplicated identical diagnostic paths in deterministic first-discovery
+  order while retaining distinct capability locations. The bounded import-mode
+  review also removed the broad `evaluation` module token, so clean carriers
+  remain clean under both top-level pytest and package-qualified imports while
+  explicit evaluator and attached-capability witnesses still fail closed.
 - Closed Task 20 software review node SW-20-I2 without adding a public runner
   lifecycle API. Live runners now own their exact provenance binding and issuer;
   global token indexes hold weak values, and the runner index pairs weak keys

@@ -307,6 +307,31 @@ def test_sparse_linewidth_guidance_covers_scientific_contract() -> None:
     assert all(term in combined for term in required_terms)
 
 
+def test_sparse_docs_state_per_scan_zero_time_frequency_sum_and_limit() -> None:
+    root = Path(__file__).parents[1]
+    guidance = " ".join(
+        (root / "docs" / "estimators.md").read_text().lower().split()
+    )
+    centered_indices = (-2.0, -1.0, 0.0, 1.0, 2.0)
+    parity_orders = (
+        (0.5, -1.0, 0.0, 1.0, -0.5),
+        (-0.5, 1.0, 0.0, -1.0, 0.5),
+    )
+
+    assert tuple(
+        sum(
+            time * offset
+            for time, offset in zip(centered_indices, order, strict=True)
+        )
+        for order in parity_orders
+    ) == (0.0, 0.0)
+    assert "each parity order independently" in guidance
+    assert "sum(t*x) == 0" in guidance
+    assert "balances acquisition-order systematics across repeated scans" in guidance
+    assert "does not identify or correct within-scan parameter dynamics" in guidance
+    assert "does not establish robustness to within-scan dynamics" in guidance
+
+
 def test_two_point_public_surfaces_import_from_installed_modules() -> None:
     from odmr_bench.estimators import (
         CalibratedTwoPointTracker,

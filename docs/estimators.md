@@ -334,6 +334,12 @@ sequence indices, endpoints, integration times, nominal exposures, and source
 fields are frozen before point one. Points one through four cannot adapt point
 five or interleave a fast query.
 
+For centered acquisition indices `t=(-2,-1,0,+1,+2)`, each parity order
+independently has the exact binary64 moment `sum(t*x) == 0`, where `x` is that
+order's multiplier sequence. Combining two scans is not required for this
+within-scan linear time-frequency cancellation. Exact reversal instead balances
+acquisition-order systematics across repeated scans.
+
 The local pseudo-Voigt/Lorentzian model has exactly four free parameters: a
 center correction, FWHM, amplitude, and constant baseline offset. Its fitted
 local center is `q0 + correction`. The source baseline slope and curvature,
@@ -419,12 +425,12 @@ nor an abort.
 The constant local baseline offset cannot represent true affine baseline
 change within one scan; the source slope is frozen, so such mismatch can bias
 center, linewidth, amplitude, and Q. The five measurements are sequential.
-Order reversal balances linear time-frequency correlation across scans but
-cannot identify or remove nonlinear or within-scan dynamics in center,
-linewidth, amplitude, baseline, or neighboring tails. Five observations and
-four fitted parameters provide one residual degree of freedom and no published
-uncertainty calibration. Unresolved hyperfine structure and other line-shape
-mismatch may also bias FWHM and Q. Q alone is not magnetometric sensitivity.
+Parity reversal does not identify or correct within-scan parameter dynamics in
+center, linewidth, amplitude, baseline, or neighboring tails, and does not
+establish robustness to within-scan dynamics. Five observations and four fitted
+parameters provide one residual degree of freedom and no published uncertainty
+calibration. Unresolved hyperfine structure and other line-shape mismatch may
+also bias FWHM and Q. Q alone is not magnetometric sensitivity.
 
 There is **no Stage 6.5 matched-budget** accuracy, bandwidth, latency,
 superiority, or experimental result yet. There is **no Stage 6.6** artifact,
