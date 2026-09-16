@@ -189,6 +189,14 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed Task 20 software review node SW-20-M1 with an actual installed-wheel
+  regression rather than an editable-checkout smoke. The gate builds and
+  inspects a temporary wheel for all seven sparse production modules and no
+  tests or caches, installs that exact artifact with resolved dependencies into
+  a fresh virtual environment, verifies the exact public and private export
+  boundary under isolated mode, and runs a copied sparse example from an
+  unrelated directory while requiring package resolution from the environment's
+  `site-packages`. No production or documentation API changed.
 - Closed Task 20 scientific review nodes SCI-20-001 and SCI-20-002 without
   changing production behavior. A cycle-safe retained-graph regression now
   traverses dataclasses, instance dictionaries, inherited slots, mapping keys

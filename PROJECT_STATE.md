@@ -353,6 +353,16 @@ clean cyclic carriers now scan identically under pytest's top-level loader and
 ordinary `tests.evaluation...` imports, while explicit evaluator runners,
 structural sentinels, and attached futures remain forbidden.
 
+Task 20 software review node SW-20-M1 replaces the editable-checkout sparse
+example smoke with an installed-artifact boundary. The named package regression
+builds one wheel in a validated temporary directory, requires all seven sparse
+estimator/evaluator modules and rejects test/cache payloads, installs the exact
+wheel with resolved dependencies into a fresh virtual environment, and probes
+the exact public/private export contract under isolated mode. A copied example
+runs from an unrelated directory with the checkout absent from `sys.path`, and
+the package must resolve beneath that environment's `site-packages`. This node
+changes no production or documentation API.
+
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
 advances the global sequence/endpoint and every identity age, and applies one
@@ -1277,6 +1287,9 @@ superiority result.
 - Stage 6.4 Task 20 SCI-20-001/002 estimator/evaluation/emulator/dynamics
   affected gate: 1,865 passed.
 - Stage 6.4 Task 20 SCI-20-001/002 full repository gate: 1,950 passed.
+- Stage 6.4 Task 20 SW-20-M1 exact isolated-wheel regression: 1 passed.
+- Stage 6.4 Task 20 SW-20-M1 package-focused gate: 10 passed.
+- Stage 6.4 Task 20 SW-20-M1 full repository gate: 1,950 passed.
 - Stage 6.4 Task 19 review-fix source package/example/guidance gate: 33 passed.
 - Stage 6.4 Task 19 review-fix estimator/evaluation/package affected gate:
   1,693 passed.

@@ -1,8 +1,12 @@
 from __future__ import annotations
 
 import math
+import shutil
 import subprocess
 import sys
+import tempfile
+import venv
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -245,15 +249,137 @@ def test_exact_estimator_export_contract_rejects_private_fitter_mutation() -> No
         _assert_exact_estimator_exports(mutated)
 
 
-def test_sparse_linewidth_example_runs_out_of_tree(tmp_path: Path) -> None:
-    example = Path(__file__).parents[1] / "examples" / "track_sparse_linewidth.py"
-    completed = subprocess.run(
-        [sys.executable, "-I", str(example)],
-        cwd=tmp_path,
-        check=False,
-        capture_output=True,
-        text=True,
+def test_sparse_linewidth_public_surface_and_example_run_from_fresh_wheel() -> None:
+    root = Path(__file__).parents[1].resolve()
+    required_wheel_modules = {
+        "odmr_bench/estimators/sparse_linewidth_fit.py",
+        "odmr_bench/estimators/sparse_linewidth_tracker.py",
+        "odmr_bench/estimators/sparse_linewidth_types.py",
+        "odmr_bench/evaluation/sparse_linewidth/__init__.py",
+        "odmr_bench/evaluation/sparse_linewidth/resource_accounting.py",
+        "odmr_bench/evaluation/sparse_linewidth/runner.py",
+        "odmr_bench/evaluation/sparse_linewidth/types.py",
+    }
+    forbidden_private_exports = (
+        "fit_sparse_linewidth",
+        "_VerifiedCalibrationIssuer",
+        "VerifiedInstrumentRunToken",
+        "_register_run_token",
+        "_evaluate_bound_source_model",
     )
+
+    with tempfile.TemporaryDirectory(prefix="odmr-wheel-test-") as temporary:
+        temporary_root = Path(temporary).resolve()
+        assert not temporary_root.is_relative_to(root)
+        wheel_directory = temporary_root / "wheel"
+        wheel_directory.mkdir()
+        built = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "build",
+                "--wheel",
+                "--outdir",
+                str(wheel_directory),
+            ],
+            cwd=root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert built.returncode == 0, built.stderr
+        wheels = tuple(wheel_directory.glob("*.whl"))
+        assert len(wheels) == 1
+        wheel = wheels[0]
+
+        with zipfile.ZipFile(wheel) as archive:
+            members = set(archive.namelist())
+        assert required_wheel_modules <= members
+        assert not any(
+            "tests" in Path(member).parts
+            or "__pycache__" in Path(member).parts
+            or member.endswith((".pyc", ".pyo"))
+            for member in members
+        )
+
+        environment = temporary_root / "environment"
+        venv.EnvBuilder(with_pip=True, clear=False).create(environment)
+        environment_python = environment / "bin" / "python"
+        if sys.platform == "win32":
+            environment_python = environment / "Scripts" / "python.exe"
+        installed = subprocess.run(
+            [
+                str(environment_python),
+                "-m",
+                "pip",
+                "install",
+                "--disable-pip-version-check",
+                str(wheel),
+            ],
+            cwd=temporary_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert installed.returncode == 0, installed.stderr
+
+        probe = f"""
+from pathlib import Path
+import sys
+
+import odmr_bench
+from odmr_bench import estimators
+from odmr_bench.evaluation import sparse_linewidth
+
+expected_estimators = {_EXPECTED_ESTIMATOR_EXPORTS!r}
+expected_sparse_evaluator = {_SPARSE_EVALUATOR_EXPORTS!r}
+forbidden = {forbidden_private_exports!r}
+package_file = Path(odmr_bench.__file__).resolve()
+environment = Path(sys.prefix).resolve()
+checkout = Path({str(root)!r})
+
+assert tuple(estimators.__all__) == expected_estimators
+assert tuple(sparse_linewidth.__all__) == expected_sparse_evaluator
+assert all(
+    getattr(estimators, name) is not None
+    for name in {_SPARSE_ESTIMATOR_EXPORTS!r}
+)
+assert all(
+    getattr(sparse_linewidth, name) is not None
+    for name in expected_sparse_evaluator
+)
+assert not any(name in estimators.__all__ for name in forbidden)
+assert not any(name in sparse_linewidth.__all__ for name in forbidden)
+assert package_file.is_relative_to(environment)
+assert "site-packages" in package_file.parts
+assert not package_file.is_relative_to(checkout)
+assert all(
+    not Path(entry or ".").resolve().is_relative_to(checkout)
+    for entry in sys.path
+)
+"""
+        probed = subprocess.run(
+            [str(environment_python), "-I", "-c", probe],
+            cwd=temporary_root,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        assert probed.returncode == 0, probed.stderr
+
+        unrelated_working_directory = temporary_root / "unrelated"
+        unrelated_working_directory.mkdir()
+        copied_example = shutil.copy2(
+            root / "examples" / "track_sparse_linewidth.py",
+            unrelated_working_directory / "track_sparse_linewidth.py",
+        )
+        completed = subprocess.run(
+            [str(environment_python), "-I", str(copied_example)],
+            cwd=unrelated_working_directory,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
 
     assert completed.returncode == 0, completed.stderr
     required_labels = (
