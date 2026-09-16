@@ -70,12 +70,21 @@ from odmr_bench.evaluation.two_point.types import (
 class _StartTrackingPlan:
     state_before: TwoPointEvaluatorRunnerState
     tracking_resources_before: ResourceSnapshot
+    provenance_dependency: _RunTokenBinding | None
 
 
 class TwoPointEvaluatorRunner:
     """Own one instrument association and its immutable audit state."""
 
-    __slots__ = ("_instrument", "_state", "_tracker")
+    __slots__ = (
+        "__weakref__",
+        "_instrument",
+        "_provenance_binding",
+        "_provenance_dependency",
+        "_provenance_issuer",
+        "_state",
+        "_tracker",
+    )
 
     @classmethod
     def bind(cls, instrument: ODMRInstrument) -> TwoPointEvaluatorRunner:
@@ -123,10 +132,14 @@ class TwoPointEvaluatorRunner:
             raise TwoPointCalibrationPreflightError("unclean_instrument_boundary")
 
         token = _mint_verified_instrument_run_token(_TOKEN_CONSTRUCTION_KEY)
+        runner = None
         try:
             runner = object.__new__(cls)
             object.__setattr__(runner, "_instrument", instrument)
             object.__setattr__(runner, "_tracker", None)
+            object.__setattr__(runner, "_provenance_binding", None)
+            object.__setattr__(runner, "_provenance_dependency", None)
+            object.__setattr__(runner, "_provenance_issuer", None)
             object.__setattr__(
                 runner,
                 "_state",
@@ -158,6 +171,7 @@ class TwoPointEvaluatorRunner:
         except BaseException:
             _rollback_run_token_registration(
                 token,
+                runner,
             )
             raise
         return runner
@@ -251,6 +265,11 @@ class TwoPointEvaluatorRunner:
                 raise TwoPointRunnerStartError("tracker_reset_failed") from error
             raise
         object.__setattr__(self, "_tracker", tracker)
+        object.__setattr__(
+            self,
+            "_provenance_dependency",
+            plan.provenance_dependency,
+        )
         object.__setattr__(self, "_state", state_after)
         return state_after
 
@@ -749,7 +768,11 @@ def _preflight_start_tracking(
         verified_calibration,
         same_runner_success=same_runner_success,
     )
-    return _StartTrackingPlan(state_before, resources_before)
+    return _StartTrackingPlan(
+        state_before,
+        resources_before,
+        None if same_runner_success else binding,
+    )
 
 
 def _authenticate_verified_calibration(

@@ -189,6 +189,20 @@ once a package version is introduced.
 
 ### Fixed
 
+- Closed Task 20 software review node SW-20-I2 without adding a public runner
+  lifecycle API. Live runners now own their exact provenance binding and issuer;
+  global token indexes hold weak values, and the runner index pairs weak keys
+  with weak issuer references. Discarding either exact runner type in ready,
+  calibration-success, tracking, terminal, or abort states now releases the
+  complete instrument/dynamics graph and returns registry cardinalities to
+  baseline without private cleanup. Exact object keys avoid ID-reuse races,
+  dead tokens fail closed, and a live conditional target retains its source
+  authority only until the target is discarded, while preserving repeated
+  tracking/resource operations, forgery rejection, and rollback semantics.
+  Re-review also closed the pre-index transaction seams: binding weak-value and
+  issuer weak-key insertion faults now clear both runner-owned authority slots
+  through the exact fresh transaction runner, even when no index publication
+  succeeded, while reraising ordinary and process-control faults identically.
 - Closed Task 20 software review node SW-20-I1 across both exact evaluator
   runners. Their bind transactions now begin immediately after minting a
   provisional run token, so any later runner allocation, slot assignment,

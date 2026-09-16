@@ -307,6 +307,27 @@ remain unchanged with the captured token neither minted nor bound. This node
 does not address the separately reviewed successful-run lifecycle, scientific,
 documentation, or wheel-isolation findings.
 
+Task 20 software review node SW-20-I2 closes the successful-registration
+lifetime leak without adding a public close protocol. Each live runner now owns
+its exact binding and issuer, while global token indexes use weak values and
+the runner index uses weak keys with weak issuer references. Exact object-key
+lookups retain token identity and avoid integer-ID reuse races; discarded
+runners therefore release their instrument, dynamics, calibration, tracker,
+and authority graph automatically. Conditional target runners retain only the
+source binding required for their live authenticated dependency, so repeated
+resource construction and tracking remain valid after caller source references
+are dropped; the source graph is collected with the target. Dead tokens fail
+closed, live lookup identity remains stable, cross-runner authentication and
+transaction rollback remain unchanged, and the former abort test no longer
+calls private cleanup. This node does not address scientific, documentation,
+wheel-isolation, or Task 20 closeout findings. I2 re-review additionally found
+that failure during the first binding weak-value insertion or issuer weak-key
+insertion could leave the new authority object on the captured failed runner.
+Both bind transactions now pass their exact fresh runner into rollback, so
+cleanup clears both private authority slots even when no weak index was ever
+published; ordinary and identical process-control faults cover both insertion
+seams for both runner types.
+
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
 advances the global sequence/endpoint and every identity age, and applies one
@@ -1219,6 +1240,12 @@ superiority result.
 - Stage 6.4 Task 20 SW-20-I1 estimator/evaluation/emulator/dynamics affected
   gate: 1,812 passed.
 - Stage 6.4 Task 20 SW-20-I1 full repository gate: 1,896 passed.
+- Stage 6.4 Task 20 SW-20-I2 lifecycle and stale/live provenance regressions:
+  22 passed.
+- Stage 6.4 Task 20 SW-20-I2 combined Stage 6.3/sparse gate: 831 passed.
+- Stage 6.4 Task 20 SW-20-I2 estimator/evaluation/emulator/dynamics affected
+  gate: 1,832 passed.
+- Stage 6.4 Task 20 SW-20-I2 full repository gate: 1,916 passed.
 - Stage 6.4 Task 19 review-fix source package/example/guidance gate: 33 passed.
 - Stage 6.4 Task 19 review-fix estimator/evaluation/package affected gate:
   1,693 passed.

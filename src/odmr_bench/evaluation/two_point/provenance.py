@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import weakref
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -30,7 +31,7 @@ _TOKEN_CONSTRUCTION_KEY: object = object()
 _MINTED_RUN_TOKEN_IDENTITIES: dict[int, VerifiedInstrumentRunToken] = {}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class _RunTokenBinding:
     """Exact in-process identities associated with one runner-issued token."""
 
@@ -41,13 +42,16 @@ class _RunTokenBinding:
     source: TwoPointCalibrationSource | None
 
 
-_RUN_TOKEN_BINDINGS: dict[VerifiedInstrumentRunToken, _RunTokenBinding] = {}
+_RUN_TOKEN_BINDINGS: weakref.WeakValueDictionary[
+    VerifiedInstrumentRunToken, _RunTokenBinding
+] = weakref.WeakValueDictionary()
 
 
 class _VerifiedCalibrationIssuer:
     """Unforgeable in-process capability for one exact registered runner."""
 
     __slots__ = (
+        "__weakref__",
         "_instrument",
         "_instrument_configuration",
         "_run_token",
@@ -72,10 +76,12 @@ class _VerifiedCalibrationIssuer:
         raise TypeError("private verified calibration issuer cannot be serialized")
 
 
-_VERIFIED_CALIBRATION_ISSUERS: dict[object, _VerifiedCalibrationIssuer] = {}
-_VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS: dict[
-    VerifiedInstrumentRunToken, tuple[_VerifiedCalibrationIssuer, object]
-] = {}
+_VERIFIED_CALIBRATION_ISSUERS: weakref.WeakKeyDictionary[
+    object, weakref.ReferenceType[_VerifiedCalibrationIssuer]
+] = weakref.WeakKeyDictionary()
+_VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS: weakref.WeakValueDictionary[
+    VerifiedInstrumentRunToken, _VerifiedCalibrationIssuer
+] = weakref.WeakValueDictionary()
 
 
 def _registered_runner_types() -> tuple[type[object], type[object]]:
@@ -106,8 +112,9 @@ def _mint_verified_calibration_issuer(
     object.__setattr__(
         issuer, "_instrument_configuration", instrument_configuration
     )
-    _VERIFIED_CALIBRATION_ISSUERS[runner] = issuer
-    _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS[token] = (issuer, runner)
+    object.__setattr__(runner, "_provenance_issuer", issuer)
+    _VERIFIED_CALIBRATION_ISSUERS[runner] = weakref.ref(issuer)
+    _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS[token] = issuer
 
 
 def _lookup_verified_calibration_issuer(
@@ -116,7 +123,8 @@ def _lookup_verified_calibration_issuer(
     """Return authority only for the exact live registered runner identity."""
     if not _is_exact_registered_runner(runner):
         raise TypeError("issuer requires a registered exact runner")
-    issuer = _VERIFIED_CALIBRATION_ISSUERS.get(runner)
+    issuer_reference = _VERIFIED_CALIBRATION_ISSUERS.get(runner)
+    issuer = None if issuer_reference is None else issuer_reference()
     try:
         state = runner._state
         instrument = runner._instrument
@@ -133,8 +141,7 @@ def _lookup_verified_calibration_issuer(
         or issuer._run_token is not state.run_token
         or issuer._instrument_configuration is not state.instrument_configuration
         or registration is None
-        or registration[0] is not issuer
-        or registration[1] is not runner
+        or registration is not issuer
         or binding is None
         or binding.issuer_runner is not runner
         or binding.instrument is not instrument
@@ -204,13 +211,15 @@ def _register_run_token(
             "run token does not match its runner/instrument/configuration identity"
         )
     del _MINTED_RUN_TOKEN_IDENTITIES[id(token)]
-    _RUN_TOKEN_BINDINGS[token] = _RunTokenBinding(
+    binding = _RunTokenBinding(
         issuer_runner=issuer_runner,
         instrument=instrument,
         instrument_configuration=instrument_configuration,
         success=None,
         source=None,
     )
+    object.__setattr__(issuer_runner, "_provenance_binding", binding)
+    _RUN_TOKEN_BINDINGS[token] = binding
     _mint_verified_calibration_issuer(
         issuer_runner,
         instrument,
@@ -221,16 +230,37 @@ def _register_run_token(
 
 def _rollback_run_token_registration(
     token: VerifiedInstrumentRunToken,
+    transaction_runner: _RegisteredEvaluatorRunner | None = None,
 ) -> None:
     """Unconditionally revoke one freshly minted bind-attempt token."""
     if _MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is token:
         del _MINTED_RUN_TOKEN_IDENTITIES[id(token)]
     binding = _RUN_TOKEN_BINDINGS.pop(token, None)
-    registration = _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS.pop(token, None)
-    if registration is not None:
-        _VERIFIED_CALIBRATION_ISSUERS.pop(registration[1], None)
-    elif binding is not None:
-        _VERIFIED_CALIBRATION_ISSUERS.pop(binding.issuer_runner, None)
+    issuer = _VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS.pop(token, None)
+    runner = None
+    for candidate, issuer_reference in tuple(
+        _VERIFIED_CALIBRATION_ISSUERS.items()
+    ):
+        candidate_issuer = issuer_reference()
+        if (issuer is not None and candidate_issuer is issuer) or (
+            candidate_issuer is not None
+            and candidate_issuer._run_token is token
+        ):
+            runner = candidate
+            if issuer is None:
+                issuer = candidate_issuer
+            _VERIFIED_CALIBRATION_ISSUERS.pop(candidate, None)
+            break
+    if runner is None and binding is not None:
+        candidate = binding.issuer_runner
+        if _is_exact_registered_runner(candidate):
+            runner = candidate
+            _VERIFIED_CALIBRATION_ISSUERS.pop(candidate, None)
+    if _is_exact_registered_runner(transaction_runner):
+        runner = transaction_runner
+    if runner is not None:
+        object.__setattr__(runner, "_provenance_binding", None)
+        object.__setattr__(runner, "_provenance_issuer", None)
 
 
 def _lookup_run_token_binding(
@@ -357,13 +387,15 @@ def _bind_run_token_success(
         raise ValueError("run token success does not match its registered identity")
     if not _consume_verified_source_construction_identity(source):
         raise ValueError("run token success does not match its registered identity")
-    _RUN_TOKEN_BINDINGS[token] = _RunTokenBinding(
+    bound = _RunTokenBinding(
         issuer_runner=binding.issuer_runner,
         instrument=binding.instrument,
         instrument_configuration=binding.instrument_configuration,
         success=success,
         source=source,
     )
+    object.__setattr__(issuer_runner, "_provenance_binding", bound)
+    _RUN_TOKEN_BINDINGS[token] = bound
 
 
 def _rollback_run_token_success(
@@ -371,4 +403,9 @@ def _rollback_run_token_success(
     binding_before: _RunTokenBinding,
 ) -> None:
     """Restore the trusted binding captured before this success transaction."""
+    object.__setattr__(
+        binding_before.issuer_runner,
+        "_provenance_binding",
+        binding_before,
+    )
     _RUN_TOKEN_BINDINGS[token] = binding_before

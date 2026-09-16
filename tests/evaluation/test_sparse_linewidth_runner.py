@@ -19,6 +19,7 @@ from odmr_bench.emulator import GaussianNoise
 from odmr_bench.emulator.instrument import ODMRInstrument
 from odmr_bench.emulator.resources import ResourceSnapshot
 from odmr_bench.estimators import (
+    CalibratedTwoPointTracker,
     SparseLinewidthCompositeTracker,
     SparseLinewidthConfiguration,
     TwoPointBudgetCeiling,
@@ -189,6 +190,87 @@ def _started_runner(
         budget_ceiling or TwoPointBudgetCeiling(100, None, None, None),
         seed=17,
     )
+    return runner, instrument
+
+
+def _lifecycle_runner(
+    runner_kind: str,
+    phase: str,
+    dynamics: SpectralDynamics,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    source_clock_id: str = "clock",
+    tracker_clock_id: str = "clock",
+    source_to_tracker_offset_s: float = 0.0,
+) -> tuple[object, ODMRInstrument]:
+    from odmr_bench.evaluation.two_point import calibration as calibration_module
+    from odmr_bench.evaluation.two_point.runner import TwoPointEvaluatorRunner
+
+    arguments = _calibration_arguments()
+    arguments.update(
+        source_clock_id=source_clock_id,
+        tracker_clock_id=tracker_clock_id,
+        source_to_tracker_offset_s=source_to_tracker_offset_s,
+    )
+    fit_configuration = arguments["fit_configuration"]
+    monkeypatch.setattr(
+        calibration_module,
+        "fit_spectrum",
+        lambda sweep, configuration, initial_guess=None: make_legal_source_fit(
+            fit_configuration  # type: ignore[arg-type]
+        ),
+    )
+    instrument = ODMRInstrument(
+        dynamics=dynamics,
+        noise=GaussianNoise(stddev_at_1s=0.0),
+        nominal_photon_rate_hz=2.5e6,
+        frequency_overhead_s=0.001,
+        seed=13,
+    )
+    runner_type = (
+        TwoPointEvaluatorRunner
+        if runner_kind == "two_point"
+        else SparseLinewidthEvaluatorRunner
+    )
+    runner = runner_type.bind(instrument)
+    if phase == "ready":
+        return runner, instrument
+
+    success = runner.acquire_verified_calibration(  # type: ignore[attr-defined]
+        **arguments  # type: ignore[arg-type]
+    )
+    assert type(success) is VerifiedTwoPointCalibrationSuccess
+    if phase == "calibration_succeeded":
+        return runner, instrument
+
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="included_same_run",
+    )
+    metadata = TwoPointRunMetadata(
+        tracker_clock_id="clock",
+        current_sequence_index=runner.state.instrument_current_sequence_index,
+        current_timestamp_s=runner.state.current_virtual_time_s,
+        nominal_photon_rate_hz=instrument.nominal_photon_rate_hz,
+        frequency_overhead_s=instrument.frequency_overhead_s,
+        fluorescence_quantity="normalized_fluorescence",
+    )
+    tracker = (
+        CalibratedTwoPointTracker(TwoPointTrackerConfiguration())
+        if runner_kind == "two_point"
+        else SparseLinewidthCompositeTracker(SparseLinewidthConfiguration())
+    )
+    runner.start_tracking(  # type: ignore[attr-defined]
+        tracker,
+        calibration,
+        success,
+        metadata,
+        TwoPointBudgetCeiling(100, None, None, None),
+        seed=17,
+    )
+    if phase == "terminal":
+        runner.stop_external()  # type: ignore[attr-defined]
     return runner, instrument
 
 
@@ -1572,10 +1654,6 @@ def test_discarded_aborted_runners_do_not_leave_global_causal_retention(
     abort_kind: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from odmr_bench.evaluation.two_point.provenance import (
-        _rollback_run_token_registration,
-    )
-
     original_query = ODMRInstrument.query
     corrupt_instruments: set[ODMRInstrument] = set()
     if abort_kind == "authenticated":
@@ -1612,13 +1690,135 @@ def test_discarded_aborted_runners_do_not_leave_global_causal_retention(
         outcome = runner.step()
         assert type(outcome) is SparseRunnerAborted
         corrupt_instruments.discard(instrument)
-        _rollback_run_token_registration(runner.state.run_token)
         dynamics_refs.append(weakref.ref(dynamics))
         del outcome, runner, instrument, dynamics
 
     gc.collect()
 
     assert all(reference() is None for reference in dynamics_refs)
+
+
+@pytest.mark.parametrize("runner_kind", ("two_point", "sparse"))
+@pytest.mark.parametrize(
+    "phase", ("ready", "calibration_succeeded", "tracking", "terminal")
+)
+def test_discarded_registered_runners_release_provenance_graph_without_private_cleanup(
+    runner_kind: str,
+    phase: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+
+    gc.collect()
+    registries = (
+        provenance_module._MINTED_RUN_TOKEN_IDENTITIES,
+        provenance_module._RUN_TOKEN_BINDINGS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUERS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS,
+    )
+    baseline_cardinalities = tuple(len(registry) for registry in registries)
+    dynamics = QueryScopedDynamicsSpy(StationaryDynamics(_snapshot()))
+    runner, instrument = _lifecycle_runner(
+        runner_kind, phase, dynamics, monkeypatch
+    )
+    dynamics_reference = weakref.ref(dynamics)
+
+    assert tuple(len(registry) for registry in registries) == tuple(
+        count + (0 if index == 0 else 1)
+        for index, count in enumerate(baseline_cardinalities)
+    )
+
+    del runner, instrument, dynamics
+    gc.collect()
+
+    assert dynamics_reference() is None
+    assert tuple(len(registry) for registry in registries) == baseline_cardinalities
+
+
+@pytest.mark.parametrize("runner_kind", ("two_point", "sparse"))
+def test_live_provenance_lookups_are_stable_and_dead_tokens_fail_closed(
+    runner_kind: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+
+    dynamics = QueryScopedDynamicsSpy(StationaryDynamics(_snapshot()))
+    runner, instrument = _lifecycle_runner(
+        runner_kind, "ready", dynamics, monkeypatch
+    )
+    token = runner.state.run_token  # type: ignore[attr-defined]
+    first_binding = provenance_module._lookup_run_token_binding(token)
+    first_issuer = provenance_module._lookup_verified_calibration_issuer(runner)
+
+    assert first_binding is not None
+    assert provenance_module._lookup_run_token_binding(token) is first_binding
+    assert provenance_module._lookup_verified_calibration_issuer(runner) is first_issuer
+
+    dynamics_reference = weakref.ref(dynamics)
+    del first_binding, first_issuer, runner, instrument, dynamics
+    gc.collect()
+
+    assert dynamics_reference() is None
+    assert provenance_module._lookup_run_token_binding(token) is None
+    assert token not in provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS
+
+
+def test_live_conditional_runner_retains_source_authority_until_target_discarded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth import (
+        build_sparse_linewidth_evaluator_resources,
+    )
+
+    source_dynamics = QueryScopedDynamicsSpy(StationaryDynamics(_snapshot()))
+    source_runner, source_instrument = _lifecycle_runner(
+        "sparse",
+        "calibration_succeeded",
+        source_dynamics,
+        monkeypatch,
+        source_clock_id="source-clock",
+        tracker_clock_id="tracking-clock",
+        source_to_tracker_offset_s=-0.012,
+    )
+    success = source_runner.state.verified_calibration  # type: ignore[attr-defined]
+    assert type(success) is VerifiedTwoPointCalibrationSuccess
+    calibration = calibrate_two_point(
+        success.source,
+        TwoPointTrackerConfiguration(),
+        budget_treatment="conditional_free_precalibration",
+    )
+    target_instrument = _instrument()
+    target_runner = SparseLinewidthEvaluatorRunner.bind(target_instrument)
+    target_runner.start_tracking(
+        SparseLinewidthCompositeTracker(SparseLinewidthConfiguration()),
+        calibration,
+        success,
+        TwoPointRunMetadata(
+            tracker_clock_id="tracking-clock",
+            current_sequence_index=None,
+            current_timestamp_s=0.0,
+            nominal_photon_rate_hz=target_instrument.nominal_photon_rate_hz,
+            frequency_overhead_s=target_instrument.frequency_overhead_s,
+            fluorescence_quantity="normalized_fluorescence",
+        ),
+        TwoPointBudgetCeiling(100, None, None, None),
+        seed=17,
+    )
+    source_reference = weakref.ref(source_dynamics)
+
+    del source_runner, source_instrument, source_dynamics
+    gc.collect()
+
+    assert source_reference() is not None
+    first_resources = build_sparse_linewidth_evaluator_resources(target_runner)
+    second_resources = build_sparse_linewidth_evaluator_resources(target_runner)
+    assert second_resources is first_resources or second_resources == first_resources
+    assert type(target_runner.step()) is SparseRunnerAccepted
+
+    del target_runner, target_instrument, success, calibration
+    gc.collect()
+
+    assert source_reference() is None
 
 
 @pytest.mark.parametrize(

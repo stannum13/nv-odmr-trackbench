@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 import pickle
+import weakref
 from dataclasses import replace
 
 import pytest
@@ -1722,6 +1723,128 @@ def test_runner_bind_rolls_back_every_provisional_token_identity(
     assert provenance_module._MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is not token
     assert captured_runner.state.run_token is token
     assert captured_runner.state.instrument_configuration is instrument_configuration
+
+
+def test_bind_rollback_clears_partially_indexed_weak_issuer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+
+    original_mint = provenance_module._mint_verified_calibration_issuer
+    captured_runners: list[object] = []
+
+    def mint_then_remove_registration(*args: object, **kwargs: object) -> None:
+        original_mint(*args, **kwargs)
+        token = args[2]
+        captured_runners.append(args[0])
+        provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS.pop(
+            token, None
+        )
+        raise RuntimeError("issuer registration interrupted")
+
+    monkeypatch.setattr(
+        provenance_module,
+        "_mint_verified_calibration_issuer",
+        mint_then_remove_registration,
+    )
+
+    with pytest.raises(RuntimeError, match="issuer registration interrupted"):
+        TwoPointEvaluatorRunner.bind(_instrument())
+
+    assert len(captured_runners) == 1
+    runner = captured_runners[0]
+    assert runner._provenance_binding is None
+    assert runner._provenance_issuer is None
+
+
+@pytest.mark.parametrize("runner_kind", ("two_point", "sparse"))
+@pytest.mark.parametrize("fault_type", (RuntimeError, KeyboardInterrupt))
+@pytest.mark.parametrize("insertion_seam", ("binding", "issuer_runner"))
+def test_bind_rollback_clears_runner_owned_authority_when_weak_index_insertion_fails(
+    runner_kind: str,
+    fault_type: type[BaseException],
+    insertion_seam: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from odmr_bench.evaluation.sparse_linewidth import runner as sparse_runner_module
+    from odmr_bench.evaluation.two_point import provenance as provenance_module
+    from odmr_bench.evaluation.two_point import runner as two_point_runner_module
+
+    instrument = _instrument()
+    registries = (
+        provenance_module._MINTED_RUN_TOKEN_IDENTITIES,
+        provenance_module._RUN_TOKEN_BINDINGS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUERS,
+        provenance_module._VERIFIED_CALIBRATION_ISSUER_REGISTRATIONS,
+    )
+    registry_snapshots = tuple(tuple(registry.items()) for registry in registries)
+    runner_module = (
+        two_point_runner_module
+        if runner_kind == "two_point"
+        else sparse_runner_module
+    )
+    runner_type = (
+        TwoPointEvaluatorRunner
+        if runner_kind == "two_point"
+        else sparse_runner_module.SparseLinewidthEvaluatorRunner
+    )
+    original_register = runner_module._register_run_token
+    captured: list[tuple[object, object]] = []
+    fault = fault_type(f"{insertion_seam} insertion interrupted")
+
+    def capture_registration(*args: object, **kwargs: object) -> None:
+        captured.append((args[0], args[1]))
+        original_register(*args, **kwargs)
+
+    monkeypatch.setattr(
+        runner_module,
+        "_register_run_token",
+        capture_registration,
+    )
+    if insertion_seam == "binding":
+        original_setitem = weakref.WeakValueDictionary.__setitem__
+
+        def fail_weak_value_insertion(
+            self: object, key: object, value: object
+        ) -> None:
+            if self is provenance_module._RUN_TOKEN_BINDINGS:
+                raise fault
+            original_setitem(self, key, value)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(
+            weakref.WeakValueDictionary,
+            "__setitem__",
+            fail_weak_value_insertion,
+        )
+    else:
+        original_setitem = weakref.WeakKeyDictionary.__setitem__
+
+        def fail_weak_key_insertion(
+            self: object, key: object, value: object
+        ) -> None:
+            if self is provenance_module._VERIFIED_CALIBRATION_ISSUERS:
+                raise fault
+            original_setitem(self, key, value)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(
+            weakref.WeakKeyDictionary,
+            "__setitem__",
+            fail_weak_key_insertion,
+        )
+
+    with pytest.raises(fault_type) as raised:
+        runner_type.bind(instrument)
+
+    assert raised.value is fault
+    assert len(captured) == 1
+    token, runner = captured[0]
+    assert tuple(tuple(registry.items()) for registry in registries) == (
+        registry_snapshots
+    )
+    assert provenance_module._MINTED_RUN_TOKEN_IDENTITIES.get(id(token)) is not token
+    assert provenance_module._lookup_run_token_binding(token) is None
+    assert runner._provenance_binding is None
+    assert runner._provenance_issuer is None
 
 
 @pytest.mark.parametrize(
