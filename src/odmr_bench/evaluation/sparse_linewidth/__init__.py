@@ -1,9 +1,11 @@
-"""Public evaluator-owned value contracts for sparse-linewidth tracking.
+"""Public closed-loop evaluator surface for sparse-linewidth tracking."""
 
-The evaluator runner and resource builder currently remain direct-module
-interfaces rather than package exports.
-"""
-
+from odmr_bench.evaluation.sparse_linewidth.resource_accounting import (
+    build_sparse_linewidth_evaluator_resources,
+)
+from odmr_bench.evaluation.sparse_linewidth.runner import (
+    SparseLinewidthEvaluatorRunner,
+)
 from odmr_bench.evaluation.sparse_linewidth.types import (
     SparseAbortedRun,
     SparseAbortReason,
@@ -35,6 +37,7 @@ __all__ = [
     "SparseEvaluatorRunnerState",
     "SparseInstrumentQueryFailure",
     "SparseLinewidthEvaluatorResources",
+    "SparseLinewidthEvaluatorRunner",
     "SparseLinewidthEvaluatorScanTiming",
     "SparsePreflightCode",
     "SparsePreflightError",
@@ -52,4 +55,5 @@ __all__ = [
     "SparseStartCode",
     "SparseStartError",
     "SparseTrackingAcquisition",
+    "build_sparse_linewidth_evaluator_resources",
 ]

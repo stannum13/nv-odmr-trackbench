@@ -42,7 +42,7 @@ human-readable configuration at `configs/drift.yaml`; from the repository
 root, use `odmrbench simulate --config configs/drift.yaml` when changing or
 inspecting that file.
 
-## Offline and calibrated two-point estimators
+## Offline, two-point, and sparse-linewidth estimators
 
 The package now includes a constrained eight-component Lorentzian and
 pseudo-Voigt fitter plus two completed-sweep wrappers.
@@ -56,6 +56,7 @@ thresholds; it does not prove the presence of eight physical resonances.
 See [docs/estimators.md](docs/estimators.md), including its
 [warm-started completed-sweep guidance](docs/estimators.md#warm-started-completed-sweeps),
 and [calibrated two-point guidance](docs/estimators.md#calibrated-two-point-center-tracking),
+and [sparse-linewidth guidance](docs/estimators.md#composite-center-and-sparse-linewidth-tracking),
 for model, initialization, calibration provenance, mandatory budget treatment,
 policy, timing, failure, resource, ordering, and recording-interpretation
 guidance. From the repository root of a source checkout with the package
@@ -65,12 +66,17 @@ installed, run these download-free generated diagnostics:
 python examples/fit_synthetic_sweep.py
 python examples/fit_warm_started_sweeps.py
 python examples/track_two_point_centers.py
+python examples/track_sparse_linewidth.py
 ```
 
 They are software fixtures, not benchmark results or evidence of a universal
-warm-start speedup or two-point superiority. The two-point example uses
-`conditional_free_precalibration` and reports only public policy/resource/timing
-diagnostics. There is **no Stage 6.5 matched-budget superiority result** yet.
+warm-start speedup, two-point superiority, or sparse-linewidth accuracy. The
+tracking examples use `conditional_free_precalibration` and report only public
+policy/resource/timing diagnostics. The sparse example completes eight fast
+pairs and one five-point scan, then prints its asynchronous live Q, scan-local
+Q, separate source epochs, evaluator timing labels, and resource ledgers.
+There is **no Stage 6.5 matched-budget superiority result** and **no Stage 6.6**
+benchmark artifact, plot, or automated report yet.
 The `examples/` scripts are source-tree files, are not contained in the wheel,
 and require either the repository-root commands above or explicit paths to the
 checkout.
@@ -80,12 +86,14 @@ optional CC BY data, including its explicit download URL, size, checksum, and
 metadata limitations. [docs/emulator.md](docs/emulator.md) describes the
 validated synthetic drift configuration and its virtual-time/photon summary.
 
-## Planned first milestone
+## Planned matched-budget milestone
 
-The first end-to-end result will compare repeated full-spectrum fitting with a
-two-point center tracker plus a lower-rate five-point linewidth estimator on a
-virtual eight-resonance spectrum. Comparisons will report center, FWHM, and Q
-errors together with acquisition and compute resources.
+The implemented composite can causally alternate two-point center updates with
+lower-rate five-point linewidth updates on all eight identities. The next
+matched-budget result will compare it with repeated and warm-started full-sweep
+fitting on a virtual eight-resonance spectrum. Comparisons will report center,
+FWHM, and Q errors together with acquisition and compute resources; none of
+those comparative conclusions is implied by the current generated example.
 
 ## Synthetic spectrum demonstration
 

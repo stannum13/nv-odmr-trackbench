@@ -10,6 +10,20 @@ once a package version is introduced.
 
 ### Added
 
+- Published the complete Stage 6.4 sparse-linewidth tracking workflow. The
+  package now exports only the approved composite estimator and sparse evaluator
+  contracts, runner, outcomes, resources, and builder while leaving fit,
+  source-model, authority, token, and registration helpers private. A
+  download-free conditional-precalibration example reports deterministic live
+  versus scan-local Q, independent epochs, public/truth timing labels, resource
+  ledgers, and pair/scan counts. README and estimator guidance document the
+  fixed five-point schedule, free/frozen model, ordered gate/presence contract,
+  timing/resource/terminal semantics, mismatch limitations, and explicit Stage
+  6.5/6.6 nonclaims. Source and isolated-wheel imports plus an out-of-tree
+  example run are regression-smoked. Independent review tightened this to a
+  complete additive estimator `__all__` contract with a real private-fitter
+  mutation sentinel and completed the fit diagnostic-presence table for
+  `nonfinite_solution`.
 - Added closed, download-free Stage 6.4 scientific acceptance regressions for
   exact noiseless recovery, seeded Poisson tolerance, composed center/linewidth
   drift, independent center/width epochs, included resource and CPU joins,

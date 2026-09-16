@@ -308,9 +308,129 @@ outside that typed guarantee.
 The tracker's integer `seed` is retained as run metadata but is currently
 **inert**: this deterministic tracker does not use it to randomize scheduling
 or updates. Instrument/noise seeds remain separate. The current implementation
-tracks center frequency only. Sparse linewidth and Q estimation belongs to
-Stage 6.4; matched-budget comparisons belong to Stage 6.5. Those future stages
-must establish their measurement-latency and accuracy claims empirically.
+tracks center frequency only. The additive composite described below performs
+sparse linewidth/Q estimation; matched-budget comparisons belong to Stage 6.5
+and must establish measurement-latency and accuracy claims empirically.
+
+## Composite center and sparse linewidth tracking
+
+`SparseLinewidthCompositeTracker` preserves the calibrated two-point fast-pair
+contract and inserts one frozen five-observation local scan after every eight
+completed fast pairs. `SparseLinewidthEvaluatorRunner` owns the closed-loop
+instrument transaction, causal full/safe observation join, timing records, and
+resource views. `build_sparse_linewidth_evaluator_resources` reconstructs the
+authenticated evaluator ledgers. Fit, model, registration, token, and authority
+helpers remain private implementation details.
+
+### Fixed geometry, fitted parameters, and fit gates
+
+The first sparse scan follows the first complete r0-through-r7 pair round and
+targets r0; later scans rotate through the eight calibration identities. For a
+target with frozen fast center `q0`, active FWHM `w0`, and calibration-source
+amplitude `A0`, frequencies are `q0 + multiplier * w0`. The exact even scan
+order is `(+0.5, -1.0, 0.0, +1.0, -0.5)` and the next scan for that same ID is
+the exact reversal `(-0.5, +1.0, 0.0, -1.0, +0.5)`. All five frequencies,
+sequence indices, endpoints, integration times, nominal exposures, and source
+fields are frozen before point one. Points one through four cannot adapt point
+five or interleave a fast query.
+
+The local pseudo-Voigt/Lorentzian model has exactly four free parameters: a
+center correction, FWHM, amplitude, and constant baseline offset. Its fitted
+local center is `q0 + correction`. The source baseline slope and curvature,
+target mixture, and every non-target center, FWHM, amplitude, and mixture are
+frozen. With the normative configuration, correction is bounded to
+`[-0.5*w0, +0.5*w0]`, FWHM to `[0.5*w0, 2*w0]` intersected with source limits,
+amplitude to `[0, 4*A0]` intersected with the source maximum, and the constant
+offset to `[-A0, +A0]`. The offset/order policy is fixed rather than another
+configuration degree of freedom.
+
+Completed fits apply this ordered first-failure gate sequence:
+
+1. model evaluation;
+2. optimizer termination and evaluation limit;
+3. finite solution and correctly shaped residual/Jacobian;
+4. interior bound margin (`1e-6`, equality passes);
+5. scaled-Jacobian rank (`s > s_max * 1e-10`);
+6. scaled-Jacobian condition (`1e8`, equality passes);
+7. resolved amplitude (`max(0.25*A0, source minimum)`, equality passes);
+8. amplitude-normalized RMSE (`0.10`, equality passes).
+
+Diagnostic presence is deliberate:
+
+| Result | Solver | Fit + RMSE | Rank | Condition | Fitted Q |
+| --- | --- | --- | --- | --- | --- |
+| `model_evaluation_failed` | absent | absent | absent | absent | absent |
+| `optimizer_failed` | present | absent | absent | absent | absent |
+| `nonfinite_solution` | present | absent | absent | absent | absent |
+| `bounds_active` | present | present | absent | absent | absent |
+| `rank_deficient` | present | present | present | absent | absent |
+| `ill_conditioned` | present | present | present | present | absent |
+| `amplitude_unresolved` | present | present | present | present | absent |
+| `residual_quality_failed` | present | present | present | present | absent |
+| `success` | present | present | present | present | present |
+
+“Fit + RMSE” is an all-or-none group containing the five fitted fields and both
+RMSE fields. A scientific failure is still a normal, charged, completed scan
+and retains the previous active linewidth.
+
+### Two different Q values and two timing domains
+
+The asynchronous live Q is always the current fast center divided by the
+active sparse FWHM. Those values can come from different observations and
+epochs, so this projection has separate center and linewidth source kinds,
+indices, public reference timestamps, release timestamps, and ages. It must not
+be described as a simultaneous Q measurement. The scan-local Q is instead the
+fitted local center divided by the FWHM from one completed five-point block.
+The fitted local center is diagnostic only and never feeds back into the fast
+center or the next fast interrogation.
+
+Safe endpoint/integration fields yield each public midpoint and their ordered
+mean, exposed as the public reference timestamp. The evaluator independently
+records actual instrument midpoints and exposes their ordered mean as the
+truth reference timestamp for later scoring. Neither reference is the causal
+release time: the fifth endpoint and sequence index are. Production estimator
+code has no truth lookup or dynamics handle.
+
+### Ledgers, treatments, and terminal behavior
+
+Resource output keeps calibration, accepted fast, accepted sparse, interleaved
+accepted tracking, accepted charged, and final charged ledgers distinct. It
+also retains zero or one unaccepted returned observation. Under
+`included_same_run`, calibration atoms precede tracking in the charged ledger.
+Under `conditional_free_precalibration`, calibration cost is reported but the
+charged ledger begins at zero; this is a conditional accounting question, not
+free physical acquisition. Observation count, integration time, nominal photon
+exposure, and virtual elapsed time are folded in arrival order. Expected and
+realized photon counts remain evaluator-side facts and do not set tracker
+affordability. Process CPU is recorded separately and makes no realtime claim.
+
+A full two-query pair or five-query scan is reserved at a clean boundary. A
+normal budget or geometry stop therefore makes no new partial block. External
+stop may preserve a partial pair or partial sparse scan and its pending query.
+A retryable instrument failure before any observation returns preserves the
+same pending query. After an observation returns, validation, construction, or
+unexpected update failure is a terminal abort with one authenticated
+unaccepted atom; an unavailable resource join is also terminal but publishes
+no fabricated aggregate resources. Scientific fit failure is neither a retry
+nor an abort.
+
+### Model mismatch and present nonclaims
+
+The constant local baseline offset cannot represent true affine baseline
+change within one scan; the source slope is frozen, so such mismatch can bias
+center, linewidth, amplitude, and Q. The five measurements are sequential.
+Order reversal balances linear time-frequency correlation across scans but
+cannot identify or remove nonlinear or within-scan dynamics in center,
+linewidth, amplitude, baseline, or neighboring tails. Five observations and
+four fitted parameters provide one residual degree of freedom and no published
+uncertainty calibration. Unresolved hyperfine structure and other line-shape
+mismatch may also bias FWHM and Q. Q alone is not magnetometric sensitivity.
+
+There is **no Stage 6.5 matched-budget** accuracy, bandwidth, latency,
+superiority, or experimental result yet. There is **no Stage 6.6** artifact,
+plot, ranking, or report automation yet. Adaptive replay at frequencies absent
+from a recording is not supported, and current generated regressions establish
+contract behavior rather than general performance.
 
 ## Synthetic example and recording interpretation
 
@@ -320,6 +440,7 @@ From a source checkout with the package installed, run:
 python examples/fit_synthetic_sweep.py
 python examples/fit_warm_started_sweeps.py
 python examples/track_two_point_centers.py
+python examples/track_sparse_linewidth.py
 ```
 
 The first example generates one deterministic pseudo-Voigt sweep in memory and
@@ -328,8 +449,11 @@ generates three causally submitted drift sweeps and reports source, age,
 attempt, optimizer-evaluation, and process-CPU diagnostics. Neither downloads
 a recording. `examples/track_two_point_centers.py` runs one verified synthetic
 pre-calibration and a separate conditional two-point tracking cycle, printing
-only public policy, resource, and timing diagnostics. These generated fixtures
-are not benchmark measurements or performance comparisons.
+only public policy, resource, and timing diagnostics. The sparse example uses a
+separate verified source under `conditional_free_precalibration`, completes one
+five-point scan, and labels live versus scan Q and public versus truth timing.
+These generated fixtures are not benchmark measurements or performance
+comparisons.
 
 A fit to the optional external recording can be described only as an apparent
 observable or offline reference. That recording has no verified eight-line

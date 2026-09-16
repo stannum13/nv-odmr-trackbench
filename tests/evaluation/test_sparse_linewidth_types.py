@@ -259,6 +259,7 @@ def test_sparse_evaluator_public_value_surface_is_exact() -> None:
         "SparseEvaluatorRunnerState",
         "SparseInstrumentQueryFailure",
         "SparseLinewidthEvaluatorResources",
+        "SparseLinewidthEvaluatorRunner",
         "SparseLinewidthEvaluatorScanTiming",
         "SparsePreflightCode",
         "SparsePreflightError",
@@ -276,9 +277,10 @@ def test_sparse_evaluator_public_value_surface_is_exact() -> None:
         "SparseStartCode",
         "SparseStartError",
         "SparseTrackingAcquisition",
+        "build_sparse_linewidth_evaluator_resources",
     )
     source = Path(inspect.getsourcefile(sparse_linewidth) or "").read_text()
-    assert ".runner" not in source
+    assert "from odmr_bench.evaluation.sparse_linewidth.runner import" in source
 
 
 def test_sparse_aliases_and_outcome_unions_are_exact() -> None:

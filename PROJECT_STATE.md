@@ -6,7 +6,7 @@ Last updated: 2026-09-16
 
 Stage 6.4 sparse five-point linewidth/Q tracking has an approved design and a
 twenty-task detailed TDD implementation plan whose final review is closed and
-which is in task-by-task execution. Tasks 1–18 now provide the immutable sparse
+which is in task-by-task execution. Tasks 1–19 now provide the immutable sparse
 record layer, canonical bound-source model, pure fit geometry, ordered fit
 outcomes, exact fast-pair transitions, the first due-scan scheduler boundary,
 and complete sparse transitions through point five, including scientific fit
@@ -269,6 +269,31 @@ nonlinear-width cases now require success, positive normalized residual, and
 respective linewidth biases above 25 kHz and 3 kHz. Setting either dynamics
 strength to zero makes its named test fail before restoring the declared
 fixture. No production code changed.
+
+Task 19 publishes the complete Stage 6.4 package surface without exporting the
+private fitter, source-model helper, provenance authority, registration, or
+token machinery. The sparse tracker configuration/records/errors/tracker and
+the evaluator runner/states/outcomes/resources/builder are now importable from
+their package namespaces. A download-free conditional-precalibration example
+uses only public APIs, completes eight fast pairs plus one sparse scan, and
+labels the terminal phase, asynchronous live and scan-local Q, independent
+center/linewidth epochs, public/truth timing references, resource ledgers, and
+pair/scan counts. Estimator documentation now fixes the offset/order policy,
+four free versus frozen parameters, ordered gate and diagnostic-presence
+contract, timing and resource semantics, partial/retry/stop/abort behavior,
+model-mismatch limitations, and explicit Stage 6.5/6.6 nonclaims. A fresh
+isolated wheel imported the tracker, runner, and builder and ran the example
+from outside the checkout; no network dataset or generated benchmark result is
+required.
+Task 19's independent review found one export-regression gap and one
+documentation omission, without finding an incorrect production export. The
+package test now pins the complete estimator `__all__`, preserves every
+pre-Stage-6.4 name in order, guards the real private
+`fit_sparse_linewidth` symbol alongside authority/token/registration/model
+helpers, and proves an appended fitter mutation fails. The estimator guide now
+gives the complete compact diagnostic-presence table, including
+`nonfinite_solution` with solver fields present and fit/RMSE/rank/condition
+groups absent.
 
 Task 9 accepts only sparse points one through four. Each accepted query becomes
 the exact tail of a new immutable `SparsePartialScan`, clears the pending slot,
@@ -1176,6 +1201,12 @@ superiority result.
 
 ## Tests currently passing
 
+- Stage 6.4 Task 19 review-fix source package/example/guidance gate: 33 passed.
+- Stage 6.4 Task 19 review-fix estimator/evaluation/package affected gate:
+  1,693 passed.
+- Stage 6.4 Task 19 review-fix full repository gate: 1,892 passed.
+- Stage 6.4 Task 19 isolated wheel build/install/public-import/example smoke:
+  passed.
 - Stage 6.4 Task 17 deterministic linewidth-drift fixture: 45 passed.
 - Stage 6.4 Task 17 dynamics/sparse-evaluator compatibility gate: 207 passed.
 - Stage 6.4 Task 17 model/dynamics/emulator/estimator/evaluation affected gate:
@@ -1363,11 +1394,11 @@ superiority result.
   acquisition transitions, timing retention, clean terminal transitions,
   returned-observation aborts, and lossless terminal resource construction.
   Deterministic linewidth drift and release-gated truth evaluation are available
-  only to tests; the complete package export remains Task 19.
+  only to tests. The complete package export and public generated workflow are
+  now available; comparative benchmark orchestration remains Stage 6.5.
 
 ## Next actions
 
-1. Continue Stage 6.4 with Task 19's public export, example, and documentation
-   publication surface.
+1. Complete Stage 6.4 Task 20's integrated scientific/software review gates.
 2. Preserve Stage 6.5 for matched-budget comparative benchmarks after the
    linewidth estimator exists.
