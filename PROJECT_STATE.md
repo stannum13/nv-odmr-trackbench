@@ -16,6 +16,17 @@ evaluator value types, the exact sparse runner shell/clean bind boundary,
 runner-neutral exact-identity verified-calibration authority, and authenticated
 calibration/start transitions. Initial resources, accepted resource
 integration, and terminal behavior then form a forward-only runner chain.
+
+Stage 6.5 matched-budget benchmarking now has a binding design at
+`docs/superpowers/specs/2026-09-23-matched-budget-benchmark-design.md`. It uses
+equal included integration time, four isolated method runs, exact complete-block
+stopping, same-epoch plus release-aligned and fixed-checkpoint scoring, strict
+eight-ID macro availability, explicit held/asynchronous Q semantics, and a
+public full-sweep evaluator. Scientific and software design reviews are clean
+after closing checkpoint-denominator, calibration, truth epoch, sparse schedule,
+provenance, metric typing, failure-hold, and aggregation ambiguities. The
+written specification awaits user review before implementation planning; no
+Stage 6.5 production code or numerical comparison claim exists yet.
 Production truth lookup and public linewidth-dynamics additions remain absent:
 deterministic linewidth drift and release-gated truth evaluation now exist only
 as closed test support. The plan uses configured
@@ -1504,7 +1515,9 @@ superiority result.
 
 ## Next actions
 
-1. Begin Stage 6.5 matched-budget comparative benchmark orchestration using
-   the closed Stage 6.4 tracker/evaluator contracts.
-2. Preserve Stage 6.6 for generated benchmark artifacts and comparative
-   claims after Stage 6.5 establishes reproducible evidence.
+1. Obtain written-spec approval for the reviewed Stage 6.5 matched-budget
+   design, then create its detailed TDD implementation plan.
+2. Execute Stage 6.5 against the closed Stage 6.1–6.4 contracts without making
+   numerical superiority claims.
+3. Preserve Stage 6.6 for generated benchmark artifacts, multi-seed uncertainty,
+   plots, and comparative claims.
